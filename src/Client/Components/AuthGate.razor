@@ -1,0 +1,42 @@
+@inject AuthState Auth
+@inject ApiClient Api
+@inject I18n L
+@implements IDisposable
+
+@if (!Auth.Ready)
+{
+    <main class="center-stage" aria-live="polite"><div class="loader"></div><p>@L["Loading"]</p></main>
+}
+else if (Auth.User is null)
+{
+    <main class="auth-shell">
+        <section class="auth-card">
+            <div class="brand-mark" aria-hidden="true">⌂</div>
+            <p class="eyebrow">@L["Private"]</p><h1>@L["SignInTitle"]</h1><p>@L["SignInBody"]</p>
+            @if (sent) { <div class="notice success" role="status">@L["LinkSent"]</div> }
+            else
+            {
+                <form @onsubmit="Send" @onsubmit:preventDefault>
+                    <label for="email">@L["Email"]</label><input id="email" type="email" autocomplete="email" required @bind="email" />
+                    <button class="btn primary wide" disabled="@busy">@(busy ? "…" : L["SendLink"])</button>
+                </form>
+                @if (error) { <div class="notice error" role="alert">@L["Error"]</div> }
+            }
+        </section>
+    </main>
+}
+else
+{
+    <Router AppAssembly="typeof(App).Assembly">
+        <Found Context="routeData"><RouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)" /><FocusOnNavigate RouteData="routeData" Selector="h1" /></Found>
+        <NotFound><LayoutView Layout="typeof(MainLayout)"><section class="empty"><h1>404</h1><p>@L["NoResults"]</p></section></LayoutView></NotFound>
+    </Router>
+}
+
+@code {
+    private string email = ""; private bool busy, sent, error;
+    protected override async Task OnInitializedAsync() { Auth.Changed += Refresh; await Auth.InitializeAsync(); }
+    private async Task Send() { busy = true; error = false; try { using var r = await Api.RequestMagicLink(email); await ApiClient.EnsureSuccess(r); sent = true; } catch { error = true; } finally { busy = false; } }
+    private void Refresh() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Auth.Changed -= Refresh;
+}

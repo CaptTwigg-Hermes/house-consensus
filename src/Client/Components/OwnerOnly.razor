@@ -1,0 +1,4 @@
+@inject AuthState Auth
+@inject I18n L
+@if (Auth.IsOwner) { @ChildContent } else { <section class="empty"><div class="empty-icon">◇</div><h1>@L["Unauthorized"]</h1></section> }
+@code { [Parameter] public RenderFragment? ChildContent { get; set; } }

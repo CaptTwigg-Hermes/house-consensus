@@ -1,0 +1,17 @@
+@page "/owner/review"
+@inject ApiClient Api
+@inject I18n L
+<PageTitle>@L["Review"] · @L["AppName"]</PageTitle>
+<OwnerOnly>
+<header class="page-head"><div><p class="eyebrow">@L["Owner"]</p><h1>@L["Review"]</h1><p>@L["ReviewIntro"]</p></div>@if (items is not null) { <span class="count">@items.Count</span> }</header>
+@if (items is null) { <Loading /> } else if (items.Count == 0) { <EmptyState Title="@L["NoResults"]" Body="@L["ReviewIntro"]" /> } else
+{
+    <section class="review-list">@foreach (var item in items) { <article class="review-card"><div class="review-main"><span class="badge reject">@L.Enum(item.State)</span><h2><NavLink href="@($"listing/{item.Id}")">@item.Address</NavLink></h2><p>@item.City · @(item.Price.HasValue ? $"{item.Price.Value:N0} kr." : L["PriceOnRequest"])</p>@if (item.AiAssessed) { <div class="evidence"><strong>@L["Evidence"] · @item.AiConfidence?.ToString("P0")</strong><p>@item.AiEvidence</p><small>@L["ModelVersion"]: @(item.ModelVersion ?? "—") · @L["RuleVersion"]: @(item.RuleVersion ?? "—")</small></div> } else { <span class="badge neutral">@L["NotAssessed"]</span> }</div><div class="review-actions"><input aria-label="@L["Reason"]" placeholder="@L["Reason"]" @bind="reasons[item.Id]" /><button class="btn like" @onclick="() => Apply(item.Id, OverrideAction.Restore)">↺ @L["Restore"]</button><button class="btn dislike" @onclick="() => Apply(item.Id, OverrideAction.Reject)">× @L["Reject"]</button></div></article> }</section>
+}
+</OwnerOnly>
+@code {
+    private List<ListingDto>? items; private readonly Dictionary<Guid, string> reasons = [];
+    protected override async Task OnInitializedAsync() => await Load();
+    private async Task Load() { items = await Api.GetAsync<List<ListingDto>>("api/review") ?? []; foreach (var x in items) reasons.TryAdd(x.Id, ""); }
+    private async Task Apply(Guid id, OverrideAction action) { using var r = await Api.Override(id, action, reasons.GetValueOrDefault(id)); await ApiClient.EnsureSuccess(r); await Load(); }
+}

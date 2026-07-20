@@ -1,0 +1,24 @@
+@inject I18n L
+@inject ApiClient Api
+
+@if (!choosing)
+{
+    <div class="vote-actions"><button class="btn like" @onclick="() => Choose(VoteChoice.Like)">♥ @L["Like"]</button><button class="btn dislike" @onclick="() => Choose(VoteChoice.Dislike)">× @L["Dislike"]</button><button class="btn ghost" disabled="@busy" @onclick="Clear">@L["ClearVote"]</button></div>
+}
+else
+{
+    <div class="vote-panel">
+        <strong>@L["ReasonOptional"]</strong>
+        <div class="tag-grid">@foreach (var tag in Enum.GetValues<ReasonTag>()) { <button class="tag @(tags.Contains(tag) ? "selected" : "")" @onclick="() => Toggle(tag)">@L.Enum(tag)</button> }</div>
+        <div class="vote-actions"><button class="btn @(@choice == VoteChoice.Like ? "like" : "dislike")" disabled="@busy" @onclick="Save">@L["SaveVote"]</button><button class="btn ghost" @onclick="() => choosing = false">@L["Cancel"]</button></div>
+    </div>
+}
+@code {
+    [Parameter] public Guid ListingId { get; set; }
+    [Parameter] public EventCallback OnVoted { get; set; }
+    private bool choosing, busy; private VoteChoice choice; private readonly HashSet<ReasonTag> tags = [];
+    private void Choose(VoteChoice value) { choice = value; choosing = true; tags.Clear(); }
+    private void Toggle(ReasonTag tag) { if (!tags.Add(tag)) tags.Remove(tag); }
+    private async Task Save() { busy = true; try { await Api.Vote(ListingId, choice, tags.ToArray()); choosing = false; await OnVoted.InvokeAsync(); } finally { busy = false; } }
+    private async Task Clear() { busy = true; try { using var response = await Api.ClearVote(ListingId); await ApiClient.EnsureSuccess(response); await OnVoted.InvokeAsync(); } finally { busy = false; } }
+}

@@ -1,0 +1,16 @@
+@page "/"
+@inject ApiClient Api
+@inject I18n L
+@inject LiveUpdates Live
+@implements IDisposable
+<PageTitle>@L["Queue"] · @L["AppName"]</PageTitle>
+<header class="page-head"><div><p class="eyebrow">@L["AppName"]</p><h1>@L["Queue"]</h1><p>@L["QueueIntro"]</p></div>@if (items is not null) { <span class="count">@items.Count</span> }</header>
+@if (items is null) { <Loading /> } else if (items.Count == 0) { <EmptyState Title="@L["EmptyQueue"]" Body="@L["EmptyQueueBody"]" /> }
+else { <section class="card-grid">@foreach (var item in items) { <ListingCard @key="item.Id" Listing="item" ShowVoting OnVoted="Load" /> }</section> }
+@code {
+    private List<ListingDto>? items;
+    protected override async Task OnInitializedAsync() { Live.Changed += LiveChanged; await Load(); }
+    private async Task Load() => items = await Api.GetAsync<List<ListingDto>>("api/listings/queue") ?? [];
+    private void LiveChanged() => InvokeAsync(async () => { await Load(); StateHasChanged(); });
+    public void Dispose() => Live.Changed -= LiveChanged;
+}

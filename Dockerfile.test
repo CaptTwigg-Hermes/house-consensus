@@ -1,0 +1,6 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+WORKDIR /src
+COPY . .
+RUN dotnet restore HouseConsensus.slnx
+ENTRYPOINT ["dotnet","test","HouseConsensus.slnx","-c","Release","--no-restore","--logger","console;verbosity=normal"]
+

@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Shared/HouseConsensus.Shared.csproj" />
+    <Project Path="src/Client/HouseConsensus.Client.csproj" />
+    <Project Path="src/Server/HouseConsensus.Server.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HouseConsensus.UnitTests/HouseConsensus.UnitTests.csproj" />
+    <Project Path="tests/HouseConsensus.IntegrationTests/HouseConsensus.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

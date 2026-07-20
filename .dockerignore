@@ -1,0 +1,14 @@
+**/bin
+**/obj
+.git
+.env
+TestResults
+media-cache
+backups
+src/Client/node_modules
+
+
+.tools
+**/__pycache__
+.pytest_cache
+exporter/dist

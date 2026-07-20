@@ -1,0 +1,24 @@
+@page "/browse"
+@inject ApiClient Api
+@inject I18n L
+@inject IJSRuntime JS
+<PageTitle>@L["Browse"] · @L["AppName"]</PageTitle>
+<header class="page-head"><div><p class="eyebrow">@L["Browse"]</p><h1>@L["Browse"]</h1></div></header>
+<section class="filter-card">
+    <div class="filter-title"><strong>@L["Filters"]</strong><button class="text-btn" @onclick="Clear">@L["Clear"]</button></div>
+    <div class="filters"><label>@L["City"]<input @bind="city" /></label><label>@L["MinPrice"]<input type="number" min="0" step="100000" @bind="minPrice" /></label><label>@L["MaxPrice"]<input type="number" min="0" step="100000" @bind="maxPrice" /></label><button class="btn primary" @onclick="Load">@L["ApplyFilters"]</button></div>
+</section>
+<div class="view-toggle" role="group"><button class="@(view == "list" ? "active" : "")" @onclick="ShowList">☷ @L["List"]</button><button class="@(view == "map" ? "active" : "")" @onclick="ShowMap">⌖ @L["Map"]</button></div>
+@if (items is null) { <Loading /> } else if (items.Count == 0) { <EmptyState Title="@L["NoResults"]" Body="" /> }
+else if (view == "list") { <section class="card-grid">@foreach (var item in items) { <ListingCard Listing="item" /> }</section> }
+else { <div id="browse-map" class="map" aria-label="@L["Map"]"></div><p class="map-note">@L["MapNote"]</p> }
+@code {
+    private List<ListingDto>? items; private string city = "", view = "list"; private decimal? minPrice, maxPrice;
+    protected override async Task OnInitializedAsync() => await Load();
+    private async Task Load() { items = await Api.GetAsync<List<ListingDto>>(BrowseQuery.Build(city, minPrice, maxPrice)) ?? []; if (view == "map") await RenderMap(); }
+    private async Task Clear() { city = ""; minPrice = maxPrice = null; await Load(); }
+    private Task ShowList() => SetView("list");
+    private Task ShowMap() => SetView("map");
+    private async Task SetView(string value) { view = value; if (value == "map") { await Task.Delay(1); await RenderMap(); } }
+    private async Task RenderMap() { if (items is not null) await JS.InvokeVoidAsync("hc.renderMap", "browse-map", items.Select(x => new { x.Id, x.Address, x.City, title = x.Address, url = $"listing/{x.Id}" })); }
+}

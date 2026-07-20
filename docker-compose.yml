@@ -1,0 +1,32 @@
+name: house-consensus
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      ConnectionStrings__Database: Host=postgres;Port=5432;Database=house_consensus;Username=house_consensus;Password=${POSTGRES_PASSWORD:-local-only-change-me}
+      INITIAL_OWNER_EMAIL: ${INITIAL_OWNER_EMAIL:-owner@example.test}
+      PublicOrigin: ${PUBLIC_ORIGIN:-http://localhost:8080}
+    depends_on:
+      postgres: { condition: service_healthy }
+      mailpit: { condition: service_started }
+    expose: ["8080"]
+    networks: [internal]
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: house_consensus
+      POSTGRES_USER: house_consensus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-only-change-me}
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U house_consensus -d house_consensus"], interval: 5s, timeout: 3s, retries: 20 }
+    networks: [internal]
+  mailpit:
+    image: axllent/mailpit:v1.27
+    restart: unless-stopped
+    expose: ["1025", "8025"]
+    networks: [internal]
+networks: { internal: {} }
+volumes: { postgres-data: {} }
+

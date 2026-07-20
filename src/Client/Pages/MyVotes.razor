@@ -1,0 +1,12 @@
+@page "/my-votes"
+@inject ApiClient Api
+@inject I18n L
+<PageTitle>@L["MyVotes"] · @L["AppName"]</PageTitle>
+<header class="page-head"><div><p class="eyebrow">@L["VoteHistory"]</p><h1>@L["MyVotes"]</h1><p>@L["MyVotesIntro"]</p></div></header>
+@if (rows is null) { <Loading /> } else if (rows.Count == 0) { <EmptyState Title="@L["NoVotes"]" Body="@L["MyVotesIntro"]" /> }
+else { <section class="vote-history">@foreach (var row in rows) { <article><NavLink href="@($"listing/{row.Listing.Id}")"><div><h2>@row.Listing.Address</h2><p>@row.Listing.City · @row.Vote.CreatedAt.ToLocalTime().ToString("d")</p></div><span class="choice @row.Vote.Choice.ToString().ToLowerInvariant()">@(row.Vote.Choice == VoteChoice.Like ? "♥" : "×") @L.Enum(row.Vote.Choice)</span></NavLink></article> }</section> }
+@code {
+    private List<Row>? rows;
+    protected override async Task OnInitializedAsync() { var votes = await Api.GetAsync<List<VoteDto>>("api/listings/my-votes") ?? []; var loaded = await Task.WhenAll(votes.Select(async v => (Vote: v, Listing: await Api.GetAsync<ListingDto>($"api/listings/{v.ListingId}")))); rows = loaded.Where(x => x.Listing is not null).Select(x => new Row(x.Vote, x.Listing!)).ToList(); }
+    private sealed record Row(VoteDto Vote, ListingDto Listing);
+}

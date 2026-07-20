@@ -1,0 +1,53 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: houseconsensus_e2e
+      POSTGRES_USER: houseconsensus
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U houseconsensus -d houseconsensus_e2e"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    tmpfs: ["/var/lib/postgresql/data"]
+
+  mailpit:
+    image: axllent/mailpit:v1.27
+    environment:
+      MP_DATABASE: /data/mailpit.db
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    ports:
+      - "8025:8025"
+    tmpfs: ["/data"]
+
+  app:
+    image: ${HOUSECONSENSUS_IMAGE:-houseconsensus:local}
+    depends_on:
+      db: { condition: service_healthy }
+      mailpit: { condition: service_started }
+    environment:
+      ASPNETCORE_ENVIRONMENT: E2E
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: Host=db;Port=5432;Database=houseconsensus_e2e;Username=houseconsensus
+      Email__Smtp__Host: mailpit
+      Email__Smtp__Port: "1025"
+      Email__PublicBaseUrl: http://app:8080
+      Seed__Enabled: "true"
+    ports:
+      - "8080:8080"
+
+  playwright:
+    build:
+      context: .
+    depends_on:
+      app: { condition: service_started }
+      mailpit: { condition: service_started }
+    environment:
+      CI: "1"
+      E2E_BASE_URL: http://app:8080
+      MAILPIT_API_URL: http://mailpit:8025
+    volumes:
+      - ./test-results:/tests/test-results
+      - ./playwright-report:/tests/playwright-report

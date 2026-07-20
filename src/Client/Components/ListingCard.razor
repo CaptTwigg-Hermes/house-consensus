@@ -1,0 +1,15 @@
+@inject I18n L
+<article class="listing-card @(Listing.Consensus ? "consensus-card" : "")">
+    <NavLink class="card-main" href="@($"listing/{Listing.Id}")">
+        <div class="card-top"><span class="score"><strong>@Math.Round(Listing.FamilyFitScore)</strong><small>@L["FamilyFit"]</small></span>@if (Listing.Consensus) { <span class="badge consensus">♥ @L["Consensus"]</span> }</div>
+        <h2>@Listing.Address</h2><p class="muted">@Listing.City</p>
+        <div class="card-meta"><strong>@Price</strong><span class="vote-dots" aria-label="@L["Everyone"]">@foreach (var vote in Listing.Votes) { <i class="@(vote.Choice == VoteChoice.Like ? "like" : "dislike")" title="@L.Enum(vote.Choice)">@(vote.Choice == VoteChoice.Like ? "♥" : "×")</i> }</span></div>
+    </NavLink>
+    @if (ShowVoting) { <VoteButtons ListingId="Listing.Id" OnVoted="OnVoted" /> }
+</article>
+@code {
+    [Parameter, EditorRequired] public ListingDto Listing { get; set; } = default!;
+    [Parameter] public bool ShowVoting { get; set; }
+    [Parameter] public EventCallback OnVoted { get; set; }
+    private string Price => Listing.Price.HasValue ? $"{Listing.Price.Value:N0} kr." : L["PriceOnRequest"];
+}

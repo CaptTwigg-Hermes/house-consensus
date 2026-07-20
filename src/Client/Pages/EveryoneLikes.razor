@@ -1,0 +1,10 @@
+@page "/everyone-likes"
+@inject ApiClient Api
+@inject I18n L
+@inject LiveUpdates Live
+@implements IDisposable
+<PageTitle>@L["EveryoneLikes"] · @L["AppName"]</PageTitle>
+<header class="page-head"><div><p class="eyebrow">@L["Consensus"]</p><h1>@L["EveryoneLikes"]</h1><p>@L["ConsensusIntro"]</p></div></header>
+@if (items is null) { <Loading /> } else if (items.Count == 0) { <EmptyState Title="@L["NoResults"]" Body="@L["ConsensusIntro"]" /> }
+else { <section class="card-grid">@foreach (var item in items) { <ListingCard @key="item.Id" Listing="item" /> }</section> }
+@code { private List<ListingDto>? items; protected override async Task OnInitializedAsync() { Live.Changed += Refresh; await Load(); } private async Task Load() => items = await Api.GetAsync<List<ListingDto>>("api/listings/consensus") ?? []; private void Refresh() => InvokeAsync(async () => { await Load(); StateHasChanged(); }); public void Dispose() => Live.Changed -= Refresh; }

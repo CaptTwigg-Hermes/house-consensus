@@ -1,0 +1,44 @@
+using System.Globalization;
+
+namespace HouseConsensus.Client.Services;
+
+public sealed class I18n
+{
+    private static readonly Dictionary<string, (string En, string Da)> Text = new()
+    {
+        ["AppName"]=("House Consensus","Husvalg"), ["Queue"]=("Queue","Kø"), ["Browse"]=("Browse","Gennemse"),
+        ["EveryoneLikes"]=("Everyone likes","Alle kan lide"), ["MyVotes"]=("My votes","Mine stemmer"), ["Review"]=("Review","Gennemgang"),
+        ["Feedback"]=("Feedback","Feedback"), ["Members"]=("Members","Medlemmer"), ["SignOut"]=("Sign out","Log ud"),
+        ["SignInTitle"]=("Welcome home","Velkommen hjem"), ["SignInBody"]=("Enter your invited email. We’ll send a secure sign-in link that works once for 15 minutes.","Indtast din inviterede e-mail. Vi sender et sikkert loginlink, som kan bruges én gang i 15 minutter."),
+        ["Email"]=("Email address","E-mailadresse"), ["SendLink"]=("Send magic link","Send loginlink"), ["LinkSent"]=("Check your inbox. If you’re invited, your sign-in link is on its way.","Tjek din indbakke. Hvis du er inviteret, er dit loginlink på vej."),
+        ["Private"]=("Private household space","Privat område for husstanden"), ["Loading"]=("Finding the best homes…","Finder de bedste boliger…"),
+        ["TryAgain"]=("Try again","Prøv igen"), ["EmptyQueue"]=("You’re all caught up","Du er helt ajour"), ["EmptyQueueBody"]=("There are no unvoted homes in your queue.","Der er ingen boliger uden din stemme i køen."),
+        ["QueueIntro"]=("Homes waiting for your vote, best family fit first.","Boliger der venter på din stemme, bedste familiematch først."),
+        ["Like"]=("Like","Kan lide"), ["Dislike"]=("Dislike","Kan ikke lide"), ["ChangeVote"]=("Change vote","Skift stemme"),
+        ["FamilyFit"]=("Family fit","Familiematch"), ["ViewDetails"]=("View details","Se detaljer"), ["Everyone"]=("Household votes","Husstandens stemmer"),
+        ["NoVotes"]=("No votes yet","Ingen stemmer endnu"), ["Consensus"]=("Everyone likes this","Alle kan lide denne"), ["PriceOnRequest"]=("Price on request","Pris på forespørgsel"),
+        ["ReasonOptional"]=("What shaped your vote? (optional)","Hvad påvirkede din stemme? (valgfrit)"), ["SaveVote"]=("Save vote","Gem stemme"), ["Cancel"]=("Cancel","Annuller"),
+        ["Details"]=("House details","Boligdetaljer"), ["Evidence"]=("AI evidence","AI-dokumentation"), ["NotAssessed"]=("AI not assessed","Ikke AI-vurderet"),
+        ["Source"]=("Open original listing","Åbn original annonce"), ["Comments"]=("Conversation","Samtale"), ["AddComment"]=("Add a comment","Tilføj kommentar"),
+        ["Post"]=("Post","Send"), ["Delete"]=("Delete","Slet"), ["Deleted"]=("Comment deleted","Kommentar slettet"), ["Live"]=("Live","Live"),
+        ["Filters"]=("Filters","Filtre"), ["City"]=("City","By"), ["MinPrice"]=("Minimum price","Minimumspris"), ["MaxPrice"]=("Maximum price","Maksimumspris"),
+        ["ApplyFilters"]=("Show homes","Vis boliger"), ["Clear"]=("Clear","Ryd"), ["List"]=("List","Liste"), ["Map"]=("Map","Kort"),
+        ["MapNote"]=("Addresses are geocoded for map display. Map data © OpenStreetMap contributors.","Adresser geokodes til kortvisning. Kortdata © OpenStreetMap-bidragsydere."),
+        ["NoResults"]=("No homes match these filters.","Ingen boliger matcher filtrene."), ["ConsensusIntro"]=("The shortlist your whole active household explicitly likes.","Listen over boliger, som hele den aktive husstand udtrykkeligt kan lide."),
+        ["MyVotesIntro"]=("Your latest choice for every home you’ve voted on.","Dit seneste valg for hver bolig, du har stemt på."), ["VoteHistory"]=("Vote history","Stemmehistorik"), ["ClearVote"]=("Clear vote","Ryd stemme"), ["NotVoted"]=("Not voted","Ikke stemt"),
+        ["ReviewIntro"]=("AI and manually rejected homes. Restore a good find or keep it rejected.","AI- og manuelt afviste boliger. Gendan et godt fund, eller behold afvisningen."),
+        ["Restore"]=("Restore","Gendan"), ["Reject"]=("Reject","Afvis"), ["Reason"]=("Reason (optional)","Årsag (valgfrit)"), ["Confidence"]=("Confidence","Sikkerhed"), ["ModelVersion"]=("Model","Model"), ["RuleVersion"]=("Rules","Regler"),
+        ["FeedbackIntro"]=("Review household feedback and export the full record.","Gennemgå husstandens feedback og eksportér hele historikken."), ["ExportCsv"]=("Export CSV","Eksportér CSV"), ["ExportJson"]=("Export JSON","Eksportér JSON"),
+        ["Reviewed"]=("Reviewed","Gennemgået"), ["MarkReviewed"]=("Mark reviewed","Markér gennemgået"), ["Unreview"]=("Reopen","Genåbn"), ["NoFeedback"]=("No feedback yet.","Ingen feedback endnu."),
+        ["SendFeedback"]=("Send feedback","Send feedback"), ["FeedbackPlaceholder"]=("Tell the owner what could work better…","Fortæl ejeren, hvad der kunne fungere bedre…"), ["Thanks"]=("Thanks — your feedback was saved.","Tak — din feedback blev gemt."),
+        ["MembersIntro"]=("Invite and manage the people whose votes make consensus.","Invitér og administrér de personer, hvis stemmer skaber enighed."), ["Invite"]=("Invite member","Invitér medlem"),
+        ["Active"]=("Active","Aktiv"), ["Inactive"]=("Inactive","Inaktiv"), ["Owner"]=("Owner","Ejer"), ["Member"]=("Member","Medlem"), ["Deactivate"]=("Deactivate","Deaktivér"), ["Reactivate"]=("Reactivate","Genaktivér"),
+        ["Language"]=("Language","Sprog"), ["English"]=("English","Engelsk"), ["Danish"]=("Danish","Dansk"), ["Menu"]=("Menu","Menu"),
+        ["FilterRejected"]=("Filter rejected","Filterafvist"), ["AiRejected"]=("AI rejected","AI-afvist"), ["ManuallyRejected"]=("Manually rejected","Manuelt afvist"), ["Restored"]=("Restored","Gendannet"), ["Archived"]=("Archived","Arkiveret"),
+        ["Unauthorized"]=("This page is only available to the owner.","Denne side er kun tilgængelig for ejeren."), ["Error"]=("Something went wrong. Please try again.","Noget gik galt. Prøv igen."),
+        ["Layout"]=("Layout","Indretning"), ["Privacy"]=("Privacy","Privatliv"), ["Garden"]=("Garden","Have"), ["Condition"]=("Condition","Stand"),
+        ["Location"]=("Location","Beliggenhed"), ["Noise"]=("Noise","Støj"), ["Price"]=("Price","Pris"), ["Other"]=("Other","Andet")
+    };
+    public string this[string key] => Text.TryGetValue(key, out var value) ? (CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "da" ? value.Da : value.En) : key;
+    public string Enum(Enum value) => this[value.ToString()];
+}

@@ -1,0 +1,51 @@
+@inherits LayoutComponentBase
+@inject AuthState Auth
+@inject I18n L
+@inject NavigationManager Nav
+@inject LiveUpdates Live
+@implements IDisposable
+
+<div class="app-frame">
+<header class="topbar">
+    <NavLink class="brand" href=""><span class="brand-mark small">⌂</span><span>@L["AppName"]</span></NavLink>
+    <div class="top-actions">
+        <span class="live-pill @(Live.Connected ? "online" : "")"><i></i>@L["Live"]</span>
+        <select class="language" aria-label="@L["Language"]" value="@Auth.User?.Language" @onchange="LanguageChanged">
+            <option value="en">EN</option><option value="da">DA</option>
+        </select>
+        <button class="icon-btn" title="@L["SignOut"]" @onclick="Logout">↪</button>
+    </div>
+</header>
+<div class="body-grid">
+<nav class="side-nav" aria-label="@L["Menu"]">
+    <NavLink href="" Match="NavLinkMatch.All"><span>⌂</span>@L["Queue"]</NavLink>
+    <NavLink href="browse"><span>⌕</span>@L["Browse"]</NavLink>
+    <NavLink href="everyone-likes"><span>♥</span>@L["EveryoneLikes"]</NavLink>
+    <NavLink href="my-votes"><span>✓</span>@L["MyVotes"]</NavLink>
+    @if (Auth.IsOwner)
+    {
+        <div class="nav-section">@L["Owner"]</div>
+        <NavLink href="owner/review"><span>◈</span>@L["Review"]</NavLink>
+        <NavLink href="owner/feedback"><span>✦</span>@L["Feedback"]</NavLink>
+        <NavLink href="owner/members"><span>♟</span>@L["Members"]</NavLink>
+    }
+</nav>
+<main class="content">@Body</main>
+</div>
+<nav class="bottom-nav" aria-label="@L["Menu"]">
+    <NavLink href="" Match="NavLinkMatch.All"><span>⌂</span><small>@L["Queue"]</small></NavLink>
+    <NavLink href="browse"><span>⌕</span><small>@L["Browse"]</small></NavLink>
+    <NavLink href="everyone-likes"><span>♥</span><small>@L["EveryoneLikes"]</small></NavLink>
+    <NavLink href="my-votes"><span>✓</span><small>@L["MyVotes"]</small></NavLink>
+    @if (Auth.IsOwner) { <NavLink href="owner/review"><span>◈</span><small>@L["Review"]</small></NavLink> }
+</nav>
+<FeedbackButton />
+</div>
+
+@code {
+    protected override async Task OnInitializedAsync() { Live.Changed += Refresh; await Live.StartAsync(); }
+    private async Task LanguageChanged(ChangeEventArgs e) => await Auth.SetLanguageAsync(e.Value?.ToString() ?? "en");
+    private async Task Logout() { await Auth.LogoutAsync(); Nav.NavigateTo("", true); }
+    private void Refresh() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Live.Changed -= Refresh;
+}
