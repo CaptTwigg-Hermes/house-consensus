@@ -24,17 +24,20 @@ services:
 
   app:
     image: ${HOUSECONSENSUS_IMAGE:-houseconsensus:local}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
     depends_on:
       db: { condition: service_healthy }
       mailpit: { condition: service_started }
     environment:
       ASPNETCORE_ENVIRONMENT: E2E
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__DefaultConnection: Host=db;Port=5432;Database=houseconsensus_e2e;Username=houseconsensus
-      Email__Smtp__Host: mailpit
-      Email__Smtp__Port: "1025"
-      Email__PublicBaseUrl: http://app:8080
-      Seed__Enabled: "true"
+      ConnectionStrings__Database: Host=db;Port=5432;Database=houseconsensus_e2e;Username=houseconsensus
+      INITIAL_OWNER_EMAIL: owner@example.test
+      PublicOrigin: http://app:8080
+      Email__SmtpHost: mailpit
+      Email__SmtpPort: "1025"
     ports:
       - "8080:8080"
 

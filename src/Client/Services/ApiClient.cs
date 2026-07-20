@@ -19,6 +19,7 @@ public sealed class ApiClient(HttpClient http)
     public async Task<VoteResult?> Vote(Guid id, VoteChoice choice, ReasonTag[] tags, CancellationToken ct = default) => await SendAsync<VoteResult>(HttpMethod.Post, $"api/listings/{id}/votes", new CastVote(choice, tags), ct);
     public Task<HttpResponseMessage> ClearVote(Guid id, CancellationToken ct = default) => http.DeleteAsync($"api/listings/{id}/votes", ct);
     public Task<HttpResponseMessage> AddComment(Guid id, string body, CancellationToken ct = default) => http.PostAsJsonAsync($"api/listings/{id}/comments", new AddComment(body), ct);
+    public async Task<HttpResponseMessage> EditComment(Guid id, string body, CancellationToken ct = default) => await RawAsync(HttpMethod.Put, $"api/comments/{id}", new EditComment(body), ct);
     public Task<HttpResponseMessage> DeleteComment(Guid id, CancellationToken ct = default) => http.DeleteAsync($"api/comments/{id}", ct);
     public async Task<HttpResponseMessage> Override(Guid id, OverrideAction action, string? reason, CancellationToken ct = default) => await RawAsync(HttpMethod.Post, $"api/review/{id}/override", new ApplyListingOverride(action, reason), ct);
     public Task<HttpResponseMessage> SubmitFeedback(Guid? listingId, string body, CancellationToken ct = default) => http.PostAsJsonAsync("api/feedback", new SubmitFeedback(listingId, body), ct);

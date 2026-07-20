@@ -12,19 +12,24 @@
     @if (listing.Consensus) { <div class="consensus-banner">♥ <strong>@L["Consensus"]</strong></div> }
     <section class="detail-grid">
         <article class="panel"><h2>@L["Everyone"]</h2>@if (listing.Votes.Count == 0) { <p class="muted">@L["NoVotes"]</p> } else { <div class="household-votes">@foreach (var vote in listing.Votes) { <div><span class="avatar">@vote.MemberId.ToString()[..2].ToUpperInvariant()</span><strong>@L.Enum(vote.Choice)</strong><span class="choice @vote.Choice.ToString().ToLowerInvariant()">@(vote.Choice == VoteChoice.Like ? "♥" : vote.Choice == VoteChoice.Dislike ? "×" : "—")</span>@if (vote.Tags.Length > 0) { <small>@string.Join(" · ", vote.Tags.Select(tag => L.Enum(tag)))</small> }</div> }</div> }<VoteButtons ListingId="Id" OnVoted="Load" /></article>
-        <article class="panel"><h2>@L["Evidence"]</h2>@if (!listing.AiAssessed) { <span class="badge neutral">@L["NotAssessed"]</span> } else { <p>@listing.AiEvidence</p>@if (listing.AiConfidence.HasValue) { <small>@L["Confidence"]: @listing.AiConfidence.Value.ToString("P0")</small> } }@if (listing.SourceUrl is not null) { <a class="btn ghost source-link" target="_blank" rel="noopener" href="@listing.SourceUrl">@L["Source"] ↗</a> }</article>
+        <article class="panel"><h2>@L["Evidence"]</h2>@if (!listing.AiAssessed) { <span class="badge neutral">@L["NotAssessed"]</span> } else { <p>@listing.AiEvidence</p>@if (listing.AiConfidence.HasValue) { <small>@L["Confidence"]: @listing.AiConfidence.Value.ToString("P0")</small> } }@if (listing.SourceUrl is not null) { <a class="btn ghost source-link" target="_blank" rel="noopener" href="@listing.SourceUrl">@L["Source"] ↗</a> }
+        @if (Auth.IsOwner) { <div class="owner-override"><input maxlength="500" aria-label="@L["Reason"]" placeholder="@L["Reason"]" @bind="overrideReason" /><div class="vote-actions"><button class="btn like" @onclick="() => Override(OverrideAction.Restore)">↺ @L["Restore"]</button><button class="btn dislike" @onclick="() => Override(OverrideAction.Reject)">× @L["Reject"]</button></div></div> }</article>
     </section>
     <section class="panel comments"><h2>@L["Comments"] <span class="live-pill @(Live.Connected ? "online" : "")"><i></i>@L["Live"]</span></h2>
-        <div class="comment-list">@foreach (var c in comments) { <article class="comment"><span class="avatar">@c.AuthorId.ToString()[..2].ToUpperInvariant()</span><div>@if (c.IsDeleted) { <em>@L["Deleted"]</em> } else { <p>@c.Body</p><small>@c.CreatedAt.ToLocalTime().ToString("g")</small>@if (c.AuthorId == Auth.User?.Id || Auth.IsOwner) { <button class="text-btn danger" @onclick="() => Delete(c.Id)">@L["Delete"]</button> } }</div></article> }</div>
+        <div class="comment-list">@foreach (var c in comments) { <article class="comment"><span class="avatar">@c.AuthorId.ToString()[..2].ToUpperInvariant()</span><div>@if (c.IsDeleted) { <em>@L["Deleted"]</em> } else if (editingId == c.Id) { <textarea maxlength="4000" rows="3" @bind="editBody"></textarea><div class="vote-actions"><button class="btn primary" disabled="@string.IsNullOrWhiteSpace(editBody)" @onclick="() => SaveEdit(c.Id)">@L["Save"]</button><button class="btn ghost" @onclick="CancelEdit">@L["Cancel"]</button></div> } else { <p>@c.Body</p><small>@c.CreatedAt.ToLocalTime().ToString("g")</small>@if (c.AuthorId == Auth.User?.Id || Auth.IsOwner) { <button class="text-btn" @onclick="() => StartEdit(c)">@L["Edit"]</button><button class="text-btn danger" @onclick="() => Delete(c.Id)">@L["Delete"]</button> } }</div></article> }</div>
         <form class="comment-form" @onsubmit="Post" @onsubmit:preventDefault><textarea maxlength="4000" rows="3" placeholder="@L["AddComment"]" @bind="newComment"></textarea><button class="btn primary" disabled="@string.IsNullOrWhiteSpace(newComment)">@L["Post"]</button></form>
     </section>
 }
 @code {
-    [Parameter] public Guid Id { get; set; } private ListingDto? listing; private List<CommentDto> comments = []; private string newComment = "";
+    [Parameter] public Guid Id { get; set; } private ListingDto? listing; private List<CommentDto> comments = []; private string newComment = "", editBody = "", overrideReason = ""; private Guid? editingId;
     protected override async Task OnInitializedAsync() { await Live.WatchAsync(Id); Live.OnListingChanged(LiveChanged); await Load(); }
     private async Task Load() { listing = await Api.GetAsync<ListingDto>($"api/listings/{Id}"); comments = await Api.GetAsync<List<CommentDto>>($"api/listings/{Id}/comments") ?? []; }
     private void LiveChanged() => InvokeAsync(async () => { await Load(); StateHasChanged(); });
     private async Task Post() { using var r = await Api.AddComment(Id, newComment); await ApiClient.EnsureSuccess(r); newComment = ""; await Load(); }
+    private void StartEdit(CommentDto comment) { editingId = comment.Id; editBody = comment.Body; }
+    private void CancelEdit() { editingId = null; editBody = ""; }
+    private async Task SaveEdit(Guid id) { using var r = await Api.EditComment(id, editBody); await ApiClient.EnsureSuccess(r); CancelEdit(); await Load(); }
     private async Task Delete(Guid id) { using var r = await Api.DeleteComment(id); await ApiClient.EnsureSuccess(r); await Load(); }
+    private async Task Override(OverrideAction action) { using var r = await Api.Override(Id, action, overrideReason); await ApiClient.EnsureSuccess(r); overrideReason = ""; await Load(); }
     public void Dispose() { }
 }
