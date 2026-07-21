@@ -37,6 +37,45 @@ public sealed class ClientUiTests
         Assert.Contains("updated", handler.Body, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Client_publish_loads_globalization_data_for_runtime_culture_selection()
+    {
+        var project = File.ReadAllText(Path.GetFullPath("../../../../../src/Client/HouseConsensus.Client.csproj", AppContext.BaseDirectory));
+        Assert.Contains("<BlazorWebAssemblyLoadAllGlobalizationData>true</BlazorWebAssemblyLoadAllGlobalizationData>", project, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Authentication_shell_exposes_stable_browser_contract()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var auth = File.ReadAllText(Path.Combine(root, "src/Client/Components/AuthGate.razor"));
+        var layout = File.ReadAllText(Path.Combine(root, "src/Client/Layout/MainLayout.razor"));
+        var members = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Owner/Members.razor"));
+        Assert.Contains("data-testid=\"auth-email\"", auth, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"auth-link-sent\"", auth, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"app-shell\"", layout, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"current-user-email\"", layout, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"language-select\"", layout, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"member-invite-email\"", members, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"member-notice\"", members, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"member-row\"", members, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Listing_and_feedback_flows_expose_stable_browser_contract()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var sources = string.Join("\n", new[]
+        {
+            "src/Client/Components/ListingCard.razor", "src/Client/Components/VoteButtons.razor",
+            "src/Client/Pages/Browse.razor", "src/Client/Pages/Detail.razor",
+            "src/Client/Pages/Owner/Review.razor", "src/Client/Components/FeedbackButton.razor",
+            "src/Client/Pages/Owner/Feedback.razor"
+        }.Select(path => File.ReadAllText(Path.Combine(root, path))));
+        foreach (var testId in new[] { "listing-card", "vote-interested", "filter-price-max", "filter-apply", "browse-map", "unanimity-status", "match-banner", "restore-listing", "feedback-message", "feedback-success", "feedback-export-csv", "feedback-export-json" })
+            Assert.Contains($"data-testid=\"{testId}\"", sources, StringComparison.Ordinal);
+    }
+
     private sealed class CaptureHandler : HttpMessageHandler
     {
         public HttpRequestMessage? Request { get; private set; }

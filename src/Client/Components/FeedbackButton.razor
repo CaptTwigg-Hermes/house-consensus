@@ -1,15 +1,15 @@
 @inject I18n L
 @inject ApiClient Api
 
-<button class="feedback-fab" title="@L["Feedback"]" @onclick="() => open = true">✦</button>
+<button data-testid="feedback-open" class="feedback-fab" title="@L["Feedback"]" @onclick="() => open = true">✦</button>
 @if (open)
 {
     <div class="modal-backdrop" @onclick="() => open = false">
         <section class="modal" role="dialog" aria-modal="true" aria-labelledby="feedback-title" @onclick:stopPropagation>
             <button class="modal-close" aria-label="@L["Cancel"]" @onclick="() => open = false">×</button>
             <h2 id="feedback-title">@L["SendFeedback"]</h2>
-            @if (sent) { <div class="notice success">@L["Thanks"]</div> }
-            else { <textarea rows="5" maxlength="4000" placeholder="@L["FeedbackPlaceholder"]" @bind="body"></textarea><button class="btn primary wide" disabled="@(busy || string.IsNullOrWhiteSpace(body))" @onclick="Send">@L["SendFeedback"]</button> }
+            @if (sent) { <div data-testid="feedback-success" class="notice success">@L["Thanks"]</div> }
+            else { <textarea data-testid="feedback-message" rows="5" maxlength="4000" placeholder="@L["FeedbackPlaceholder"]" @bind="body" @bind:event="oninput"></textarea><button class="btn primary wide" disabled="@(busy || string.IsNullOrWhiteSpace(body))" @onclick="Send">@L["SendFeedback"]</button> }
         </section>
     </div>
 }

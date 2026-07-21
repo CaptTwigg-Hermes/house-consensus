@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
-  <PropertyGroup><RootNamespace>HouseConsensus.Client</RootNamespace><WasmEnableWebcil>false</WasmEnableWebcil><ServiceWorkerAssetsManifest>service-worker-assets.js</ServiceWorkerAssetsManifest></PropertyGroup>
+  <PropertyGroup><RootNamespace>HouseConsensus.Client</RootNamespace><WasmEnableWebcil>false</WasmEnableWebcil><BlazorWebAssemblyLoadAllGlobalizationData>true</BlazorWebAssemblyLoadAllGlobalizationData><ServiceWorkerAssetsManifest>service-worker-assets.js</ServiceWorkerAssetsManifest></PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Shared/HouseConsensus.Shared.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" />

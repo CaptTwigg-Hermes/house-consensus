@@ -5,12 +5,13 @@
 @inject LiveUpdates Live
 @implements IDisposable
 
-<div class="app-frame">
+<div class="app-frame" data-testid="app-shell">
 <header class="topbar">
     <NavLink class="brand" href=""><span class="brand-mark small">⌂</span><span>@L["AppName"]</span></NavLink>
     <div class="top-actions">
+        <span class="user-email" data-testid="current-user-email">@Auth.User?.Email</span>
         <span class="live-pill @(Live.Connected ? "online" : "")"><i></i>@L["Live"]</span>
-        <select class="language" aria-label="@L["Language"]" value="@Auth.User?.Language" @onchange="LanguageChanged">
+        <select class="language" data-testid="language-select" aria-label="@L["Language"]" value="@Auth.User?.Language" @onchange="LanguageChanged">
             <option value="en">EN</option><option value="da">DA</option>
         </select>
         <button class="icon-btn" title="@L["SignOut"]" @onclick="Logout">↪</button>

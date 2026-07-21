@@ -38,6 +38,9 @@ services:
       PublicOrigin: http://app:8080
       Email__SmtpHost: mailpit
       Email__SmtpPort: "1025"
+      E2E__SeedData: "true"
+      Auth__MagicRequestPermitLimit: "100"
+      Auth__MagicConsumePermitLimit: "100"
     ports:
       - "8080:8080"
 

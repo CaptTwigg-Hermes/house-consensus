@@ -12,7 +12,8 @@ export interface Household {
 }
 
 export function identity(testInfo: TestInfo, role: string): Identity {
-  const slug = `${testInfo.workerIndex}-${testInfo.testId}-${role}`
+  if (role === 'owner') return { name: 'Owner', email: 'owner@example.test' };
+  const slug = `${testInfo.workerIndex}-${testInfo.testId}-${role}-${Date.now()}`
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(-48);
   return { name: `${role} ${slug.slice(-12)}`, email: `e2e+${slug}@example.test` };
 }
@@ -33,12 +34,11 @@ export async function requestMagicLink(page: Page, mailpit: MailpitClient, perso
 }
 
 export async function inviteMember(ownerPage: Page, mailpit: MailpitClient, member: Identity): Promise<string> {
-  await ownerPage.goto('/settings/members');
-  await ownerPage.getByRole('button', { name: /invite member/i }).click();
+  await ownerPage.goto('/owner/members');
   await ownerPage.getByTestId('member-invite-email').fill(member.email);
-  await ownerPage.getByRole('button', { name: /send invite/i }).click();
-  await expect(ownerPage.getByTestId('member-row').filter({ hasText: member.email })).toBeVisible();
-  return mailpit.waitForLink(member.email, { subject: /invite|join/i });
+  await ownerPage.getByRole('button', { name: /invite/i }).click();
+  await expect(ownerPage.getByTestId('member-notice')).toBeVisible();
+  return mailpit.waitForLink(member.email, { subject: /sign|login|magic/i });
 }
 
 export async function createTwoMemberHousehold(
@@ -52,6 +52,11 @@ export async function createTwoMemberHousehold(
   const ownerContext = await browser.newContext({ baseURL });
   const ownerPage = await ownerContext.newPage();
   await requestMagicLink(ownerPage, mailpit, owner);
+  const members = await ownerPage.request.get('/api/members');
+  for (const member of await members.json() as Array<{ id: string; role: string | number; isActive: boolean }>) {
+    if ((member.role === 'Member' || member.role === 'member' || member.role === 0) && member.isActive)
+      expect((await ownerPage.request.post(`/api/members/${member.id}/deactivate`, { headers: { 'X-House-Consensus-CSRF': '1' } })).ok()).toBeTruthy();
+  }
   const inviteLink = await inviteMember(ownerPage, mailpit, member);
 
   const memberContext = await browser.newContext({ baseURL });

@@ -13,11 +13,11 @@ else if (Auth.User is null)
         <section class="auth-card">
             <div class="brand-mark" aria-hidden="true">⌂</div>
             <p class="eyebrow">@L["Private"]</p><h1>@L["SignInTitle"]</h1><p>@L["SignInBody"]</p>
-            @if (sent) { <div class="notice success" role="status">@L["LinkSent"]</div> }
+            @if (sent) { <div class="notice success" role="status" data-testid="auth-link-sent">@L["LinkSent"]</div> }
             else
             {
                 <form @onsubmit="Send" @onsubmit:preventDefault>
-                    <label for="email">@L["Email"]</label><input id="email" type="email" autocomplete="email" required @bind="email" />
+                    <label for="email">@L["Email"]</label><input id="email" data-testid="auth-email" type="email" autocomplete="email" required @bind="email" />
                     <button class="btn primary wide" disabled="@busy">@(busy ? "…" : L["SendLink"])</button>
                 </form>
                 @if (error) { <div class="notice error" role="alert">@L["Error"]</div> }

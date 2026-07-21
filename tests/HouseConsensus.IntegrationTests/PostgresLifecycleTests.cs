@@ -60,7 +60,128 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
         var token = new Uri(mail.Link).Query.Split("token=")[1];
         await using (var db = Db()) { var service = new MagicLinkService(db, mail, cfg, now); var member = await service.ConsumeAsync(Uri.UnescapeDataString(token), ct); Assert.NotNull(member); Assert.Equal("new@example.test", member.Email); Assert.Null(await service.ConsumeAsync(Uri.UnescapeDataString(token), ct)); }
     }
-    private sealed class CaptureEmail : IEmailSender { public string Link { get; private set; } = ""; public Task SendMagicLinkAsync(string email, string link, CancellationToken ct) { Link = link; return Task.CompletedTask; } }
-    private sealed class ManualTimeProvider(DateTimeOffset now) : TimeProvider { public override DateTimeOffset GetUtcNow() => now; }
+    [Fact]
+    public async Task Unknown_and_expired_invites_do_not_create_magic_links()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var now = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        var mail = new CaptureEmail();
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { { "PublicOrigin", "https://example.test" } }).Build();
+        await using var db = Db();
+        var owner = new Member { Email = "owner@example.test", Role = MemberRole.Owner };
+        db.Members.Add(owner);
+        await db.SaveChangesAsync(ct);
+        db.Invites.Add(new Invite { Email = "expired@example.test", InvitedById = owner.Id, ExpiresAt = now.GetUtcNow() });
+        await db.SaveChangesAsync(ct);
+        var service = new MagicLinkService(db, mail, cfg, now);
+
+        await service.RequestAsync("unknown@example.test", ct);
+        await service.RequestAsync("expired@example.test", ct);
+
+        Assert.Equal(0, await db.MagicLinks.CountAsync(ct));
+        Assert.Equal(0, mail.SendCount);
+    }
+
+    [Fact]
+    public async Task Expired_magic_link_cannot_accept_invite()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var now = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        var mail = new CaptureEmail();
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { { "PublicOrigin", "https://example.test" } }).Build();
+        await using var db = Db();
+        var owner = new Member { Email = "owner@example.test", Role = MemberRole.Owner };
+        db.Members.Add(owner);
+        await db.SaveChangesAsync(ct);
+        var invite = new Invite { Email = "invitee@example.test", InvitedById = owner.Id, ExpiresAt = now.GetUtcNow().AddDays(1) };
+        db.Invites.Add(invite);
+        await db.SaveChangesAsync(ct);
+        var service = new MagicLinkService(db, mail, cfg, now);
+        await service.RequestAsync(invite.Email, ct);
+        var token = Uri.UnescapeDataString(new Uri(mail.Link).Query.Split("token=")[1]);
+        now.Advance(TimeSpan.FromMinutes(15));
+
+        Assert.Null(await service.ConsumeAsync(token, ct));
+        Assert.Null((await db.Invites.SingleAsync(ct)).AcceptedAt);
+        Assert.False(await db.Members.AnyAsync(x => x.Email == invite.Email, ct));
+    }
+
+    [Fact]
+    public async Task Vote_tags_and_latest_choice_round_trip_through_PostgreSQL()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+        var member = new Member { Email = "member@example.test" };
+        var listing = new Listing { ExternalId = "vote-case", Address = "Vote Street 1" };
+        db.AddRange(member, listing);
+        await db.SaveChangesAsync(ct);
+        var at = DateTimeOffset.UtcNow;
+        db.Votes.AddRange(
+            new Vote { ListingId = listing.Id, MemberId = member.Id, Choice = VoteChoice.Dislike, Tags = [ReasonTag.Noise, ReasonTag.Price], CreatedAt = at },
+            new Vote { ListingId = listing.Id, MemberId = member.Id, Choice = VoteChoice.Like, Tags = [ReasonTag.Garden], CreatedAt = at.AddSeconds(1) });
+        await db.SaveChangesAsync(ct);
+        db.ChangeTracker.Clear();
+
+        var history = await db.Votes.OrderBy(x => x.CreatedAt).ToListAsync(ct);
+        Assert.Equal([ReasonTag.Noise, ReasonTag.Price], history[0].Tags);
+        Assert.Equal(VoteChoice.Like, ConsensusRules.LatestVotes(history)[member.Id].Choice);
+        Assert.True(ConsensusRules.HasConsensus([member.Id], history));
+    }
+
+    [Fact]
+    public async Task Comment_revision_audit_round_trips_actor_body_and_deletion()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+        var author = new Member { Email = "author@example.test" };
+        var owner = new Member { Email = "owner@example.test", Role = MemberRole.Owner };
+        var listing = new Listing { ExternalId = "comment-case", Address = "Comment Street 1" };
+        db.AddRange(author, owner, listing);
+        await db.SaveChangesAsync(ct);
+        var at = DateTimeOffset.UtcNow;
+        var comment = new Comment(listing.Id, author.Id, "first", at);
+        comment.Edit(author.Id, false, "second", at.AddSeconds(1));
+        comment.Delete(owner.Id, true, at.AddSeconds(2));
+        db.Comments.Add(comment);
+        await db.SaveChangesAsync(ct);
+        db.ChangeTracker.Clear();
+
+        var saved = await db.Comments.Include(x => x.Revisions).SingleAsync(ct);
+        var revisions = saved.Revisions.OrderBy(x => x.ChangedAt).ToArray();
+        Assert.True(saved.IsDeleted);
+        Assert.Equal("", saved.Body);
+        Assert.Equal("first", revisions[0].PreviousBody);
+        Assert.Equal(author.Id, revisions[0].ActorId);
+        Assert.Equal("second", revisions[1].PreviousBody);
+        Assert.Equal(owner.Id, revisions[1].ActorId);
+        Assert.True(revisions[1].WasDeletion);
+    }
+
+    [Fact]
+    public async Task E2E_seed_is_idempotent_and_covers_active_and_rejected_review_flows()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+
+        await E2EDataSeeder.SeedAsync(db, ct);
+        await E2EDataSeeder.SeedAsync(db, ct);
+
+        var listings = await db.Listings.OrderBy(x => x.ExternalId).ToListAsync(ct);
+        Assert.Equal(2, listings.Count);
+        Assert.Contains(listings, x => x.State == ListingState.Active && x.Price == 4_500_000m);
+        Assert.Contains(listings, x => x.State == ListingState.AiRejected && x.AiAssessed);
+    }
+
+    private sealed class CaptureEmail : IEmailSender
+    {
+        public string Link { get; private set; } = "";
+        public int SendCount { get; private set; }
+        public Task SendMagicLinkAsync(string email, string link, CancellationToken ct) { Link = link; SendCount++; return Task.CompletedTask; }
+    }
+    private sealed class ManualTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+        public void Advance(TimeSpan amount) => now += amount;
+    }
 }
 

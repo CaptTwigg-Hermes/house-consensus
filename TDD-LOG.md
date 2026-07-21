@@ -1,6 +1,6 @@
 # RED / GREEN log
 
-The implementation was developed test-first at the source level. RED cases were captured before their corresponding implementations. A repository-local .NET 10 SDK became available for verification; Docker/PostgreSQL verification remains blocked because this environment has no reachable daemon.
+The implementation was developed test-first at the source level. RED cases were captured before their corresponding implementations. A repository-local .NET 10 SDK and dedicated PostgreSQL 18.4 test instance are available. Browser flows run directly against the published app and Mailpit when Docker is unavailable.
 
 | Cycle | RED specification | GREEN implementation | Execution |
 |---|---|---|---|
@@ -15,7 +15,11 @@ The implementation was developed test-first at the source level. RED cases were 
 | 9 | Comment owners need an audited edit path from the UI | `ApiClient.EditComment` and inline localized edit controls; owner detail actions expose restore/reject | RED: missing client method; GREEN: focused and aggregate unit suites |
 | 10 | E2E Compose must build the app and use the server’s real configuration keys | corrected build context, database key, owner bootstrap, public origin, and SMTP keys | RED: deployment config regression test; GREEN: exporter test suite |
 | 11 | Exporter PostgreSQL upsert must execute against a real server | repaired the unterminated `RETURNING "Id"` identifier | RED: 2/2 exporter PostgreSQL tests failed; GREEN: 2/2 focused and 12/12 aggregate exporter tests |
-| 12 | First-start migrations must make newly-created PostgreSQL enums usable immediately | reload Npgsql type metadata after migration; allow a guarded external test database | RED: both .NET PostgreSQL tests failed on unknown enum types; GREEN: 2/2 integration tests and live health/bootstrap checks |
+| 12 | First-start migrations must make newly-created PostgreSQL enums usable immediately | reload Npgsql type metadata after migration; allow a guarded external test database | RED: both .NET PostgreSQL tests failed on unknown enum types; GREEN: integration tests and live health/bootstrap checks |
+| 13 | Browser startup must load configured cultures and expose stable automation contracts | ship Blazor globalization data and add semantic test hooks | RED: WebAssembly culture-data startup exception and missing locators; GREEN: browser auth flow |
+| 14 | E2E must have deterministic listings and respect the single-household model | guarded E2E seeder, fixed bootstrap owner, serial workers and active-member cleanup | RED: empty Browse and non-unanimous historical members; GREEN: Browse, restore and voting flows |
+| 15 | Repeated browser auth must remain testable without weakening production limits | configurable request/consume permit limits with E2E-only overrides | RED: HTTP 429 during the suite; GREEN: seven sequential browser flows |
+| 16 | Feedback submit must react while the user types | bind textarea on `oninput` | RED: enabled-button timeout after `fill`; GREEN: feedback submit and CSV/JSON export flow |
 
 Run the full gate on a Docker-enabled host with: `docker build -f Dockerfile.test -t house-consensus-tests . && docker run --rm -v /var/run/docker.sock:/var/run/docker.sock house-consensus-tests`.
 
@@ -23,10 +27,10 @@ Run the full gate on a Docker-enabled host with: `docker build -f Dockerfile.tes
 ## Latest verification
 
 - Release solution build: **GREEN**, 0 compiler/analyzer errors (the invariant-mode host SDK emitted locale-resource warnings).
-- Unit tests: **GREEN**, 23/23 (including client culture/filter and audited comment edit helpers).
+- Unit tests: **GREEN**, 26/26 (including client culture/filter, audited comments, and browser-contract regressions).
 - Hosted WASM Release publish: **GREEN**; static framework, manifest, service worker, and server assembly verified in the publish artifact.
-- Exporter tests: **GREEN**, 12/12 against PostgreSQL 18.4 on the dedicated test instance.
+- Exporter tests: **GREEN**, 14/14 against PostgreSQL 18.4 on the dedicated test instance; Ruff is GREEN.
 - Houseshopping export-failure isolation: **GREEN**, 3/3 focused tests.
-- TypeScript/Playwright discovery: **GREEN**, typecheck and 7/7 tests discovered. Browser execution remains blocked because `/var/run/docker.sock` is absent.
-- PostgreSQL integration tests: **GREEN**, 2/2 using the guarded external test database.
+- TypeScript/Playwright: **GREEN**, typecheck plus 7/7 Chromium flows against the published app, PostgreSQL and Mailpit.
+- PostgreSQL integration tests: **GREEN**, 7/7 using the guarded external test database.
 - Live server health/bootstrap: **GREEN**; migration applied, owner bootstrapped, SPA served, and `/health` returned HTTP 200 `Healthy`.

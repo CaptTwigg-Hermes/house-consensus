@@ -3,7 +3,7 @@
 @inject I18n L
 <PageTitle>@L["Feedback"] · @L["AppName"]</PageTitle>
 <OwnerOnly>
-<header class="page-head"><div><p class="eyebrow">@L["Owner"]</p><h1>@L["Feedback"]</h1><p>@L["FeedbackIntro"]</p></div><div class="export-actions"><a class="btn ghost" href="api/feedback/export.csv" download>↓ @L["ExportCsv"]</a><a class="btn ghost" href="api/feedback/export.json" download>↓ @L["ExportJson"]</a></div></header>
+<header class="page-head"><div><p class="eyebrow">@L["Owner"]</p><h1>@L["Feedback"]</h1><p>@L["FeedbackIntro"]</p></div><div class="export-actions"><a data-testid="feedback-export-csv" class="btn ghost" href="api/feedback/export.csv" download>↓ @L["ExportCsv"]</a><a data-testid="feedback-export-json" class="btn ghost" href="api/feedback/export.json" download>↓ @L["ExportJson"]</a></div></header>
 @if (items is null) { <Loading /> } else if (items.Count == 0) { <EmptyState Title="@L["NoFeedback"]" Body="@L["FeedbackIntro"]" /> } else
 {
     <section class="feedback-list">@foreach (var item in items) { <article class="feedback-item @(item.ReviewedAt.HasValue ? "reviewed" : "")"><div class="feedback-status">@(item.ReviewedAt.HasValue ? "✓" : "•")</div><div><p>@item.Body</p><small>@item.CreatedAt.ToLocalTime().ToString("g") @if (item.ListingId.HasValue) { <NavLink href="@($"listing/{item.ListingId}")"> · @L["Details"]</NavLink> }</small></div><button class="btn ghost" @onclick="() => Toggle(item)">@(item.ReviewedAt.HasValue ? L["Unreview"] : L["MarkReviewed"])</button></article> }</section>

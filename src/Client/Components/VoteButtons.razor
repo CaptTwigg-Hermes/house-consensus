@@ -3,7 +3,7 @@
 
 @if (!choosing)
 {
-    <div class="vote-actions"><button class="btn like" @onclick="() => Choose(VoteChoice.Like)">♥ @L["Like"]</button><button class="btn dislike" @onclick="() => Choose(VoteChoice.Dislike)">× @L["Dislike"]</button><button class="btn ghost" disabled="@busy" @onclick="Clear">@L["ClearVote"]</button></div>
+    <div class="vote-actions"><button data-testid="vote-interested" class="btn like" @onclick="() => Choose(VoteChoice.Like)">♥ @L["Like"]</button><button data-testid="vote-reject" class="btn dislike" @onclick="() => Choose(VoteChoice.Dislike)">× @L["Dislike"]</button><button class="btn ghost" disabled="@busy" @onclick="Clear">@L["ClearVote"]</button></div>
 }
 else
 {
