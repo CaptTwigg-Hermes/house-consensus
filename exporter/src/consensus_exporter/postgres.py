@@ -102,7 +102,8 @@ class PostgresExporter:
                      "AiEvidence"=excluded."AiEvidence","ModelVersion"=excluded."ModelVersion",
                      "RuleVersion"=excluded."RuleVersion","SourceUrl"=excluded."SourceUrl",
                      "ImportedAt"=excluded."ImportedAt","ArchivedAt"=excluded."ArchivedAt"
-                    RETURNING "Id""",
+                    RETURNING "Id"
+                    """,
                     (
                         uuid.uuid4(),
                         case.source_id,

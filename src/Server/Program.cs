@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -80,7 +81,12 @@ app.Run();
 static async Task Bootstrap(WebApplication app)
 {
     await using var scope = app.Services.CreateAsyncScope(); var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    if (app.Configuration.GetValue("Database:AutoMigrate", true)) await db.Database.MigrateAsync();
+    if (app.Configuration.GetValue("Database:AutoMigrate", true))
+    {
+        await db.Database.MigrateAsync();
+        await db.Database.OpenConnectionAsync();
+        await ((NpgsqlConnection)db.Database.GetDbConnection()).ReloadTypesAsync();
+    }
     var owner = MagicLinkService.Normalize(app.Configuration["INITIAL_OWNER_EMAIL"] ?? ""); if (!string.IsNullOrWhiteSpace(owner) && !await db.Members.AnyAsync()) { db.Members.Add(new Member { Email = owner, Role = MemberRole.Owner }); await db.SaveChangesAsync(); }
 }
 static bool IsEmail(string value) => System.Net.Mail.MailAddress.TryCreate(value, out var parsed) && parsed.Address == value.Trim();

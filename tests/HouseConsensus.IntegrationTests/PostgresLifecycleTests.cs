@@ -5,15 +5,44 @@ using HouseConsensus.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Npgsql;
 using Testcontainers.PostgreSql;
 namespace HouseConsensus.IntegrationTests;
 
 public sealed class PostgresLifecycleTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder().WithImage("postgres:17-alpine").WithDatabase("hc").WithUsername("hc").WithPassword("hc-test-password").Build();
-    private AppDbContext Db() => new(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(_postgres.GetConnectionString(), n => n.MapEnum<MemberRole>("member_role").MapEnum<VoteChoice>("vote_choice").MapEnum<ListingState>("listing_state").MapEnum<ReasonTag>("reason_tag").MapEnum<OverrideAction>("override_action")).Options);
-    public async ValueTask InitializeAsync() { await _postgres.StartAsync(); await using var db = Db(); await db.Database.MigrateAsync(); }
-    public async ValueTask DisposeAsync() => await _postgres.DisposeAsync();
+    private PostgreSqlContainer? _postgres;
+    private string _connectionString = "";
+    private AppDbContext Db() => new(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(_connectionString, n => n.MapEnum<MemberRole>("member_role").MapEnum<VoteChoice>("vote_choice").MapEnum<ListingState>("listing_state").MapEnum<ReasonTag>("reason_tag").MapEnum<OverrideAction>("override_action")).Options);
+    public async ValueTask InitializeAsync()
+    {
+        _connectionString = Environment.GetEnvironmentVariable("HOUSE_CONSENSUS_TEST_DATABASE_URL") ?? "";
+        var externalDatabase = !string.IsNullOrWhiteSpace(_connectionString);
+        if (!externalDatabase)
+        {
+            _postgres = new PostgreSqlBuilder().WithImage("postgres:17-alpine").WithDatabase("hc").WithUsername("hc").WithPassword("hc-test-password").Build();
+            await _postgres.StartAsync();
+            _connectionString = _postgres.GetConnectionString();
+        }
+        if (externalDatabase)
+        {
+            var database = new NpgsqlConnectionStringBuilder(_connectionString).Database;
+            if (string.IsNullOrWhiteSpace(database) || !database.Contains("test", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("External integration database name must contain 'test'.");
+            await using var reset = new NpgsqlConnection(_connectionString);
+            await reset.OpenAsync();
+            await using var command = new NpgsqlCommand("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;", reset);
+            await command.ExecuteNonQueryAsync();
+        }
+        await using var db = Db();
+        await db.Database.MigrateAsync();
+        await db.Database.OpenConnectionAsync();
+        await ((NpgsqlConnection)db.Database.GetDbConnection()).ReloadTypesAsync();
+    }
+    public async ValueTask DisposeAsync()
+    {
+        if (_postgres is not null) await _postgres.DisposeAsync();
+    }
     [Fact]
     public async Task Migration_constraints_vote_history_override_and_archive_round_trip()
     {

@@ -18,9 +18,14 @@ App: `http://127.0.0.1:8080`; Mailpit: `http://127.0.0.1:8025`. The first startu
 ```sh
 docker build -f Dockerfile.test -t house-consensus-test .
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock house-consensus-test
-uv run --project exporter --with pytest --with pytest-asyncio --with 'psycopg[binary]' --with httpx pytest -q tests/exporter
+TEST_DATABASE_URL='postgresql://user:password@host:5434/house_consensus_test' \
+  uv run --project exporter --with pytest --with pytest-asyncio --with 'psycopg[binary]' --with httpx pytest -q tests/exporter
+HOUSE_CONSENSUS_TEST_DATABASE_URL='Host=host;Port=5434;Database=house_consensus_dotnet_test;Username=user;Password=password' \
+  dotnet test HouseConsensus.slnx -c Release
 docker compose -f tests/HouseConsensus.Playwright/compose.e2e.yml up --build --abort-on-container-exit --exit-code-from playwright
 ```
+
+External integration databases are reset by the tests and their names must contain `test`. Never point either variable at a production database. Without the variables, .NET integration tests fall back to Testcontainers.
 
 See `tests/HouseConsensus.Playwright/README.md` and `exporter/README.md`.
 
