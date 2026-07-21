@@ -12,7 +12,7 @@ services:
     volumes:
       - ${HOUSESHOPPING_DB:-../houseshopping/state/house.db}:/data/house.db:ro
       - consensus-media:/data/media
-    command: ["--sqlite", "/data/house.db", "--media-dir", "/data/media"]
+    command: ["--sqlite", "/data/house.db", "--media-dir", "/data/media", "--ensure-schema"]
     depends_on:
       app: { condition: service_healthy }
     networks: [internal]

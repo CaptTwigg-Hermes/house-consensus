@@ -41,6 +41,7 @@ def test_dev_compose_provides_an_explicit_real_house_importer():
     assert "importer:" in compose
     assert "../houseshopping/state/house.db" in compose
     assert "CONSENSUS_DATABASE_URL:" in compose
+    assert '"--ensure-schema"' in compose
     assert "house-consensus-export" in dockerfile
     assert dockerfile.index("COPY src ./src") < dockerfile.index("RUN uv sync")
 

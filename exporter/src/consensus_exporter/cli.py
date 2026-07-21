@@ -25,6 +25,11 @@ def main() -> int:
         "--scope", default=os.getenv("CONSENSUS_SOURCE_SCOPE", "default")
     )
     parser.add_argument("--run-id", default=None)
+    parser.add_argument(
+        "--ensure-schema",
+        action="store_true",
+        help="create exporter-owned tables before importing",
+    )
     args = parser.parse_args()
     if not args.database_url:
         parser.error("--database-url or CONSENSUS_DATABASE_URL is required")
@@ -33,6 +38,7 @@ def main() -> int:
         args.database_url,
         source_scope=args.scope,
         media_cache=MediaCache(args.media_dir),
+        ensure_schema_on_export=args.ensure_schema,
     ).export(cases, run_id=args.run_id or str(uuid.uuid4()))
     print(
         f"exported={result.exported} archived={result.archived} media_cached={result.media_cached} media_errors={result.media_errors}"

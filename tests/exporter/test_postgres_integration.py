@@ -84,3 +84,18 @@ def test_archive_and_reappearance_lifecycle(database_url):
             join listing_export_state s on s.listing_id=l."Id" where l."ExternalId"='two'""").fetchone()
             == (True, "sold")
         )
+
+
+def test_explicit_schema_bootstrap_supports_a_fresh_application_database(database_url):
+    with psycopg.connect(database_url, autocommit=True) as conn:
+        conn.execute("drop schema public cascade")
+        conn.execute("create schema public")
+
+    result = PostgresExporter(database_url, ensure_schema_on_export=True).export(
+        [_case("bootstrap")], run_id="bootstrap-run"
+    )
+
+    assert result.exported == 1
+    with psycopg.connect(database_url) as conn:
+        assert conn.execute("select count(*) from export_runs").fetchone() == (1,)
+        assert conn.execute("select count(*) from listings").fetchone() == (1,)
