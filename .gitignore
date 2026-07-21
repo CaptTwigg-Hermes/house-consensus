@@ -16,3 +16,4 @@ backups/
 .pytest_cache/
 *.pyc
 core
+.artifacts/

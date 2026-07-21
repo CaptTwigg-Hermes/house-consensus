@@ -108,7 +108,28 @@ public sealed class I18n
         ["Location"] = ("Location", "Beliggenhed"),
         ["Noise"] = ("Noise", "Støj"),
         ["Price"] = ("Price", "Pris"),
-        ["Other"] = ("Other", "Andet")
+        ["Other"] = ("Other", "Andet"),
+        ["KeyFacts"] = ("Key facts", "Nøgletal"),
+        ["LivingArea"] = ("living", "bolig"),
+        ["LotArea"] = ("lot", "grund"),
+        ["Rooms"] = ("rooms", "rum"),
+        ["YearBuilt"] = ("built", "bygget"),
+        ["Bathrooms"] = ("baths", "bad"),
+        ["Energy"] = ("energy", "energi"),
+        ["Quiet"] = ("Quiet", "Stille"),
+        ["OneFloor"] = ("One floor", "Ét plan"),
+        ["PhotoOf"] = ("Photo of", "Foto af"),
+        ["ConsensusShort"] = ("Match", "Match"),
+        ["FamilyFitSignals"] = ("Family fit signals", "Familiematch"),
+        ["SeparateEntrance"] = ("Separate entrance", "Separat indgang"),
+        ["SecondKitchen"] = ("Second kitchen", "Ekstra køkken"),
+        ["GroundFloorBedroom"] = ("Ground-floor bedroom", "Soveværelse i stueplan"),
+        ["Buildable"] = ("buildable", "byggeret"),
+        ["BrowseIntro"] = ("Compare the homes that made it through screening.", "Sammenlign boligerne, der kom gennem screeningen."),
+        ["Homes"] = ("Homes", "Boliger"),
+        ["SearchCity"] = ("Search city or municipality", "Søg by eller kommune"),
+        ["Search"] = ("Search", "Søg"),
+        ["Close"] = ("Close", "Luk")
     };
     public string this[string key] => Text.TryGetValue(key, out var value) ? (CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "da" ? value.Da : value.En) : key;
     public string Enum(Enum value) => this[value.ToString()];

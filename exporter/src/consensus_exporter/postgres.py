@@ -29,6 +29,50 @@ def _confidence(value: str | None) -> float | None:
     return {"high": 1.0, "medium": 0.66, "low": 0.33}.get(value or "")
 
 
+def _first(data: dict, *keys: str):
+    return next((data[key] for key in keys if data.get(key) not in (None, "")), None)
+
+
+def _integer(data: dict, *keys: str) -> int | None:
+    value = _first(data, *keys)
+    try:
+        return int(round(float(value))) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _boolean(data: dict, *keys: str) -> bool | None:
+    value = _first(data, *keys)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.lower() in {"true", "false"}:
+        return value.lower() == "true"
+    return None
+
+
+def _card_facts(case: ExportCase) -> tuple:
+    raw = case.raw
+    energy = _first(raw, "energy_label", "energyLabel")
+    noise = _first(raw, "noise_status")
+    return (
+        _first(raw, "preview_image"),
+        _integer(raw, "housing_area_m2", "housingArea"),
+        _integer(raw, "garden_size_m2", "lotArea"),
+        _integer(raw, "rooms", "numberOfRooms"),
+        _integer(raw, "year_built", "yearBuilt"),
+        _integer(raw, "numberOfBathrooms", "vision_bathroom_count"),
+        _integer(raw, "vision_bedroom_count"),
+        _integer(raw, "number_of_floors", "numberOfFloors"),
+        str(energy).upper() if energy else None,
+        noise == "quiet" if noise is not None else None,
+        _integer(raw, "buildable_headroom_m2"),
+        _boolean(raw, "vision_ground_floor_bedroom"),
+        _boolean(raw, "vision_separate_entrance"),
+        _boolean(raw, "vision_second_kitchen"),
+        _integer(raw, "vision_privacy_score"),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ExportResult:
     exported: int
@@ -86,8 +130,12 @@ class PostgresExporter:
                 listing_id = conn.execute(
                     """INSERT INTO listings AS current
                     ("Id","ExternalId","Address","City","Price","FamilyFitScore","State","AiAssessed",
-                     "AiConfidence","AiEvidence","ModelVersion","RuleVersion","SourceUrl","ImportedAt","ArchivedAt")
-                    VALUES (%s,%s,%s,%s,%s,%s,%s::listing_state,%s,%s,%s,%s,%s,%s,%s,%s)
+                     "AiConfidence","AiEvidence","ModelVersion","RuleVersion","SourceUrl","ImportedAt","ArchivedAt",
+                     "PreviewImageUrl","LivingArea","LotArea","Rooms","YearBuilt","Bathrooms","Bedrooms","Floors",
+                     "EnergyLabel","Quiet","BuildableHeadroom","GroundFloorBedroom","SeparateEntrance",
+                     "SecondKitchen","PrivacyScore")
+                    VALUES (%s,%s,%s,%s,%s,%s,%s::listing_state,%s,%s,%s,%s,%s,%s,%s,%s,
+                            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT("ExternalId") DO UPDATE SET
                      "Address"=excluded."Address","City"=excluded."City","Price"=excluded."Price",
                      "FamilyFitScore"=excluded."FamilyFitScore",
@@ -101,7 +149,15 @@ class PostgresExporter:
                      "AiAssessed"=excluded."AiAssessed","AiConfidence"=excluded."AiConfidence",
                      "AiEvidence"=excluded."AiEvidence","ModelVersion"=excluded."ModelVersion",
                      "RuleVersion"=excluded."RuleVersion","SourceUrl"=excluded."SourceUrl",
-                     "ImportedAt"=excluded."ImportedAt","ArchivedAt"=excluded."ArchivedAt"
+                     "ImportedAt"=excluded."ImportedAt","ArchivedAt"=excluded."ArchivedAt",
+                     "PreviewImageUrl"=excluded."PreviewImageUrl","LivingArea"=excluded."LivingArea",
+                     "LotArea"=excluded."LotArea","Rooms"=excluded."Rooms","YearBuilt"=excluded."YearBuilt",
+                     "Bathrooms"=excluded."Bathrooms","Bedrooms"=excluded."Bedrooms","Floors"=excluded."Floors",
+                     "EnergyLabel"=excluded."EnergyLabel","Quiet"=excluded."Quiet",
+                     "BuildableHeadroom"=excluded."BuildableHeadroom",
+                     "GroundFloorBedroom"=excluded."GroundFloorBedroom",
+                     "SeparateEntrance"=excluded."SeparateEntrance","SecondKitchen"=excluded."SecondKitchen",
+                     "PrivacyScore"=excluded."PrivacyScore"
                     RETURNING "Id"
                     """,
                     (
@@ -122,6 +178,7 @@ class PostgresExporter:
                         case.source_url,
                         fetched_at,
                         fetched_at if case.archive_reason else None,
+                        *_card_facts(case),
                     ),
                 ).fetchone()[0]
                 conn.execute(

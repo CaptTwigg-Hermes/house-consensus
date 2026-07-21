@@ -3,20 +3,48 @@
 @inject I18n L
 @inject IJSRuntime JS
 <PageTitle>@L["Browse"] · @L["AppName"]</PageTitle>
-<header class="page-head"><div><p class="eyebrow">@L["Browse"]</p><h1>@L["Browse"]</h1></div></header>
-<section class="filter-card">
-    <div class="filter-title"><strong>@L["Filters"]</strong><button data-testid="filter-clear" class="text-btn" @onclick="Clear">@L["Clear"]</button></div>
-    <div class="filters"><label>@L["City"]<input data-testid="filter-city" @bind="city" /></label><label>@L["MinPrice"]<input data-testid="filter-price-min" type="number" min="0" step="100000" @bind="minPrice" /></label><label>@L["MaxPrice"]<input data-testid="filter-price-max" type="number" min="0" step="100000" @bind="maxPrice" /></label><button data-testid="filter-apply" class="btn primary" @onclick="Load">@L["ApplyFilters"]</button></div>
+<header class="page-head browse-head">
+    <div><p class="eyebrow">@L["Browse"]</p><h1>@L["Browse"]</h1><p>@L["BrowseIntro"]</p></div>
+    @if (items is not null) { <span class="count" aria-label="@L["Homes"]">@items.Count</span> }
+</header>
+<section class="browse-toolbar" aria-label="@L["Filters"]">
+    <form class="browse-search" @onsubmit="Apply" @onsubmit:preventDefault>
+        <label class="sr-only" for="browse-city">@L["City"]</label>
+        <span aria-hidden="true">⌕</span>
+        <input id="browse-city" data-testid="filter-city" placeholder="@L["SearchCity"]" @bind="city" />
+        <button type="submit" class="search-submit">@L["Search"]</button>
+    </form>
+    <div class="toolbar-actions">
+        <div class="view-toggle compact" role="group"><button class="@(view == "list" ? "active" : "")" @onclick="ShowList">☷ <span>@L["List"]</span></button><button class="@(view == "map" ? "active" : "")" @onclick="ShowMap">⌖ <span>@L["Map"]</span></button></div>
+        <button type="button" data-testid="filter-open" class="filter-open" @onclick="OpenFilters">@L["Filters"]@if (ActiveRangeCount > 0) { <b>@ActiveRangeCount</b> }</button>
+    </div>
 </section>
-<div class="view-toggle" role="group"><button class="@(view == "list" ? "active" : "")" @onclick="ShowList">☷ @L["List"]</button><button class="@(view == "map" ? "active" : "")" @onclick="ShowMap">⌖ @L["Map"]</button></div>
+<div class="filter-backdrop @(filtersOpen ? "open" : "")" @onclick="CloseFilters">
+    <section class="filter-drawer" role="dialog" aria-modal="true" aria-label="@L["Filters"]" @onclick:stopPropagation>
+        <div class="drawer-handle" aria-hidden="true"></div>
+        <div class="filter-title"><div><p class="eyebrow">@L["Browse"]</p><strong>@L["Filters"]</strong></div><button type="button" class="drawer-close" aria-label="@L["Close"]" @onclick="CloseFilters">×</button></div>
+        <div class="filters">
+            <label>@L["MinPrice"]<input data-testid="filter-price-min" type="number" min="0" step="100000" inputmode="numeric" @bind="minPrice" /></label>
+            <label>@L["MaxPrice"]<input data-testid="filter-price-max" type="number" min="0" step="100000" inputmode="numeric" @bind="maxPrice" /></label>
+        </div>
+        <div class="drawer-actions"><button type="button" data-testid="filter-clear" class="btn ghost" @onclick="Clear">@L["Clear"]</button><button type="button" data-testid="filter-apply" class="btn primary" @onclick="Apply">@L["ApplyFilters"]</button></div>
+    </section>
+</div>
 @if (items is null) { <Loading /> } else if (items.Count == 0) { <EmptyState Title="@L["NoResults"]" Body="" /> }
-else if (view == "list") { <section class="card-grid">@foreach (var item in items) { <ListingCard Listing="item" /> }</section> }
+else if (view == "list") { <section class="card-grid">@foreach (var item in items) { <ListingCard @key="item.Id" Listing="item" /> }</section> }
 else { <div id="browse-map" data-testid="browse-map" class="map" aria-label="@L["Map"]"></div><p class="map-note">@L["MapNote"]</p> }
 @code {
-    private List<ListingDto>? items; private string city = "", view = "list"; private decimal? minPrice, maxPrice;
+    private List<ListingDto>? items;
+    private string city = "", view = "list";
+    private decimal? minPrice, maxPrice;
+    private bool filtersOpen;
+    private int ActiveRangeCount => (minPrice.HasValue ? 1 : 0) + (maxPrice.HasValue ? 1 : 0);
     protected override async Task OnInitializedAsync() => await Load();
     private async Task Load() { items = await Api.GetAsync<List<ListingDto>>(BrowseQuery.Build(city, minPrice, maxPrice)) ?? []; if (view == "map") await RenderMap(); }
-    private async Task Clear() { city = ""; minPrice = maxPrice = null; await Load(); }
+    private async Task Apply() { await Load(); filtersOpen = false; }
+    private async Task Clear() { city = ""; minPrice = maxPrice = null; await Load(); filtersOpen = false; }
+    private void OpenFilters() => filtersOpen = true;
+    private void CloseFilters() => filtersOpen = false;
     private Task ShowList() => SetView("list");
     private Task ShowMap() => SetView("map");
     private async Task SetView(string value) { view = value; if (value == "map") { await Task.Delay(1); await RenderMap(); } }

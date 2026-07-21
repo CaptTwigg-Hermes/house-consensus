@@ -39,6 +39,21 @@ public sealed class Listing
     public string? ModelVersion { get; set; }
     public string? RuleVersion { get; set; }
     public string? SourceUrl { get; set; }
+    public string? PreviewImageUrl { get; set; }
+    public int? LivingArea { get; set; }
+    public int? LotArea { get; set; }
+    public int? Rooms { get; set; }
+    public int? YearBuilt { get; set; }
+    public int? Bathrooms { get; set; }
+    public int? Bedrooms { get; set; }
+    public int? Floors { get; set; }
+    public string? EnergyLabel { get; set; }
+    public bool? Quiet { get; set; }
+    public int? BuildableHeadroom { get; set; }
+    public bool? GroundFloorBedroom { get; set; }
+    public bool? SeparateEntrance { get; set; }
+    public bool? SecondKitchen { get; set; }
+    public int? PrivacyScore { get; set; }
     public DateTimeOffset ImportedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? ArchivedAt { get; private set; }
     public List<ListingOverride> Overrides { get; } = [];

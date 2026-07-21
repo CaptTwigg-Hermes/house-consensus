@@ -76,6 +76,22 @@ public sealed class ClientUiTests
             Assert.Contains($"data-testid=\"{testId}\"", sources, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void House_cards_surface_photos_property_facts_and_fit_signals()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var card = File.ReadAllText(Path.Combine(root, "src/Client/Components/ListingCard.razor"))
+            + File.ReadAllText(Path.Combine(root, "src/Client/Components/PropertyFacts.razor"));
+        var detail = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Detail.razor"));
+        var css = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/css/app.css"));
+
+        Assert.Contains("card-image", card, StringComparison.Ordinal);
+        Assert.Contains("property-facts", card, StringComparison.Ordinal);
+        Assert.Contains("fit-signals", card, StringComparison.Ordinal);
+        Assert.Contains("detail-cover", detail, StringComparison.Ordinal);
+        Assert.Contains("aspect-ratio: 3/2", css, StringComparison.Ordinal);
+    }
+
     private sealed class CaptureHandler : HttpMessageHandler
     {
         public HttpRequestMessage? Request { get; private set; }

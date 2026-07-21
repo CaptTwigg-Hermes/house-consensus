@@ -8,7 +8,20 @@
 @if (listing is null) { <Loading /> } else
 {
     <NavLink class="back-link" href="browse">← @L["Browse"]</NavLink>
+    @if (!string.IsNullOrWhiteSpace(listing.PreviewImageUrl))
+    {
+        <div class="detail-cover"><img src="@listing.PreviewImageUrl" alt="@($"{L["PhotoOf"]} {listing.Address}")" referrerpolicy="no-referrer" /></div>
+    }
     <header class="detail-hero"><div><p class="eyebrow">@listing.City</p><h1>@listing.Address</h1><p class="detail-price">@(listing.Price?.ToString("N0") ?? L["PriceOnRequest"]) @(listing.Price.HasValue ? "kr." : "")</p></div><div class="hero-score"><strong>@Math.Round(listing.FamilyFitScore)</strong><span>@L["FamilyFit"]</span></div></header>
+    <PropertyFacts Listing="listing" />
+    <div class="fit-signals detail-signals">
+        @if (listing.Quiet is true) { <span>@L["Quiet"]</span> }
+        @if (listing.SeparateEntrance is true) { <span>@L["SeparateEntrance"]</span> }
+        @if (listing.SecondKitchen is true) { <span>@L["SecondKitchen"]</span> }
+        @if (listing.GroundFloorBedroom is true) { <span>@L["GroundFloorBedroom"]</span> }
+        @if (listing.PrivacyScore.HasValue) { <span>@L["Privacy"] @listing.PrivacyScore/5</span> }
+        @if (listing.BuildableHeadroom > 0) { <span>+@listing.BuildableHeadroom m² @L["Buildable"]</span> }
+    </div>
     @if (listing.Consensus) { <div class="consensus-banner" data-testid="match-banner">♥ <strong>@L["Consensus"]</strong></div> }
     <section class="detail-grid">
         <article class="panel"><h2>@L["Everyone"]</h2><p data-testid="unanimity-status">@(listing.Consensus ? L["Consensus"] : L["WaitingForVotes"])</p>@if (listing.Votes.Count == 0) { <p class="muted">@L["NoVotes"]</p> } else { <div class="household-votes">@foreach (var vote in listing.Votes) { <div><span class="avatar">@vote.MemberId.ToString()[..2].ToUpperInvariant()</span><strong>@L.Enum(vote.Choice)</strong><span class="choice @vote.Choice.ToString().ToLowerInvariant()">@(vote.Choice == VoteChoice.Like ? "♥" : vote.Choice == VoteChoice.Dislike ? "×" : "—")</span>@if (vote.Tags.Length > 0) { <small>@string.Join(" · ", vote.Tags.Select(tag => L.Enum(tag)))</small> }</div> }</div> }<VoteButtons ListingId="Id" OnVoted="Load" /></article>

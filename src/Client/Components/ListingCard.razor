@@ -1,9 +1,41 @@
 @inject I18n L
 <article class="listing-card @(Listing.Consensus ? "consensus-card" : "")" data-testid="listing-card" data-listing-id="@Listing.Id" data-price="@Listing.Price">
-    <NavLink class="card-main" href="@($"listing/{Listing.Id}")">
-        <div class="card-top"><span class="score"><strong>@Math.Round(Listing.FamilyFitScore)</strong><small>@L["FamilyFit"]</small></span>@if (Listing.Consensus) { <span class="badge consensus">♥ @L["Consensus"]</span> }</div>
-        <h2>@Listing.Address</h2><p class="muted">@Listing.City</p>
-        <div class="card-meta"><strong>@Price</strong><span class="vote-dots" aria-label="@L["Everyone"]">@foreach (var vote in Listing.Votes) { <i class="@(vote.Choice == VoteChoice.Like ? "like" : "dislike")" title="@L.Enum(vote.Choice)">@(vote.Choice == VoteChoice.Like ? "♥" : "×")</i> }</span></div>
+    <NavLink class="card-main" href="@($"listing/{Listing.Id}")" aria-label="@($"{Listing.Address}, {Price}")">
+        <div class="card-image">
+            @if (!string.IsNullOrWhiteSpace(Listing.PreviewImageUrl))
+            {
+                <img src="@($"/api/listings/{Listing.Id}/image")" alt="@($"{L["PhotoOf"]} {Listing.Address}")" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+            }
+            <div class="image-placeholder" aria-hidden="true"><span>⌂</span></div>
+            <div class="card-image-shade"></div>
+            <span class="score-chip"><strong>@Math.Round(Listing.FamilyFitScore)</strong><small>/100</small></span>
+            <div class="image-badges">
+                @if (Listing.Consensus) { <span class="badge consensus">♥ @L["ConsensusShort"]</span> }
+                @if (Listing.Quiet is true) { <span class="badge quiet">@L["Quiet"]</span> }
+                @if (Listing.Floors == 1) { <span class="badge neutral">@L["OneFloor"]</span> }
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="card-heading">
+                <div><h2>@Listing.Address</h2><p>@Listing.City</p></div>
+                <div class="card-price"><strong>@Price</strong>@if (PricePerArea is not null) { <small>@PricePerArea</small> }</div>
+            </div>
+            <PropertyFacts Listing="Listing" />
+            @if (HasFitSignals)
+            {
+                <div class="fit-signals" aria-label="@L["FamilyFitSignals"]">
+                    @if (Listing.SeparateEntrance is true) { <span>@L["SeparateEntrance"]</span> }
+                    @if (Listing.SecondKitchen is true) { <span>@L["SecondKitchen"]</span> }
+                    @if (Listing.GroundFloorBedroom is true) { <span>@L["GroundFloorBedroom"]</span> }
+                    @if (Listing.PrivacyScore.HasValue) { <span>@L["Privacy"] @Listing.PrivacyScore/5</span> }
+                    @if (Listing.BuildableHeadroom > 0) { <span>+@Listing.BuildableHeadroom m² @L["Buildable"]</span> }
+                </div>
+            }
+            <footer class="card-footer">
+                <span class="vote-dots" aria-label="@L["Everyone"]">@foreach (var vote in Listing.Votes) { <i class="@(vote.Choice == VoteChoice.Like ? "like" : "dislike")" title="@L.Enum(vote.Choice)">@(vote.Choice == VoteChoice.Like ? "♥" : "×")</i> }</span>
+                <span class="detail-link">@L["ViewDetails"] <b aria-hidden="true">→</b></span>
+            </footer>
+        </div>
     </NavLink>
     @if (ShowVoting) { <VoteButtons ListingId="Listing.Id" OnVoted="OnVoted" /> }
 </article>
@@ -12,4 +44,6 @@
     [Parameter] public bool ShowVoting { get; set; }
     [Parameter] public EventCallback OnVoted { get; set; }
     private string Price => Listing.Price.HasValue ? $"{Listing.Price.Value:N0} kr." : L["PriceOnRequest"];
+    private string? PricePerArea => Listing.Price.HasValue && Listing.LivingArea > 0 ? $"{Listing.Price.Value / Listing.LivingArea.Value:N0} kr/m²" : null;
+    private bool HasFitSignals => Listing.SeparateEntrance is true || Listing.SecondKitchen is true || Listing.GroundFloorBedroom is true || Listing.PrivacyScore.HasValue || Listing.BuildableHeadroom > 0;
 }

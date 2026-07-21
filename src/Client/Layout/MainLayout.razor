@@ -7,38 +7,38 @@
 
 <div class="app-frame" data-testid="app-shell">
 <header class="topbar">
-    <NavLink class="brand" href=""><span class="brand-mark small">⌂</span><span>@L["AppName"]</span></NavLink>
+    <NavLink class="brand" href=""><span class="brand-mark small"><AppIcon Name="home" /></span><span>@L["AppName"]</span></NavLink>
     <div class="top-actions">
         <span class="user-email" data-testid="current-user-email">@Auth.User?.Email</span>
         <span class="live-pill @(Live.Connected ? "online" : "")"><i></i>@L["Live"]</span>
         <select class="language" data-testid="language-select" aria-label="@L["Language"]" value="@Auth.User?.Language" @onchange="LanguageChanged">
             <option value="en">EN</option><option value="da">DA</option>
         </select>
-        <button class="icon-btn" title="@L["SignOut"]" @onclick="Logout">↪</button>
+        <button class="icon-btn" title="@L["SignOut"]" aria-label="@L["SignOut"]" @onclick="Logout"><AppIcon Name="logout" /></button>
     </div>
 </header>
 <div class="body-grid">
 <nav class="side-nav" aria-label="@L["Menu"]">
-    <NavLink href="" Match="NavLinkMatch.All"><span>⌂</span>@L["Queue"]</NavLink>
-    <NavLink href="browse"><span>⌕</span>@L["Browse"]</NavLink>
-    <NavLink href="everyone-likes"><span>♥</span>@L["EveryoneLikes"]</NavLink>
-    <NavLink href="my-votes"><span>✓</span>@L["MyVotes"]</NavLink>
+    <NavLink href="" Match="NavLinkMatch.All"><AppIcon Name="home" />@L["Queue"]</NavLink>
+    <NavLink href="browse"><AppIcon Name="search" />@L["Browse"]</NavLink>
+    <NavLink href="everyone-likes"><AppIcon Name="heart" />@L["EveryoneLikes"]</NavLink>
+    <NavLink href="my-votes"><AppIcon Name="check" />@L["MyVotes"]</NavLink>
     @if (Auth.IsOwner)
     {
         <div class="nav-section">@L["Owner"]</div>
-        <NavLink href="owner/review"><span>◈</span>@L["Review"]</NavLink>
-        <NavLink href="owner/feedback"><span>✦</span>@L["Feedback"]</NavLink>
-        <NavLink href="owner/members"><span>♟</span>@L["Members"]</NavLink>
+        <NavLink href="owner/review"><AppIcon Name="review" />@L["Review"]</NavLink>
+        <NavLink href="owner/feedback"><AppIcon Name="spark" />@L["Feedback"]</NavLink>
+        <NavLink href="owner/members"><AppIcon Name="members" />@L["Members"]</NavLink>
     }
 </nav>
 <main class="content">@Body</main>
 </div>
 <nav class="bottom-nav" aria-label="@L["Menu"]">
-    <NavLink href="" Match="NavLinkMatch.All"><span>⌂</span><small>@L["Queue"]</small></NavLink>
-    <NavLink href="browse"><span>⌕</span><small>@L["Browse"]</small></NavLink>
-    <NavLink href="everyone-likes"><span>♥</span><small>@L["EveryoneLikes"]</small></NavLink>
-    <NavLink href="my-votes"><span>✓</span><small>@L["MyVotes"]</small></NavLink>
-    @if (Auth.IsOwner) { <NavLink href="owner/review"><span>◈</span><small>@L["Review"]</small></NavLink> }
+    <NavLink href="" Match="NavLinkMatch.All"><AppIcon Name="home" /><small>@L["Queue"]</small></NavLink>
+    <NavLink href="browse"><AppIcon Name="search" /><small>@L["Browse"]</small></NavLink>
+    <NavLink href="everyone-likes"><AppIcon Name="heart" /><small>@L["EveryoneLikes"]</small></NavLink>
+    <NavLink href="my-votes"><AppIcon Name="check" /><small>@L["MyVotes"]</small></NavLink>
+    @if (Auth.IsOwner) { <NavLink href="owner/review"><AppIcon Name="review" /><small>@L["Review"]</small></NavLink> }
 </nav>
 <FeedbackButton />
 </div>

@@ -20,7 +20,21 @@ public static class E2EDataSeeder
             AiConfidence = 0.91,
             AiEvidence = "E2E active listing",
             ModelVersion = "e2e",
-            RuleVersion = "e2e"
+            RuleVersion = "e2e",
+            PreviewImageUrl = "https://images.example.test/house.webp",
+            LivingArea = 186,
+            LotArea = 920,
+            Rooms = 7,
+            YearBuilt = 1974,
+            Bathrooms = 2,
+            Bedrooms = 4,
+            Floors = 1,
+            EnergyLabel = "C",
+            Quiet = true,
+            BuildableHeadroom = 75,
+            GroundFloorBedroom = true,
+            SeparateEntrance = true,
+            PrivacyScore = 4
         };
         var rejected = new Listing
         {

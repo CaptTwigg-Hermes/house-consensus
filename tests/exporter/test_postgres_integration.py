@@ -99,3 +99,39 @@ def test_explicit_schema_bootstrap_supports_a_fresh_application_database(databas
     with psycopg.connect(database_url) as conn:
         assert conn.execute("select count(*) from export_runs").fetchone() == (1,)
         assert conn.execute("select count(*) from listings").fetchone() == (1,)
+
+
+def test_export_populates_house_card_facts(database_url):
+    case = _case(
+        "card",
+        preview_image="https://images.example.test/house.webp",
+        housing_area_m2=249,
+        garden_size_m2=1563,
+        rooms=8,
+        year_built=1948,
+        numberOfBathrooms=2,
+        vision_bedroom_count=3,
+        number_of_floors=1,
+        energy_label="a2020",
+        noise_status="quiet",
+        buildable_headroom_m2=220,
+        vision_ground_floor_bedroom=True,
+        vision_separate_entrance=True,
+        vision_second_kitchen=True,
+        vision_privacy_score=5,
+    )
+
+    PostgresExporter(database_url).export([case], run_id="card-facts")
+
+    with psycopg.connect(database_url) as conn:
+        actual = conn.execute(
+            '''SELECT "PreviewImageUrl","LivingArea","LotArea","Rooms","YearBuilt",
+                      "Bathrooms","Bedrooms","Floors","EnergyLabel","Quiet",
+                      "BuildableHeadroom","GroundFloorBedroom","SeparateEntrance",
+                      "SecondKitchen","PrivacyScore"
+               FROM listings WHERE "ExternalId"='card' '''
+        ).fetchone()
+    assert actual == (
+        "https://images.example.test/house.webp", 249, 1563, 8, 1948,
+        2, 3, 1, "A2020", True, 220, True, True, True, 5,
+    )
