@@ -25,3 +25,10 @@ def test_e2e_compose_enables_seed_data_and_test_rate_limit():
     assert 'E2E__SeedData: "true"' in compose
     assert 'Auth__MagicRequestPermitLimit: "100"' in compose
     assert 'Auth__MagicConsumePermitLimit: "100"' in compose
+
+
+def test_runtime_image_uses_the_dotnet_builtin_non_root_user():
+    dockerfile = Path("Dockerfile").read_text()
+
+    assert "USER $APP_UID" in dockerfile
+    assert "adduser" not in dockerfile
