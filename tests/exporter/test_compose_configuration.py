@@ -42,6 +42,7 @@ def test_dev_compose_provides_an_explicit_real_house_importer():
     assert "../houseshopping/state/house.db" in compose
     assert "CONSENSUS_DATABASE_URL:" in compose
     assert '"--ensure-schema"' in compose
+    assert '"--skip-media"' in compose
     assert "house-consensus-export" in dockerfile
     assert dockerfile.index("COPY src ./src") < dockerfile.index("RUN uv sync")
 
@@ -54,3 +55,15 @@ def test_windows_import_script_stages_unc_sqlite_on_local_disk():
     assert "Copy-Item" in script
     assert "$env:HOUSESHOPPING_DB" in script
     assert "--profile tools" in script
+
+
+def test_main_compose_uses_external_postgres_5433_for_app_and_importer():
+    base = Path("docker-compose.yml").read_text()
+    dev = Path("docker-compose.dev.yml").read_text()
+    expected = "Host=${POSTGRES_HOST:-192.168.50.2};Port=${POSTGRES_PORT:-5433};Database=${POSTGRES_DB:-house_consensus};Username=${POSTGRES_USER:-house_consensus}"
+
+    assert expected in base
+    assert "host=${POSTGRES_HOST:-192.168.50.2} port=${POSTGRES_PORT:-5433}" in dev
+    assert "dbname=${POSTGRES_DB:-house_consensus} user=${POSTGRES_USER:-house_consensus}" in dev
+    assert "  postgres:\n" not in base
+    assert "postgres-data" not in base

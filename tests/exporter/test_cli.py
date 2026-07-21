@@ -30,3 +30,22 @@ def test_cli_explicitly_enables_schema_bootstrap(monkeypatch, tmp_path):
 
     assert cli.main() == 0
     assert captured["ensure_schema_on_export"] is True
+
+
+def test_cli_can_skip_unused_media_downloads(monkeypatch):
+    captured = {}
+
+    class FakeExporter:
+        def __init__(self, database_url, **kwargs):
+            captured.update(kwargs)
+
+        def export(self, cases, *, run_id):
+            return SimpleNamespace(exported=0, archived=0, media_cached=0, media_errors=0)
+
+    monkeypatch.setattr(cli, "PostgresExporter", FakeExporter)
+    monkeypatch.setattr(cli, "load_sqlite_cases", lambda _: [])
+    monkeypatch.setattr(cli, "MediaCache", lambda _: (_ for _ in ()).throw(AssertionError("media cache created")))
+    monkeypatch.setattr("sys.argv", ["house-consensus-export", "--database-url", "postgresql://example.test/db", "--skip-media"])
+
+    assert cli.main() == 0
+    assert captured["media_cache"] is None

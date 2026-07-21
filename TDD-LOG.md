@@ -20,6 +20,8 @@ The implementation was developed test-first at the source level. RED cases were 
 | 14 | E2E must have deterministic listings and respect the single-household model | guarded E2E seeder, fixed bootstrap owner, serial workers and active-member cleanup | RED: empty Browse and non-unanimous historical members; GREEN: Browse, restore and voting flows |
 | 15 | Repeated browser auth must remain testable without weakening production limits | configurable request/consume permit limits with E2E-only overrides | RED: HTTP 429 during the suite; GREEN: seven sequential browser flows |
 | 16 | Feedback submit must react while the user types | bind textarea on `oninput` | RED: enabled-button timeout after `fill`; GREEN: feedback submit and CSV/JSON export flow |
+| 17 | A fresh application database lacks exporter-owned provenance tables | explicit `--ensure-schema` importer bootstrap | RED: `UndefinedTable: export_runs`; GREEN: fresh PostgreSQL bootstrap integration test |
+| 18 | Compose app and importer must share the external PostgreSQL 5433 database without downloading unused media | external connection settings plus explicit `--skip-media` import mode | RED: Compose still declared bundled PostgreSQL and CLI rejected `--skip-media`; GREEN: 2,743-row real migration and live app health |
 
 Run the full gate on a Docker-enabled host with: `docker build -f Dockerfile.test -t house-consensus-tests . && docker run --rm -v /var/run/docker.sock:/var/run/docker.sock house-consensus-tests`.
 
@@ -29,8 +31,9 @@ Run the full gate on a Docker-enabled host with: `docker build -f Dockerfile.tes
 - Release solution build: **GREEN**, 0 compiler/analyzer errors (the invariant-mode host SDK emitted locale-resource warnings).
 - Unit tests: **GREEN**, 26/26 (including client culture/filter, audited comments, and browser-contract regressions).
 - Hosted WASM Release publish: **GREEN**; static framework, manifest, service worker, and server assembly verified in the publish artifact.
-- Exporter tests: **GREEN**, 14/14 against PostgreSQL 18.4 on the dedicated test instance; Ruff is GREEN.
+- Exporter tests: **GREEN**, 21/21 against PostgreSQL 18.4 on the dedicated test instance; Ruff is GREEN.
 - Houseshopping export-failure isolation: **GREEN**, 3/3 focused tests.
 - TypeScript/Playwright: **GREEN**, typecheck plus 7/7 Chromium flows against the published app, PostgreSQL and Mailpit.
 - PostgreSQL integration tests: **GREEN**, 7/7 using the guarded external test database.
 - Live server health/bootstrap: **GREEN**; migration applied, owner bootstrapped, SPA served, and `/health` returned HTTP 200 `Healthy`.
+- Real migration: **GREEN**; PostgreSQL 18.4 at `192.168.50.2:5433/house_consensus` contains 2,743 listings (148 active, 2,595 filter-rejected), 2,743 provenance rows, and one completed import run.

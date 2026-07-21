@@ -4,7 +4,7 @@ Private invite-only household house-evaluation app. This monorepo contains a .NE
 
 ## Local stack
 
-1. Create an untracked `.env` containing strong `POSTGRES_PASSWORD`, `INITIAL_OWNER_EMAIL`, and `PUBLIC_ORIGIN` values.
+1. Create an untracked `.env` containing strong `POSTGRES_PASSWORD`, `INITIAL_OWNER_EMAIL`, and `PUBLIC_ORIGIN` values. The stack uses the external PostgreSQL database `house_consensus` at `192.168.50.2:5433` by default; override `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, or `POSTGRES_USER` when needed.
 2. Start only on loopback:
 
 ```sh
@@ -31,7 +31,7 @@ See `tests/HouseConsensus.Playwright/README.md` and `exporter/README.md`.
 
 ## Houseshopping integration
 
-The application starts with an empty listing database. Import the real houseshopping SQLite data into the local Compose PostgreSQL database with:
+The application database is external to Compose. Import the real houseshopping SQLite data into the same PostgreSQL database used by the app with:
 
 On Windows/PowerShell, use the wrapper that stages the SQLite file on local disk before mounting it into Docker Desktop (Docker cannot bind-mount a UNC path):
 
@@ -51,4 +51,4 @@ The importer reads `../houseshopping/state/house.db` by default. Pass `-SourceDb
 
 ## Production handoff and backup
 
-Do not deploy this development Compose file. For TrueNAS/Dockge use external PostgreSQL, TLS through Cloudflare Tunnel, platform-managed required secrets, and no public service ports. Production cookies are always Secure. Schedule `scripts/backup-postgres.sh` daily; it makes an AES-256 encrypted dump and keeps 30 days. Keep `BACKUP_PASSPHRASE_FILE` as a protected mounted secret and test restores into a disposable database regularly.
+Do not deploy the loopback development overlay. For TrueNAS/Dockge keep the external PostgreSQL connection, use TLS through Cloudflare Tunnel, platform-managed required secrets, and no public service ports. Production cookies are always Secure. Schedule `scripts/backup-postgres.sh` daily; it makes an AES-256 encrypted dump and keeps 30 days. Keep `BACKUP_PASSPHRASE_FILE` as a protected mounted secret and test restores into a disposable database regularly.

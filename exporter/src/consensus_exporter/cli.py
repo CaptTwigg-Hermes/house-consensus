@@ -30,6 +30,11 @@ def main() -> int:
         action="store_true",
         help="create exporter-owned tables before importing",
     )
+    parser.add_argument(
+        "--skip-media",
+        action="store_true",
+        help="skip optional media downloads",
+    )
     args = parser.parse_args()
     if not args.database_url:
         parser.error("--database-url or CONSENSUS_DATABASE_URL is required")
@@ -37,7 +42,7 @@ def main() -> int:
     result = PostgresExporter(
         args.database_url,
         source_scope=args.scope,
-        media_cache=MediaCache(args.media_dir),
+        media_cache=None if args.skip_media else MediaCache(args.media_dir),
         ensure_schema_on_export=args.ensure_schema,
     ).export(cases, run_id=args.run_id or str(uuid.uuid4()))
     print(
