@@ -43,3 +43,13 @@ def test_dev_compose_provides_an_explicit_real_house_importer():
     assert "CONSENSUS_DATABASE_URL:" in compose
     assert "house-consensus-export" in dockerfile
     assert dockerfile.index("COPY src ./src") < dockerfile.index("RUN uv sync")
+
+
+def test_windows_import_script_stages_unc_sqlite_on_local_disk():
+    script_path = Path("scripts/import-houses.ps1")
+    script = script_path.read_text() if script_path.exists() else ""
+
+    assert "$env:LOCALAPPDATA" in script
+    assert "Copy-Item" in script
+    assert "$env:HOUSESHOPPING_DB" in script
+    assert "--profile tools" in script
