@@ -32,3 +32,14 @@ def test_runtime_image_uses_the_dotnet_builtin_non_root_user():
 
     assert "USER $APP_UID" in dockerfile
     assert "adduser" not in dockerfile
+
+
+def test_dev_compose_provides_an_explicit_real_house_importer():
+    compose = Path("docker-compose.dev.yml").read_text()
+    dockerfile = Path("exporter/Dockerfile").read_text() if Path("exporter/Dockerfile").exists() else ""
+
+    assert "importer:" in compose
+    assert "../houseshopping/state/house.db" in compose
+    assert "CONSENSUS_DATABASE_URL:" in compose
+    assert "house-consensus-export" in dockerfile
+    assert dockerfile.index("COPY src ./src") < dockerfile.index("RUN uv sync")

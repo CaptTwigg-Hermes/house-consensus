@@ -31,7 +31,15 @@ See `tests/HouseConsensus.Playwright/README.md` and `exporter/README.md`.
 
 ## Houseshopping integration
 
-`/workspace/houseshopping` runs `export_consensus` after publish in an isolated subprocess. That stage is non-fatal, logs failure to stderr, and leaves existing alert stdout and pipeline status unchanged.
+The application starts with an empty listing database. Import the real houseshopping SQLite data into the local Compose PostgreSQL database with:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile tools run --rm --build importer
+```
+
+The importer reads `../houseshopping/state/house.db` by default. Set `HOUSESHOPPING_DB` when the SQLite file is elsewhere. Re-running the importer is safe and refreshes listings idempotently.
+
+`/workspace/houseshopping` runs `export_consensus` after publish in an isolated subprocess when `CONSENSUS_EXPORT=1` is configured. That stage is non-fatal, logs failure to stderr, and leaves existing alert stdout and pipeline status unchanged.
 
 ## Production handoff and backup
 

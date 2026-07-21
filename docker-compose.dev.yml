@@ -3,4 +3,18 @@ services:
     ports: ["127.0.0.1:8080:8080"]
   mailpit:
     ports: ["127.0.0.1:8025:8025"]
-
+  importer:
+    profiles: ["tools"]
+    build: ./exporter
+    environment:
+      CONSENSUS_DATABASE_URL: host=postgres port=5432 dbname=house_consensus user=house_consensus password=${POSTGRES_PASSWORD:-local-only-change-me}
+      CONSENSUS_SOURCE_SCOPE: ${CONSENSUS_SOURCE_SCOPE:-greater-copenhagen-v1}
+    volumes:
+      - ${HOUSESHOPPING_DB:-../houseshopping/state/house.db}:/data/house.db:ro
+      - consensus-media:/data/media
+    command: ["--sqlite", "/data/house.db", "--media-dir", "/data/media"]
+    depends_on:
+      app: { condition: service_healthy }
+    networks: [internal]
+volumes:
+  consensus-media:
