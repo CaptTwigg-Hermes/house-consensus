@@ -3,6 +3,7 @@
 from __future__ import annotations
 import hashlib
 import json
+import math
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -55,25 +56,32 @@ def _score_breakdown(data: dict, expected_total: float | None) -> tuple[float | 
     if not isinstance(breakdown, dict):
         return (None,) * 10
 
-    def score(key: str) -> float | None:
-        value = breakdown.get(key)
+    def number(value) -> float | None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
         try:
-            return float(value) if value is not None else None
-        except (TypeError, ValueError):
+            return float(value)
+        except (TypeError, ValueError, OverflowError):
             return None
 
-    scores = tuple(score(key) for key in ("privacy", "kids_space", "garden", "shared_living", "practical"))
-    if any(value is None for value in scores):
+    scores = tuple(number(breakdown.get(key)) for key in ("privacy", "kids_space", "garden", "shared_living", "practical"))
+    if any(value is None or not math.isfinite(value) or not 0 <= value <= 100 for value in scores):
         return (None,) * 10
 
-    weight_data = breakdown.get("weights")
-    if isinstance(weight_data, dict):
-        try:
-            weights = tuple(float(weight_data[key]) for key in ("privacy", "kids_space", "garden", "shared_living", "practical"))
-        except (KeyError, TypeError, ValueError):
-            weights = ()
-    else:
+    if "weights" not in breakdown:
         weights = ()
+    else:
+        weight_data = breakdown["weights"]
+        if not isinstance(weight_data, dict):
+            return (None,) * 10
+        try:
+            raw_weights = tuple(weight_data[key] for key in ("privacy", "kids_space", "garden", "shared_living", "practical"))
+        except KeyError:
+            return (None,) * 10
+        parsed_weights = tuple(number(value) for value in raw_weights)
+        if any(value is None for value in parsed_weights):
+            return (None,) * 10
+        weights = parsed_weights
     if not weights:
         vision_keys = (
             "vision_separate_entrance", "vision_second_kitchen", "vision_internal_connection",
@@ -84,8 +92,15 @@ def _score_breakdown(data: dict, expected_total: float | None) -> tuple[float | 
         weights = (30.0, 20.0, 20.0, 15.0, 15.0) if any(data.get(key) is not None for key in vision_keys) else (
             0.0, 20.0 / 0.7, 20.0 / 0.7, 15.0 / 0.7, 15.0 / 0.7,
         )
+    if any(not math.isfinite(weight) or weight < 0 for weight in weights):
+        return (None,) * 10
+    if not math.isclose(sum(weights), 100.0, abs_tol=0.01):
+        return (None,) * 10
+    expected = number(expected_total)
+    if expected is None or not math.isfinite(expected) or not 0 <= expected <= 100:
+        return (None,) * 10
     calculated_total = round(sum(value * weight / 100 for value, weight in zip(scores, weights)), 1)
-    if expected_total is None or abs(calculated_total - float(expected_total)) > 0.11:
+    if abs(calculated_total - expected) > 0.11:
         return (None,) * 10
     return (*scores, *weights)
 
