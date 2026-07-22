@@ -96,11 +96,20 @@ class ExportCase:
         ).lower()
         confidence = _first(merged, "ai_confidence", "vision_confidence")
         confidence = str(confidence).lower() if confidence is not None else None
-        # houseshopping's real vision result says whether the layout supports
-        # multiple generations. False is therefore the rejection decision.
-        multigen_layout = _bool(merged.get("vision_multigen_layout"))
-        if not ai_decision and multigen_layout is not None:
-            ai_decision = "pass" if multigen_layout else "reject"
+        # Houseshopping emits strong|possible|unlikely. Keep legacy booleans
+        # for backwards compatibility, but only high-confidence "unlikely"
+        # is an AI rejection.
+        multigen_value = merged.get("vision_multigen_layout")
+        if not ai_decision and isinstance(multigen_value, str):
+            normalized_layout = multigen_value.strip().lower()
+            if normalized_layout == "unlikely":
+                ai_decision = "reject"
+            elif normalized_layout in {"strong", "possible"}:
+                ai_decision = "pass"
+        if not ai_decision:
+            legacy_multigen = _bool(multigen_value)
+            if legacy_multigen is not None:
+                ai_decision = "pass" if legacy_multigen else "reject"
         failed = ai_raw_status in _AI_FAILURES
         assessed = not failed and bool(
             ai_decision
@@ -154,11 +163,8 @@ class ExportCase:
                 "evidence": evidence_value or {},
             }
 
-        coordinates = (
-            merged.get("coordinates")
-            if isinstance(merged.get("coordinates"), dict)
-            else {}
-        )
+        coordinate_value = merged.get("_coordinates") or merged.get("coordinates")
+        coordinates = coordinate_value if isinstance(coordinate_value, dict) else {}
         return cls(
             source_id=source_id,
             address=_first(merged, "address")

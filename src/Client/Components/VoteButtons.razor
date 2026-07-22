@@ -1,24 +1,47 @@
 @inject I18n L
 @inject ApiClient Api
 
-@if (!choosing)
+<div class="vote-actions">
+    <button data-testid="vote-interested" class="btn like" disabled="@busy" @onclick="() => Choose(VoteChoice.Like)">♥ @L["Like"]</button>
+    <button data-testid="vote-reject" class="btn dislike" disabled="@busy" @onclick="() => Choose(VoteChoice.Dislike)">× @L["Dislike"]</button>
+</div>
+@if (choosing)
 {
-    <div class="vote-actions"><button data-testid="vote-interested" class="btn like" @onclick="() => Choose(VoteChoice.Like)">♥ @L["Like"]</button><button data-testid="vote-reject" class="btn dislike" @onclick="() => Choose(VoteChoice.Dislike)">× @L["Dislike"]</button><button class="btn ghost" disabled="@busy" @onclick="Clear">@L["ClearVote"]</button></div>
-}
-else
-{
-    <div class="vote-panel">
-        <strong>@L["ReasonOptional"]</strong>
-        <div class="tag-grid">@foreach (var tag in Enum.GetValues<ReasonTag>()) { <button class="tag @(tags.Contains(tag) ? "selected" : "")" @onclick="() => Toggle(tag)">@L.Enum(tag)</button> }</div>
-        <div class="vote-actions"><button class="btn @(@choice == VoteChoice.Like ? "like" : "dislike")" disabled="@busy" @onclick="Save">@L["SaveVote"]</button><button class="btn ghost" @onclick="() => choosing = false">@L["Cancel"]</button></div>
+    <div class="sheet-backdrop open" @onclick="Cancel">
+        <section class="vote-note-sheet" data-testid="vote-note-sheet" role="dialog" aria-modal="true" aria-labelledby="vote-note-title" @onclick:stopPropagation>
+            <div class="drawer-handle" aria-hidden="true"></div>
+            <h2 id="vote-note-title">@(choice == VoteChoice.Like ? L["Like"] : L["Dislike"])</h2>
+            <p class="muted">@L["ReasonOptional"]</p>
+            <div class="tag-grid">@foreach (var tag in Enum.GetValues<ReasonTag>()) { <button type="button" class="tag @(tags.Contains(tag) ? "selected" : "")" @onclick="() => Toggle(tag)">@L.Enum(tag)</button> }</div>
+            <label class="vote-note-label" for="vote-note">@L["VoteNote"]</label>
+            <textarea id="vote-note" data-testid="vote-note" maxlength="2000" rows="4" placeholder="@L["VoteNotePlaceholder"]" @bind="note"></textarea>
+            <div class="sheet-actions">
+                <button type="button" class="btn @(choice == VoteChoice.Like ? "like" : "dislike")" disabled="@busy" @onclick="() => Save(note)">@L["SaveVote"]</button>
+                <button type="button" data-testid="vote-skip-comment" class="btn ghost" disabled="@busy" @onclick="() => Save(null)">@L["SkipComment"]</button>
+                <button type="button" class="text-btn" disabled="@busy" @onclick="Cancel">@L["Cancel"]</button>
+            </div>
+        </section>
     </div>
 }
 @code {
     [Parameter] public Guid ListingId { get; set; }
     [Parameter] public EventCallback OnVoted { get; set; }
-    private bool choosing, busy; private VoteChoice choice; private readonly HashSet<ReasonTag> tags = [];
-    private void Choose(VoteChoice value) { choice = value; choosing = true; tags.Clear(); }
+    private bool choosing, busy;
+    private VoteChoice choice;
+    private string note = "";
+    private readonly HashSet<ReasonTag> tags = [];
+    private void Choose(VoteChoice value) { choice = value; choosing = true; tags.Clear(); note = ""; }
     private void Toggle(ReasonTag tag) { if (!tags.Add(tag)) tags.Remove(tag); }
-    private async Task Save() { busy = true; try { await Api.Vote(ListingId, choice, tags.ToArray()); choosing = false; await OnVoted.InvokeAsync(); } finally { busy = false; } }
-    private async Task Clear() { busy = true; try { using var response = await Api.ClearVote(ListingId); await ApiClient.EnsureSuccess(response); await OnVoted.InvokeAsync(); } finally { busy = false; } }
+    private void Cancel() { if (!busy) choosing = false; }
+    private async Task Save(string? value)
+    {
+        busy = true;
+        try
+        {
+            await Api.Vote(ListingId, choice, tags.ToArray(), value);
+            choosing = false;
+            await OnVoted.InvokeAsync();
+        }
+        finally { busy = false; }
+    }
 }

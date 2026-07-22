@@ -15,6 +15,10 @@ test('Browse applies price filters and renders the filtered homes on the map', a
   await page.getByRole('button', { name: /map|kort/i }).click();
   await expect(page.getByTestId('browse-map')).toBeVisible();
   await expect(page.getByTestId('browse-map')).toHaveClass(/leaflet-container/);
+  const marker = page.locator('.leaflet-marker-icon').first();
+  await expect(marker).toBeVisible();
+  await marker.click();
+  await expect(page.locator('.leaflet-popup .map-popup.rich')).toContainText('/100');
   await page.getByTestId('filter-open').click();
   await page.getByTestId('filter-clear').click();
   await expect(page.getByTestId('filter-price-max')).toHaveValue('');
@@ -51,4 +55,19 @@ test('Mobile browse keeps controls compact and opens filters in a bottom drawer'
   await page.getByTestId('filter-open').click();
   await expect(page.getByTestId('filter-price-max')).toBeVisible();
   await expect(page.locator('.filter-drawer')).toBeVisible();
+});
+
+
+test('Browse persists applied parity filters independently', async ({ page, mailpit }, testInfo) => {
+  await requestMagicLink(page, mailpit, identity(testInfo, 'owner'));
+  await page.goto('/browse');
+  await page.getByTestId('filter-open').click();
+  await page.getByTestId('filter-preferred').click();
+  await page.getByTestId('filter-apply').click();
+  await page.reload();
+  await page.getByTestId('filter-open').click();
+  await expect(page.getByTestId('filter-preferred')).toHaveClass(/selected/);
+  const keys = await page.evaluate(() => Object.keys(localStorage));
+  expect(keys).toContain('hc.filters.browse');
+  expect(keys).not.toContain('hc.filters.myvotes');
 });

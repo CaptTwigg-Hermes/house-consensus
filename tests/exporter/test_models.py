@@ -50,7 +50,7 @@ def test_raw_case_not_in_matches_is_still_exported_as_non_ai_rejected():
 def test_real_vision_fields_and_string_booleans_are_interpreted_semantically():
     rejected = ExportCase.from_records(
         {"caseID": "real-1"},
-        {"id": "real-1", "non_ai_passed": "true", "vision_multigen_layout": "false", "vision_confidence": "HIGH"},
+        {"id": "real-1", "non_ai_passed": "true", "vision_multigen_layout": "unlikely", "vision_confidence": "HIGH"},
     )
     assert rejected.non_ai_passed is True
     assert rejected.ai_status == "rejected"
@@ -58,8 +58,16 @@ def test_real_vision_fields_and_string_booleans_are_interpreted_semantically():
 
     filtered = ExportCase.from_records(
         {"caseID": "real-2"},
-        {"id": "real-2", "non_ai_passed": "false", "vision_multigen_layout": "true", "vision_confidence": "high"},
+        {"id": "real-2", "non_ai_passed": "false", "vision_multigen_layout": "strong", "vision_confidence": "high"},
     )
     assert filtered.non_ai_passed is False
     assert filtered.ai_status == "assessed"
     assert filtered.pipeline_decision == "filter_rejected"
+
+
+def test_match_coordinates_are_normalized_from_pipeline_private_field():
+    case = ExportCase.from_records(
+        {"caseID": "coords"},
+        {"id": "coords", "_coordinates": {"lat": 55.7, "lon": 12.4}},
+    )
+    assert (case.latitude, case.longitude) == (55.7, 12.4)

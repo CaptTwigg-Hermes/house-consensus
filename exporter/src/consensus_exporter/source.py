@@ -50,5 +50,6 @@ def load_sqlite_cases(path: str | Path) -> list[ExportCase]:
     for fallback_id, payload in rows:
         raw = json.loads(payload)
         raw.setdefault("caseID", fallback_id)
-        result.append(ExportCase.from_records(raw, matches.get(fallback_id)))
+        case = ExportCase.from_records(raw, matches.get(fallback_id))
+        result.append(case)
     return result

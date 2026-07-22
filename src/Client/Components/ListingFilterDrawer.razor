@@ -1,0 +1,63 @@
+@inject I18n L
+<section class="filter-drawer" role="dialog" aria-modal="true" aria-label="@L["Filters"]" @onclick:stopPropagation>
+    <div class="drawer-handle" aria-hidden="true"></div>
+    <div class="filter-title"><div><p class="eyebrow">@L["Browse"]</p><strong>@L["Filters"]</strong></div><button type="button" class="drawer-close" aria-label="@L["Close"]" @onclick="OnClose">×</button></div>
+    <label class="filter-search">@L["Search"]<input placeholder="@L["SearchHomes"]" @bind="State.Search" /></label>
+    <div class="quick-filters" aria-label="@L["QuickFilters"]">
+        <button type="button" data-testid="filter-preferred" class="tag @(State.OnlyPreferred ? "selected" : "")" @onclick="() => State.OnlyPreferred = !State.OnlyPreferred">@L["Preferred"]</button>
+        <button type="button" data-testid="filter-quiet" class="tag @(State.OnlyQuiet ? "selected" : "")" @onclick="() => State.OnlyQuiet = !State.OnlyQuiet">@L["Quiet"]</button>
+        <button type="button" data-testid="filter-new" class="tag @(State.OnlyNew ? "selected" : "")" @onclick="() => State.OnlyNew = !State.OnlyNew">@L["New"]</button>
+        <button type="button" data-testid="filter-ai-plan" class="tag @(State.OnlyAiAssessed ? "selected" : "")" @onclick="() => State.OnlyAiAssessed = !State.OnlyAiAssessed">@L["AiPlan"]</button>
+    </div>
+    <label>@L["Sort"]<select @bind="State.Sort">@foreach (var value in Enum.GetValues<ListingSort>()) { <option value="@value">@L[value.ToString()]</option> }</select></label>
+    <div class="filter-sections">
+        <fieldset><legend>@L["PriceAndSize"]</legend><div class="filters two-col">
+            <label>@L["MinPrice"]<input data-testid="filter-price-min" type="number" step="100000" @bind="State.MinPrice" /></label>
+            <label>@L["MaxPrice"]<input data-testid="filter-price-max" type="number" step="100000" @bind="State.MaxPrice" /></label>
+            <label>@L["MinArea"]<input data-testid="filter-area-min" type="number" step="10" @bind="State.MinArea" /></label>
+            <label>@L["MaxArea"]<input type="number" step="10" @bind="State.MaxArea" /></label>
+            <label>@L["MinGarden"]<input data-testid="filter-garden-min" type="number" step="50" @bind="State.MinGarden" /></label>
+            <label>@L["MinRooms"]<input data-testid="filter-rooms-min" type="number" step="1" @bind="State.MinRooms" /></label>
+        </div></fieldset>
+        <fieldset><legend>@L["Property"]</legend><div class="filters two-col">
+            <label>@L["MinYear"]<input data-testid="filter-year-min" type="number" step="5" @bind="State.MinYear" /></label>
+            <label>@L["MaxYear"]<input type="number" step="5" @bind="State.MaxYear" /></label>
+            <label>@L["MaxExpense"]<input data-testid="filter-expense-max" type="number" step="500" @bind="State.MaxMonthlyExpense" /></label>
+            <label>@L["MaxDays"]<input data-testid="filter-days-max" type="number" step="1" @bind="State.MaxDaysOnMarket" /></label>
+            <label>@L["MaxCommute"]<input data-testid="filter-commute-max" type="number" step="5" @bind="State.MaxCommute" /></label>
+        </div></fieldset>
+        <fieldset><legend>@L["FamilyFit"]</legend><div class="filters two-col">
+            <label>@L["MinScore"]<input data-testid="filter-score-min" type="number" min="0" max="100" step="5" @bind="State.MinFamilyScore" /></label>
+            <label>@L["MinPrivacy"]<input data-testid="filter-privacy-min" type="number" min="1" max="5" @bind="State.MinPrivacy" /></label>
+            <label>@L["MaxPrivacy"]<input type="number" min="1" max="5" @bind="State.MaxPrivacy" /></label>
+        </div></fieldset>
+        @Category(L["Municipality"], nameof(State.Municipalities), State.Municipalities, Options(x => x.City))
+        @Category(L["MultiGen"], nameof(State.MultigenFits), State.MultigenFits, Options(x => x.MultigenFit))
+        @Category(L["Buildable"], nameof(State.BuildableStatuses), State.BuildableStatuses, Options(x => x.BuildableStatus))
+        @Category(L["Condition"], nameof(State.Conditions), State.Conditions, Options(x => x.Condition))
+        @Category(L["Energy"], nameof(State.EnergyLabels), State.EnergyLabels, Options(x => x.EnergyLabel))
+        @Category(L["GardenOrientation"], nameof(State.GardenOrientations), State.GardenOrientations, Options(x => x.GardenOrientation))
+        @Category(L["FamilyUnits"], nameof(State.FamilyUnits), State.FamilyUnits, Options(x => x.FamilyUnits))
+    </div>
+    <div class="drawer-actions"><button type="button" data-testid="filter-clear" class="btn ghost" @onclick="OnClear">@L["Clear"]</button><button type="button" data-testid="filter-apply" class="btn primary" @onclick="OnApply">@L["ShowCount"].Replace("{0}", PreviewCount.ToString())</button></div>
+</section>
+@code {
+    [Parameter, EditorRequired] public ListingFilterState State { get; set; } = new();
+    [Parameter, EditorRequired] public IReadOnlyList<ListingDto> Items { get; set; } = [];
+    [Parameter] public int PreviewCount { get; set; }
+    [Parameter] public EventCallback OnApply { get; set; }
+    [Parameter] public EventCallback OnClear { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    private IReadOnlyList<string> Options(Func<ListingDto, string?> selector) => Items.Select(selector).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToList();
+    private void Toggle(List<string> selected, string value) { var found = selected.FirstOrDefault(x => x.Equals(value, StringComparison.OrdinalIgnoreCase)); if (found is null) selected.Add(value); else selected.Remove(found); }
+    private RenderFragment Category(string label, string name, List<string> selected, IReadOnlyList<string> values) => builder =>
+    {
+        if (values.Count == 0) return;
+        builder.OpenElement(0, "fieldset"); builder.AddAttribute(1, "data-filter-group", name);
+        builder.OpenElement(2, "legend"); builder.AddContent(3, label); builder.CloseElement();
+        builder.OpenElement(4, "div"); builder.AddAttribute(5, "class", "filter-chips");
+        var seq = 6;
+        foreach (var value in values) { builder.OpenElement(seq++, "button"); builder.AddAttribute(seq++, "type", "button"); builder.AddAttribute(seq++, "class", selected.Contains(value, StringComparer.OrdinalIgnoreCase) ? "tag selected" : "tag"); builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => Toggle(selected, value))); builder.AddContent(seq++, value); builder.CloseElement(); }
+        builder.CloseElement(); builder.CloseElement();
+    };
+}

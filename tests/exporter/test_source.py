@@ -4,7 +4,7 @@ from pathlib import Path
 from consensus_exporter.source import load_sqlite_cases
 
 
-def test_sqlite_source_returns_all_cases_and_merges_optional_match(tmp_path: Path):
+def test_sqlite_source_returns_passes_plus_non_persisted_hard_reject_tombstones(tmp_path: Path):
     db = tmp_path / "house.db"
     conn = sqlite3.connect(db)
     conn.execute("create table cases (id text primary key, payload text)")

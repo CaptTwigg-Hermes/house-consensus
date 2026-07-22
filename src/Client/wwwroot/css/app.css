@@ -13,6 +13,10 @@
   --sage: #dce8d7;
   --red: #a9473f;
   --shadow: 0 12px 40px rgba(24, 57, 47, .1);
+  --surface: var(--paper);
+  --surface-2: var(--cream);
+  --border: var(--line);
+  --accent: var(--coral);
   font-family: 'DM Sans', system-ui, sans-serif;
   color: var(--ink);
   background: var(--cream);
@@ -1153,7 +1157,7 @@ body {
   top: 14px;
   left: 14px;
   min-width: 54px;
-  height: 34px;
+  height: 30px;
   display: flex;
   align-items: baseline;
   justify-content: center;
@@ -1538,6 +1542,9 @@ body {
   box-shadow: 0 -14px 50px rgba(11, 25, 21, .2);
   transform: translateY(16px);
   transition: transform .18s ease;
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .filter-backdrop.open .filter-drawer {
@@ -1581,6 +1588,11 @@ body {
   grid-template-columns: 1fr 2fr;
   gap: 9px;
   margin-top: 18px;
+  position: sticky;
+  bottom: -1px;
+  padding-top: 10px;
+  background: var(--paper);
+  z-index: 2;
 }
 
 button:focus-visible,
@@ -1714,3 +1726,15 @@ textarea:focus-visible {
     font-size: 1rem;
   }
 }
+
+.sheet-backdrop{position:fixed;inset:0;z-index:80;background:rgba(15,23,42,.52);display:flex;align-items:flex-end;justify-content:center;padding:0}
+.vote-note-sheet{width:min(100%,560px);background:var(--surface);border-radius:20px 20px 0 0;padding:12px 18px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -12px 40px rgba(0,0,0,.22)}
+.vote-note-sheet h2{margin:4px 0}.vote-note-label{display:block;font-weight:700;margin:14px 0 6px}.vote-note-sheet textarea{width:100%;resize:vertical}.sheet-actions{display:grid;gap:8px;margin-top:14px}.sheet-actions .text-btn{justify-self:center}
+
+.filter-sections{display:grid;gap:14px;overflow:auto;padding-bottom:92px}.filter-sections fieldset{border:0;border-top:1px solid var(--border);margin:0;padding:14px 0 0}.filter-sections legend{font-weight:800;padding:0 8px 0 0}.two-col{grid-template-columns:repeat(2,minmax(0,1fr))}.filter-chips{display:flex;gap:7px;flex-wrap:wrap}.filter-search{display:grid;gap:6px;margin-bottom:12px}.filter-drawer select{width:100%}
+.my-vote-grid{display:grid;gap:14px}.my-vote-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:var(--shadow)}.my-vote-main{display:grid;grid-template-columns:132px 1fr;color:inherit;text-decoration:none}.my-vote-image{position:relative;aspect-ratio:3/2;min-height:100%;background:var(--surface-2)}.my-vote-image img{width:100%;height:100%;object-fit:cover}.my-vote-image .choice{position:absolute;left:8px;bottom:8px}.my-vote-copy{position:relative;padding:12px;display:grid;gap:5px}.my-vote-copy h2,.my-vote-copy p{margin:0}.mini-score{position:absolute;right:10px;top:10px;background:var(--accent);color:#fff;border-radius:9px;padding:3px 7px;font-weight:800}.vote-note-excerpt{color:var(--muted);font-style:italic;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.my-vote-actions,.edit-vote-note{border-top:1px solid var(--border);padding:10px 12px}.my-vote-actions{display:grid;gap:8px}.edit-vote-note textarea{width:100%}.map-popup.rich{display:grid;grid-template-columns:76px 1fr;gap:9px;align-items:center;text-decoration:none;color:inherit}.map-popup.rich img{width:76px;height:58px;object-fit:cover;border-radius:7px}.map-popup.rich span{display:grid;gap:4px}
+@media(max-width:520px){.my-vote-main{grid-template-columns:112px 1fr}.two-col{grid-template-columns:1fr 1fr}}
+
+.learning-panel{display:grid;gap:16px;margin-bottom:28px;padding:18px;background:var(--surface);border:1px solid var(--border);border-radius:18px}.learning-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.learning-head h2,.learning-head p{margin:0}.learning-list{display:grid;gap:12px}.learning-card{border:1px solid var(--border);border-radius:14px;padding:14px;display:grid;gap:11px}.learning-card.active{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}.learning-card header{display:flex;justify-content:space-between}.learning-card header div{display:flex;gap:8px;align-items:center}.learning-card .status{font-size:.75rem;padding:2px 7px;border-radius:99px;background:var(--surface-2)}.learning-impact{display:grid;grid-template-columns:1fr 1fr;gap:8px}.learning-impact span{padding:10px;border-radius:10px;background:var(--surface-2)}.learning-impact strong{display:block;font-size:1.3rem}.learning-card pre{white-space:pre-wrap;word-break:break-word;background:var(--surface-2);padding:10px;border-radius:9px}.learning-actions{display:flex;gap:8px}.feedback-section>h2{margin-top:0}@media(max-width:620px){.learning-head{display:grid}.learning-head .btn{width:100%}}
+
+.quick-filters{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 12px}

@@ -1,12 +1,74 @@
 @page "/my-votes"
 @inject ApiClient Api
 @inject I18n L
+@inject IJSRuntime JS
 <PageTitle>@L["MyVotes"] · @L["AppName"]</PageTitle>
-<header class="page-head"><div><p class="eyebrow">@L["VoteHistory"]</p><h1>@L["MyVotes"]</h1><p>@L["MyVotesIntro"]</p></div></header>
-@if (rows is null) { <Loading /> } else if (rows.Count == 0) { <EmptyState Title="@L["NoVotes"]" Body="@L["MyVotesIntro"]" /> }
-else { <section class="vote-history">@foreach (var row in rows) { <article><NavLink href="@($"listing/{row.Listing.Id}")"><div><h2>@row.Listing.Address</h2><p>@row.Listing.City · @row.Vote.CreatedAt.ToLocalTime().ToString("d")</p></div><span class="choice @row.Vote.Choice.ToString().ToLowerInvariant()">@(row.Vote.Choice == VoteChoice.Like ? "♥" : "×") @L.Enum(row.Vote.Choice)</span></NavLink></article> }</section> }
+<header class="page-head"><div><p class="eyebrow">@L["VoteHistory"]</p><h1>@L["MyVotes"]</h1><p>@L["MyVotesIntro"]</p></div>@if (rows is not null) { <span class="count">@Visible.Count</span> }</header>
+<section class="browse-toolbar my-votes-toolbar">
+    <form class="browse-search" @onsubmit="SaveState" @onsubmit:preventDefault><span>⌕</span><input placeholder="@L["SearchHomes"]" @bind="applied.Search" /><button class="search-submit">@L["Search"]</button></form>
+    <div class="toolbar-actions"><div class="filter-chips"><button data-testid="my-votes-like-filter" class="tag @(applied.VoteChoices.Contains(VoteChoice.Like) ? "selected" : "")" @onclick="() => ToggleVote(VoteChoice.Like)">♥ @L["Like"]</button><button data-testid="my-votes-dislike-filter" class="tag @(applied.VoteChoices.Contains(VoteChoice.Dislike) ? "selected" : "")" @onclick="() => ToggleVote(VoteChoice.Dislike)">× @L["Dislike"]</button></div><button class="filter-open" @onclick="OpenFilters">@L["Filters"]@if (applied.ActiveCount > 0) { <b>@applied.ActiveCount</b> }</button></div>
+</section>
+@if (filtersOpen && rows is not null)
+{
+    <div class="filter-backdrop open" @onclick="CloseFilters"><ListingFilterDrawer State="draft" Items="@rows.Select(x => x.Listing).ToList()" PreviewCount="@PreviewCount" OnApply="ApplyFilters" OnClear="ClearFilters" OnClose="CloseFilters" /></div>
+}
+@if (rows is null) { <Loading /> }
+else if (Visible.Count == 0) { <EmptyState Title="@L["NoVotes"]" Body="@L["MyVotesIntro"]" /> }
+else
+{
+    <section class="my-vote-grid">@foreach (var row in Visible)
+    {
+        <article class="my-vote-card" data-testid="my-vote-card">
+            <NavLink href="@($"listing/{row.Listing.Id}")" class="my-vote-main">
+                <div class="my-vote-image"><img src="@($"/api/listings/{row.Listing.Id}/image")" alt="@($"{L["PhotoOf"]} {row.Listing.Address}")" loading="lazy" /><span class="choice @row.Vote.Choice.ToString().ToLowerInvariant()">@(row.Vote.Choice == VoteChoice.Like ? "♥" : "×") @L.Enum(row.Vote.Choice)</span></div>
+                <div class="my-vote-copy"><div><h2>@row.Listing.Address</h2><p>@row.Listing.City</p></div><strong>@(row.Listing.Price?.ToString("N0") ?? L["PriceOnRequest"]) @(row.Listing.Price.HasValue ? "kr." : "")</strong><span class="mini-score">@Math.Round(row.Listing.FamilyFitScore)/100</span>@if (!string.IsNullOrWhiteSpace(row.Vote.Note)) { <p class="vote-note-excerpt">“@row.Vote.Note”</p> }</div>
+            </NavLink>
+            @if (editingId == row.Listing.Id)
+            {
+                <div class="edit-vote-note"><textarea data-testid="my-vote-edit-note" maxlength="2000" rows="3" @bind="editNote"></textarea><div class="vote-actions"><button data-testid="my-vote-save-note" class="btn primary" @onclick="() => SaveNote(row.Listing.Id)">@L["Save"]</button><button class="btn ghost" @onclick="CancelEdit">@L["Cancel"]</button></div></div>
+            }
+            else
+            {
+                <div class="my-vote-actions"><button data-testid="my-vote-edit-note-open" class="text-btn" @onclick="() => StartEdit(row)">@L["EditNote"]</button><strong>@L["ChangeVote"]</strong><VoteButtons ListingId="row.Listing.Id" OnVoted="Load" /></div>
+            }
+        </article>
+    }</section>
+}
 @code {
+    private const string StateKey = "hc.filters.myvotes";
     private List<Row>? rows;
-    protected override async Task OnInitializedAsync() { var votes = await Api.GetAsync<List<VoteDto>>("api/listings/my-votes") ?? []; var loaded = await Task.WhenAll(votes.Select(async v => (Vote: v, Listing: await Api.GetAsync<ListingDto>($"api/listings/{v.ListingId}")))); rows = loaded.Where(x => x.Listing is not null).Select(x => new Row(x.Vote, x.Listing!)).ToList(); }
+    private ListingFilterState applied = new(), draft = new();
+    private bool filtersOpen, stateLoaded;
+    private Guid? editingId;
+    private string editNote = "";
+    private IReadOnlyList<Row> Visible
+    {
+        get
+        {
+            if (rows is null) return [];
+            var byId = rows.ToDictionary(x => x.Listing.Id);
+            return applied.Apply(rows.Where(x => applied.VoteChoices.Contains(x.Vote.Choice)).Select(x => x.Listing)).Select(x => byId[x.Id]).ToList();
+        }
+    }
+    private int PreviewCount => rows is null ? 0 : draft.Apply(rows.Where(x => draft.VoteChoices.Contains(x.Vote.Choice)).Select(x => x.Listing)).Count;
+    protected override async Task OnInitializedAsync() => await Load();
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || stateLoaded) return;
+        stateLoaded = true;
+        applied = await JS.InvokeAsync<ListingFilterState?>("hc.loadState", StateKey) ?? new();
+        if (applied.VoteChoices.Count == 0) applied.VoteChoices = [VoteChoice.Like, VoteChoice.Dislike];
+        draft = applied.Clone(); StateHasChanged();
+    }
+    private async Task Load() { var votes = await Api.GetAsync<List<VoteDto>>("api/listings/my-votes") ?? []; var loaded = await Task.WhenAll(votes.Select(async v => new Row(v, (await Api.GetAsync<ListingDto>($"api/listings/{v.ListingId}"))!))); rows = loaded.Where(x => x.Listing is not null).ToList(); }
+    private void OpenFilters() { draft = applied.Clone(); filtersOpen = true; }
+    private void CloseFilters() => filtersOpen = false;
+    private async Task ApplyFilters() { applied = draft.Clone(); filtersOpen = false; await SaveState(); }
+    private async Task ClearFilters() { applied = draft = new(); await SaveState(); }
+    private async Task ToggleVote(VoteChoice choice) { if (!applied.VoteChoices.Remove(choice)) applied.VoteChoices.Add(choice); await SaveState(); }
+    private async Task SaveState() => await JS.InvokeVoidAsync("hc.saveState", StateKey, applied);
+    private void StartEdit(Row row) { editingId = row.Listing.Id; editNote = row.Vote.Note ?? ""; }
+    private void CancelEdit() { editingId = null; editNote = ""; }
+    private async Task SaveNote(Guid listingId) { using var response = await Api.EditVoteNote(listingId, editNote); await ApiClient.EnsureSuccess(response); CancelEdit(); await Load(); }
     private sealed record Row(VoteDto Vote, ListingDto Listing);
 }

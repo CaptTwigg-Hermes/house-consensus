@@ -44,7 +44,20 @@ public static class E2EDataSeeder
             KidsSpaceWeight = 20,
             GardenWeight = 20,
             SharedLivingWeight = 15,
-            PracticalWeight = 15
+            PracticalWeight = 15,
+            Latitude = 55.6761,
+            Longitude = 12.5683,
+            PostalCode = "2100",
+            Preferred = true,
+            IsNew = true,
+            FamilyUnits = "two_family",
+            MonthlyExpense = 4_500,
+            DaysOnMarket = 12,
+            CommuteMinutes = 20,
+            BuildableStatus = "expand",
+            Condition = "good",
+            GardenOrientation = "southwest",
+            MultigenFit = "strong"
         };
         var rejected = new Listing
         {
@@ -57,7 +70,15 @@ public static class E2EDataSeeder
             AiConfidence = 0.95,
             AiEvidence = "E2E rejected listing",
             ModelVersion = "e2e",
-            RuleVersion = "e2e"
+            RuleVersion = "e2e",
+            Latitude = 55.6419,
+            Longitude = 12.0878,
+            PostalCode = "4000",
+            Preferred = false,
+            IsNew = false,
+            FamilyUnits = "two_family",
+            Condition = "poor",
+            MultigenFit = "unlikely"
         };
         rejected.ApplyImportDecision(true);
         db.Listings.AddRange(active, rejected);

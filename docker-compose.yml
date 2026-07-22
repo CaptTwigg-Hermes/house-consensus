@@ -9,6 +9,10 @@ services:
       PublicOrigin: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN must be set}
       Email__SmtpHost: mailpit
       Email__SmtpPort: "1025"
+      AiLearning__BaseUrl: ${AI_LEARNING_BASE_URL:-}
+      AiLearning__Model: ${AI_LEARNING_MODEL:-gemma4:12b}
+      AiLearning__AllowInsecureHttp: ${AI_LEARNING_ALLOW_INSECURE_HTTP:-false}
+      AiLearning__ApiKey: ${AI_LEARNING_API_KEY:-}
       ASPNETCORE_URLS: http://+:8080
     expose: ["8080"]
     networks: [internal]

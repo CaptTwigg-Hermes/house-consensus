@@ -4,9 +4,39 @@
 <PageTitle>@L["Feedback"] · @L["AppName"]</PageTitle>
 <OwnerOnly>
 <header class="page-head"><div><p class="eyebrow">@L["Owner"]</p><h1>@L["Feedback"]</h1><p>@L["FeedbackIntro"]</p></div><div class="export-actions"><a data-testid="feedback-export-csv" class="btn ghost" href="api/feedback/export.csv" download>↓ @L["ExportCsv"]</a><a data-testid="feedback-export-json" class="btn ghost" href="api/feedback/export.json" download>↓ @L["ExportJson"]</a></div></header>
+<section class="learning-panel">
+    <div class="learning-head"><div><p class="eyebrow">@L["AiLearning"]</p><h2>@L["AiRuleProposals"]</h2><p>@L["AiLearningIntro"]</p></div><button data-testid="learning-generate" class="btn primary" disabled="@busy" @onclick="Generate">@(busy ? L["Working"] : L["GenerateProposal"])</button></div>
+    @if (!string.IsNullOrWhiteSpace(notice)) { <p class="notice">@notice</p> }
+    @if (!string.IsNullOrWhiteSpace(error)) { <p class="error">@error</p> }
+    @if (proposals is null) { <Loading /> }
+    else if (proposals.Count == 0) { <p class="muted">@L["NoAiProposals"]</p> }
+    else { <div class="learning-list">@foreach (var proposal in proposals) {
+        <article class="learning-card @(proposal.IsActive ? "active" : "")">
+            <header><div><strong>@proposal.VersionLabel</strong><span class="status">@(proposal.IsActive ? L["Active"] : proposal.Status)</span></div><small>@proposal.CreatedAt.ToLocalTime().ToString("g")</small></header>
+            <h3>@proposal.Summary</h3>
+            <div data-testid="learning-impact" class="learning-impact"><span><strong>@proposal.Impact.Changed</strong>@L["WouldChange"]</span><span><strong>@proposal.Impact.WouldReject</strong>@L["WouldReject"]</span><span><strong>@proposal.Impact.WouldRestore</strong>@L["WouldRestore"]</span><span><strong>@proposal.Impact.Eligible</strong>@L["EligibleHomes"]</span></div>
+            <details><summary>@L["ProposedRule"]</summary><pre>@proposal.RuleJson</pre></details>
+            <details><summary>@L["SupportingNotes"] (@proposal.SourceNotes.Count)</summary><ul>@foreach (var note in proposal.SourceNotes) { <li><b>@L.Enum(note.Choice)</b>@if (note.Tags.Length > 0) { <small> · @string.Join(", ", note.Tags.Select(tag => L.Enum(tag)))</small> } — @note.Note <NavLink href="@($"listing/{note.ListingId}")">@L["Details"]</NavLink></li> }</ul></details>
+            @if (proposal.Status == "draft") { <div class="learning-actions"><button data-testid="learning-approve" class="btn primary" disabled="@busy" @onclick="() => Approve(proposal.Id)">@L["Approve"]</button><button data-testid="learning-reject" class="btn ghost" disabled="@busy" @onclick="() => Reject(proposal.Id)">@L["Reject"]</button></div> }
+            @if (proposal.IsActive) { <button data-testid="learning-deactivate" class="btn ghost" disabled="@busy" @onclick="() => Deactivate(proposal.Id)">@L["DeactivateRule"]</button> }
+        </article> }</div> }
+</section>
+<section class="feedback-section"><h2>@L["GeneralFeedback"]</h2>
 @if (items is null) { <Loading /> } else if (items.Count == 0) { <EmptyState Title="@L["NoFeedback"]" Body="@L["FeedbackIntro"]" /> } else
-{
-    <section class="feedback-list">@foreach (var item in items) { <article class="feedback-item @(item.ReviewedAt.HasValue ? "reviewed" : "")"><div class="feedback-status">@(item.ReviewedAt.HasValue ? "✓" : "•")</div><div><p>@item.Body</p><small>@item.CreatedAt.ToLocalTime().ToString("g") @if (item.ListingId.HasValue) { <NavLink href="@($"listing/{item.ListingId}")"> · @L["Details"]</NavLink> }</small></div><button class="btn ghost" @onclick="() => Toggle(item)">@(item.ReviewedAt.HasValue ? L["Unreview"] : L["MarkReviewed"])</button></article> }</section>
-}
+{ <section class="feedback-list">@foreach (var item in items) { <article class="feedback-item @(item.ReviewedAt.HasValue ? "reviewed" : "")"><div class="feedback-status">@(item.ReviewedAt.HasValue ? "✓" : "•")</div><div><p>@item.Body</p><small>@item.CreatedAt.ToLocalTime().ToString("g") @if (item.ListingId.HasValue) { <NavLink href="@($"listing/{item.ListingId}")"> · @L["Details"]</NavLink> }</small></div><button class="btn ghost" @onclick="() => Toggle(item)">@(item.ReviewedAt.HasValue ? L["Unreview"] : L["MarkReviewed"])</button></article> }</section> }
+</section>
 </OwnerOnly>
-@code { private List<FeedbackDto>? items; protected override async Task OnInitializedAsync() => await Load(); private async Task Load() => items = await Api.GetAsync<List<FeedbackDto>>("api/feedback") ?? []; private async Task Toggle(FeedbackDto item) { using var r = await Api.ReviewFeedback(item.Id, !item.ReviewedAt.HasValue); await ApiClient.EnsureSuccess(r); await Load(); } }
+@code {
+    private List<FeedbackDto>? items;
+    private List<AiRuleProposalDto>? proposals;
+    private bool busy;
+    private string? notice, error;
+    protected override async Task OnInitializedAsync() => await Load();
+    private async Task Load() { items = await Api.GetAsync<List<FeedbackDto>>("api/feedback") ?? []; proposals = await Api.GetAsync<List<AiRuleProposalDto>>("api/learning/proposals") ?? []; }
+    private async Task Toggle(FeedbackDto item) { using var response = await Api.ReviewFeedback(item.Id, !item.ReviewedAt.HasValue); await ApiClient.EnsureSuccess(response); await Load(); }
+    private async Task Generate() { busy = true; error = notice = null; try { var created = await Api.GenerateAiRuleProposal(); notice = created is null ? null : L["ProposalReady"]; await Load(); } catch (Exception ex) { error = ex.Message; } finally { busy = false; } }
+    private Task Approve(Guid id) => Change(id, "approve");
+    private Task Reject(Guid id) => Change(id, "reject");
+    private Task Deactivate(Guid id) => Change(id, "deactivate");
+    private async Task Change(Guid id, string action) { busy = true; error = notice = null; try { using var response = await Api.ChangeAiRuleProposal(id, action); await ApiClient.EnsureSuccess(response); notice = L["ProposalUpdated"]; await Load(); } catch (Exception ex) { error = ex.Message; } finally { busy = false; } }
+}

@@ -9,7 +9,9 @@ test('two members voting Like produces a live unanimous match', async ({ browser
     expect(href).toBeTruthy();
     await Promise.all([household.ownerPage.goto(href!), household.memberPage.goto(href!)]);
     await household.ownerPage.getByTestId('vote-interested').click();
+    await household.ownerPage.getByTestId('vote-note').fill('Private note visible to the household');
     await household.ownerPage.getByRole('button', { name: /save vote|gem stemme/i }).click();
+    await expect(household.memberPage.getByText('Private note visible to the household')).toBeVisible();
     await expect(household.ownerPage.getByTestId('unanimity-status')).toContainText(/waiting|venter/i);
     await household.memberPage.getByTestId('vote-interested').click();
     await household.memberPage.getByRole('button', { name: /save vote|gem stemme/i }).click();

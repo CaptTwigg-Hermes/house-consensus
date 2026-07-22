@@ -13,11 +13,23 @@ public sealed class ConsensusTests
     }
     [Fact] public void Empty_household_never_has_consensus() => Assert.False(ConsensusRules.HasConsensus([], []));
     [Fact]
-    public void Clearing_a_vote_is_an_immutable_not_voted_history_event()
+    public void Vote_note_is_optional_editable_and_audited()
     {
-        var member = Guid.NewGuid(); var house = Guid.NewGuid(); var at = DateTimeOffset.UtcNow;
-        var history = new[] { new Vote { Id = 1, ListingId = house, MemberId = member, Choice = VoteChoice.Like, CreatedAt = at }, new Vote { Id = 2, ListingId = house, MemberId = member, Choice = VoteChoice.NotVoted, CreatedAt = at.AddSeconds(1) } };
-        Assert.Equal(2, history.Length); Assert.Equal(VoteChoice.NotVoted, ConsensusRules.LatestVotes(history)[member].Choice); Assert.False(ConsensusRules.HasConsensus([member], history));
+        var member = Guid.NewGuid(); var at = DateTimeOffset.UtcNow;
+        var vote = new Vote(Guid.NewGuid(), member, VoteChoice.Like, [], " first reason ", at);
+        Assert.Equal("first reason", vote.Note);
+        vote.EditNote(member, "better reason", at.AddSeconds(1));
+        Assert.Equal("better reason", vote.Note);
+        Assert.Single(vote.NoteRevisions);
+        Assert.Equal("first reason", vote.NoteRevisions[0].PreviousNote);
+        Assert.Throws<DomainException>(() => vote.EditNote(Guid.NewGuid(), "tamper", at.AddSeconds(2)));
+    }
+    [Fact]
+    public void Vote_note_may_be_skipped_but_cannot_exceed_limit()
+    {
+        var member = Guid.NewGuid();
+        Assert.Null(new Vote(Guid.NewGuid(), member, VoteChoice.Dislike, [], null, DateTimeOffset.UtcNow).Note);
+        Assert.Throws<DomainException>(() => new Vote(Guid.NewGuid(), member, VoteChoice.Like, [], new string('x', 2001), DateTimeOffset.UtcNow));
     }
     [Fact]
     public void Deactivation_and_reactivation_recalculate_from_history()
@@ -43,6 +55,32 @@ public sealed class ListingTests
     public void Queue_eligibility_follows_state(ListingState state, bool expected)
     { var l = new Listing { ExternalId = "x", Address = "a" }; if (state == ListingState.AiRejected) l.ApplyImportDecision(true); else if (state == ListingState.ManuallyRejected) l.ApplyOverride(OverrideAction.Reject, Guid.NewGuid(), null, DateTimeOffset.UtcNow); else if (state == ListingState.Restored) l.ApplyOverride(OverrideAction.Restore, Guid.NewGuid(), null, DateTimeOffset.UtcNow); else if (state == ListingState.Archived) l.Archive(DateTimeOffset.UtcNow); Assert.Equal(expected, l.IsQueueEligible); }
 }
+public sealed class AiLearningRuleTests
+{
+    private const string Rule = """{"combinator":"all","conditions":[{"field":"condition","operator":"eq","value":"poor"}]}""";
+    [Theory]
+    [InlineData("{\"combinator\":\"xor\",\"conditions\":[{\"field\":\"condition\",\"operator\":\"eq\",\"value\":\"poor\"}]}")]
+    [InlineData("{\"combinator\":\"all\",\"conditions\":[{\"field\":\"privacy_score\",\"operator\":\"lt\",\"value\":\"low\"}]}")]
+    [InlineData("{\"combinator\":\"all\",\"conditions\":[{\"field\":\"separate_entrance\",\"operator\":\"contains\",\"value\":true}]}")]
+    public void Invalid_rule_shape_or_types_are_rejected(string rule) => Assert.Throws<DomainException>(() => AiLearningRules.Validate(rule));
+
+    [Fact]
+    public void Approved_rule_rejects_only_high_confidence_unvoted_unoverridden_match()
+    {
+        var match = new Listing { ExternalId = "match", Address = "A", Condition = "poor", AiConfidence = 1.0 };
+        Assert.True(AiLearningRules.Apply(match, false, "feedback-v1", Rule));
+        Assert.Equal(ListingState.AiRejected, match.State);
+        Assert.Equal("feedback-v1", match.LearningRuleVersion);
+
+        var voted = new Listing { ExternalId = "voted", Address = "B", Condition = "poor", AiConfidence = 1.0 };
+        Assert.False(AiLearningRules.Apply(voted, true, "feedback-v1", Rule));
+        var medium = new Listing { ExternalId = "medium", Address = "C", Condition = "poor", AiConfidence = .66 };
+        Assert.False(AiLearningRules.Apply(medium, false, "feedback-v1", Rule));
+        var mismatch = new Listing { ExternalId = "mismatch", Address = "D", Condition = "good", AiConfidence = 1.0 };
+        Assert.False(AiLearningRules.Apply(mismatch, false, "feedback-v1", Rule));
+    }
+}
+
 public sealed class CommentTests
 {
     [Fact]

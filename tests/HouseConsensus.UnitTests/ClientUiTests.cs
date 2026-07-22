@@ -68,12 +68,90 @@ public sealed class ClientUiTests
         var sources = string.Join("\n", new[]
         {
             "src/Client/Components/ListingCard.razor", "src/Client/Components/VoteButtons.razor",
+            "src/Client/Components/ListingFilterDrawer.razor",
             "src/Client/Pages/Browse.razor", "src/Client/Pages/Detail.razor",
             "src/Client/Pages/Owner/Review.razor", "src/Client/Components/FeedbackButton.razor",
             "src/Client/Pages/Owner/Feedback.razor"
         }.Select(path => File.ReadAllText(Path.Combine(root, path))));
         foreach (var testId in new[] { "listing-card", "vote-interested", "filter-price-max", "filter-apply", "browse-map", "unanimity-status", "match-banner", "restore-listing", "feedback-message", "feedback-success", "feedback-export-csv", "feedback-export-json" })
             Assert.Contains($"data-testid=\"{testId}\"", sources, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Voting_uses_optional_note_sheet_and_has_no_clear_action()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var vote = File.ReadAllText(Path.Combine(root, "src/Client/Components/VoteButtons.razor"));
+        var api = File.ReadAllText(Path.Combine(root, "src/Client/Services/ApiClient.cs"));
+        var program = File.ReadAllText(Path.Combine(root, "src/Server/Program.cs"));
+        Assert.Contains("vote-note-sheet", vote, StringComparison.Ordinal);
+        Assert.Contains("vote-note", vote, StringComparison.Ordinal);
+        Assert.Contains("vote-skip-comment", vote, StringComparison.Ordinal);
+        Assert.DoesNotContain("ClearVote", vote, StringComparison.Ordinal);
+        Assert.DoesNotContain("ClearVote", api, StringComparison.Ordinal);
+        Assert.DoesNotContain("listings.MapDelete", program, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Vote_api_rejects_legacy_clear_choice()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var program = File.ReadAllText(Path.Combine(root, "src/Server/Program.cs"));
+        Assert.Contains("request.Choice == VoteChoice.NotVoted", program, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Owner_review_queries_only_unresolved_ai_rejections()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var program = File.ReadAllText(Path.Combine(root, "src/Server/Program.cs"));
+        var reviewQuery = program[(program.IndexOf("review.MapGet", StringComparison.Ordinal))..program.IndexOf("review.MapPost", StringComparison.Ordinal)];
+        Assert.Contains("x.State == ListingState.AiRejected", reviewQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("FilterRejected", reviewQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("ManuallyRejected", reviewQuery, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Browse_and_my_votes_share_full_persisted_filter_contract()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var drawer = File.ReadAllText(Path.Combine(root, "src/Client/Components/ListingFilterDrawer.razor"));
+        var browse = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Browse.razor"));
+        var votes = File.ReadAllText(Path.Combine(root, "src/Client/Pages/MyVotes.razor"));
+        var js = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/js/app.js"));
+        foreach (var id in new[] { "filter-area-min", "filter-garden-min", "filter-rooms-min", "filter-year-min", "filter-commute-max", "filter-expense-max", "filter-days-max", "filter-score-min", "filter-privacy-min", "filter-preferred", "filter-quiet", "filter-new", "filter-ai-plan" })
+            Assert.Contains(id, drawer, StringComparison.Ordinal);
+        foreach (var category in new[] { "Municipalities", "MultigenFits", "BuildableStatuses", "Conditions", "EnergyLabels", "GardenOrientations", "FamilyUnits" })
+            Assert.Contains(category, drawer, StringComparison.Ordinal);
+        foreach (var sort in new[] { "GardenHigh", "YearNewest", "CommuteFastest", "NewFirst" }) Assert.Contains(sort, File.ReadAllText(Path.Combine(root, "src/Client/Services/ListingFilterState.cs")), StringComparison.Ordinal);
+        Assert.Contains("hc.filters.browse", browse, StringComparison.Ordinal);
+        Assert.Contains("hc.filters.myvotes", votes, StringComparison.Ordinal);
+        Assert.Contains("saveState", js, StringComparison.Ordinal);
+        Assert.Contains("loadState", js, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Map_uses_imported_coordinates_and_rich_popups_without_browser_geocoding()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var browse = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Browse.razor"));
+        var js = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/js/app.js"));
+        Assert.Contains("x.Latitude.HasValue && x.Longitude.HasValue", browse, StringComparison.Ordinal);
+        Assert.Contains("listing.latitude", js, StringComparison.Ordinal);
+        Assert.Contains("listing.image", js, StringComparison.Ordinal);
+        Assert.Contains("listing.score", js, StringComparison.Ordinal);
+        Assert.DoesNotContain("nominatim", js, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("setTimeout(resolve, 1100)", js, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Owner_feedback_exposes_versioned_ai_rule_proposals_and_impact_actions()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var feedback = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Owner/Feedback.razor"));
+        var program = File.ReadAllText(Path.Combine(root, "src/Server/Program.cs"));
+        foreach (var token in new[] { "learning-generate", "learning-impact", "learning-approve", "learning-reject", "learning-deactivate" }) Assert.Contains(token, feedback, StringComparison.Ordinal);
+        foreach (var endpoint in new[] { "/learning/proposals", "/learning/{id:guid}/approve", "/learning/{id:guid}/reject", "/learning/{id:guid}/deactivate" }) Assert.Contains(endpoint, program, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -115,8 +193,17 @@ public sealed class ClientUiTests
         Assert.Contains("PracticalScore =", seed, StringComparison.Ordinal);
         Assert.Contains("FamilyPrivacyWeight =", seed, StringComparison.Ordinal);
         Assert.Contains("PracticalWeight =", seed, StringComparison.Ordinal);
-        Assert.Contains("height: 34px", css, StringComparison.Ordinal);
+        Assert.Matches(@"\.score-chip\s*\{[^}]*height:\s*30px", css);
         Assert.Contains(".score-chip:focus-within .score-tooltip", css, StringComparison.Ordinal);
+    }
+
+
+    [Fact]
+    public void Browse_field_migration_has_valid_rollback_sql()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var migration = File.ReadAllText(Path.Combine(root, "src/Server/Data/Migrations/202607220002_AddBrowseFields.cs"));
+        Assert.Contains("ALTER TABLE listings DROP COLUMN \"MultigenFit\"", migration, StringComparison.Ordinal);
     }
 
     private sealed class CaptureHandler : HttpMessageHandler

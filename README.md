@@ -15,6 +15,8 @@ App: `http://127.0.0.1:8080`; Mailpit: `http://127.0.0.1:8025`. The first startu
 
 Set `DEBUG_AUTO_LOGIN=true` in `.env` to authenticate automatically as `INITIAL_OWNER_EMAIL` when using `docker-compose.dev.yml`. The flag is wired only into the Development overlay; enabling it in any other ASP.NET environment aborts startup.
 
+Owner-triggered AI learning is disabled until `AI_LEARNING_BASE_URL` is configured. Use an authenticated HTTPS endpoint and optionally `AI_LEARNING_API_KEY`. Plain HTTP is accepted only for loopback, unless the deployment explicitly sets `AI_LEARNING_ALLOW_INSECURE_HTTP=true` for a trusted private network. `AI_LEARNING_MODEL` defaults to `gemma4:12b`.
+
 ## Verification
 
 ```sh

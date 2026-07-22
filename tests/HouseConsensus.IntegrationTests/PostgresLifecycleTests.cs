@@ -1,6 +1,7 @@
 using Xunit;
 using HouseConsensus.Server.Auth;
 using HouseConsensus.Server.Data;
+using HouseConsensus.Server.Learning;
 using HouseConsensus.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -175,14 +176,18 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
         db.AddRange(member, listing);
         await db.SaveChangesAsync(ct);
         var at = DateTimeOffset.UtcNow;
+        var firstVote = new Vote(listing.Id, member.Id, VoteChoice.Dislike, [ReasonTag.Noise, ReasonTag.Price], "too noisy", at);
+        firstVote.EditNote(member.Id, "road noise", at.AddMilliseconds(500));
         db.Votes.AddRange(
-            new Vote { ListingId = listing.Id, MemberId = member.Id, Choice = VoteChoice.Dislike, Tags = [ReasonTag.Noise, ReasonTag.Price], CreatedAt = at },
-            new Vote { ListingId = listing.Id, MemberId = member.Id, Choice = VoteChoice.Like, Tags = [ReasonTag.Garden], CreatedAt = at.AddSeconds(1) });
+            firstVote,
+            new Vote(listing.Id, member.Id, VoteChoice.Like, [ReasonTag.Garden], null, at.AddSeconds(1)));
         await db.SaveChangesAsync(ct);
         db.ChangeTracker.Clear();
 
-        var history = await db.Votes.OrderBy(x => x.CreatedAt).ToListAsync(ct);
+        var history = await db.Votes.Include(x => x.NoteRevisions).OrderBy(x => x.CreatedAt).ToListAsync(ct);
         Assert.Equal([ReasonTag.Noise, ReasonTag.Price], history[0].Tags);
+        Assert.Equal("road noise", history[0].Note);
+        Assert.Equal("too noisy", Assert.Single(history[0].NoteRevisions).PreviousNote);
         Assert.Equal(VoteChoice.Like, ConsensusRules.LatestVotes(history)[member.Id].Choice);
         Assert.True(ConsensusRules.HasConsensus([member.Id], history));
     }
@@ -217,6 +222,303 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Listing_filter_and_map_fields_round_trip_through_PostgreSQL()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+        var listing = new Listing
+        {
+            ExternalId = "filter-map-case", Address = "Map Street 1",
+            Latitude = 55.7, Longitude = 12.4, MonthlyExpense = 5_244,
+            DaysOnMarket = 18, CommuteMinutes = 22,
+            BuildableStatus = "extra_house", Condition = "good",
+            GardenOrientation = "southwest", MultigenFit = "likely",
+            PostalCode = "4000", Preferred = true, IsNew = true, FamilyUnits = "two_family"
+        };
+        db.Listings.Add(listing);
+        await db.SaveChangesAsync(ct);
+        db.ChangeTracker.Clear();
+
+        var saved = await db.Listings.SingleAsync(x => x.ExternalId == "filter-map-case", ct);
+        Assert.Equal(55.7, saved.Latitude);
+        Assert.Equal(12.4, saved.Longitude);
+        Assert.Equal(5_244, saved.MonthlyExpense);
+        Assert.Equal(18, saved.DaysOnMarket);
+        Assert.Equal(22, saved.CommuteMinutes);
+        Assert.Equal("extra_house", saved.BuildableStatus);
+        Assert.Equal("good", saved.Condition);
+        Assert.Equal("southwest", saved.GardenOrientation);
+        Assert.Equal("likely", saved.MultigenFit);
+        Assert.Equal("4000", saved.PostalCode);
+        Assert.True(saved.Preferred);
+        Assert.True(saved.IsNew);
+        Assert.Equal("two_family", saved.FamilyUnits);
+    }
+
+    [Fact]
+    public async Task Ai_rule_proposal_and_learning_rejection_round_trip()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+        var owner = new Member { Email = "learning-owner@example.test", Role = MemberRole.Owner };
+        var listing = new Listing { ExternalId = "learning-case", Address = "Learning 1", Condition = "poor", AiConfidence = 1.0 };
+        db.AddRange(owner, listing);
+        await db.SaveChangesAsync(ct);
+        var proposal = new AiRuleProposal(owner.Id, 1, "Avoid poor condition", """{"combinator":"all","conditions":[{"field":"condition","operator":"eq","value":"poor"}]}""", "[]", """{"eligible":1,"wouldReject":1}""", DateTimeOffset.UtcNow);
+        proposal.Approve(owner.Id, DateTimeOffset.UtcNow);
+        Assert.True(AiLearningRules.Apply(listing, false, proposal.VersionLabel, proposal.RuleJson));
+        db.AiRuleProposals.Add(proposal);
+        await db.SaveChangesAsync(ct);
+        db.ChangeTracker.Clear();
+
+        var saved = await db.AiRuleProposals.SingleAsync(ct);
+        Assert.True(saved.IsActive);
+        Assert.Equal("feedback-v1", (await db.Listings.SingleAsync(x => x.Id == listing.Id, ct)).LearningRuleVersion);
+    }
+
+    [Fact]
+    public async Task Owner_triggered_proposal_previews_and_applies_only_eligible_matches()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+        var owner = new Member { Email = "proposal-owner@example.test", Role = MemberRole.Owner };
+        var source = new Listing { ExternalId = "note-source", Address = "Source", Condition = "poor", AiConfidence = 1.0 };
+        var target = new Listing { ExternalId = "rule-target", Address = "Target", Condition = "poor", AiConfidence = 1.0 };
+        var safe = new Listing { ExternalId = "rule-safe", Address = "Safe", Condition = "good", AiConfidence = 1.0 };
+        var baselineRejected = new Listing { ExternalId = "rule-reconsider", Address = "Reconsider", Condition = "good", AiConfidence = 1.0 };
+        baselineRejected.ApplyImportDecision(true);
+        db.AddRange(owner, source, target, safe, baselineRejected); await db.SaveChangesAsync(ct);
+        db.Votes.Add(new Vote(source.Id, owner.Id, VoteChoice.Dislike, [ReasonTag.Condition], "Too much renovation", DateTimeOffset.UtcNow));
+        await db.SaveChangesAsync(ct);
+        var service = new AiLearningService(db, new FakeRuleGenerator(), TimeProvider.System);
+
+        var proposal = await service.CreateProposalAsync(owner.Id, ct);
+        Assert.Contains("wouldReject", proposal.ImpactPreviewJson, StringComparison.Ordinal);
+        await service.ApproveAsync(proposal.Id, owner.Id, ct);
+
+        Assert.Equal(ListingState.AiRejected, (await db.Listings.FindAsync([target.Id], ct))!.State);
+        Assert.Equal(ListingState.Active, (await db.Listings.FindAsync([safe.Id], ct))!.State);
+        Assert.Equal(ListingState.Active, (await db.Listings.FindAsync([source.Id], ct))!.State);
+        Assert.Equal(ListingState.Active, (await db.Listings.FindAsync([baselineRejected.Id], ct))!.State);
+        Assert.Equal(proposal.VersionLabel, (await db.Listings.FindAsync([baselineRejected.Id], ct))!.LearningRuleVersion);
+
+        var approvedAt = proposal.ReviewedAt;
+        target.ApplyOverride(OverrideAction.Restore, owner.Id, "Owner decision", DateTimeOffset.UtcNow);
+        await db.SaveChangesAsync(ct);
+        await service.DeactivateAsync(proposal.Id, owner.Id, ct);
+        Assert.Equal(ListingState.AiRejected, (await db.Listings.FindAsync([baselineRejected.Id], ct))!.State);
+        Assert.Null((await db.Listings.FindAsync([baselineRejected.Id], ct))!.LearningRuleVersion);
+        Assert.Equal(ListingState.Restored, (await db.Listings.FindAsync([target.Id], ct))!.State);
+        Assert.Null((await db.Listings.FindAsync([target.Id], ct))!.LearningRuleVersion);
+        Assert.Equal(approvedAt, proposal.ReviewedAt);
+        Assert.Equal(["approved", "deactivated"], await db.AiRuleProposalActions.Where(x => x.ProposalId == proposal.Id).OrderBy(x => x.CreatedAt).Select(x => x.Action).ToArrayAsync(ct));
+    }
+
+    [Fact]
+    public async Task Deactivating_a_replacement_reactivates_the_previous_version()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+        var owner = new Member { Email = "versions-owner@example.test", Role = MemberRole.Owner };
+        var source = new Listing { ExternalId = "versions-source", Address = "Source", Condition = "poor", AiConfidence = 1.0 };
+        var target = new Listing { ExternalId = "versions-target", Address = "Target", Condition = "poor", AiConfidence = 1.0 };
+        db.AddRange(owner, source, target); await db.SaveChangesAsync(ct);
+        db.Votes.Add(new Vote(source.Id, owner.Id, VoteChoice.Dislike, [], "Avoid poor condition", DateTimeOffset.UtcNow)); await db.SaveChangesAsync(ct);
+        var service = new AiLearningService(db, new FakeRuleGenerator(), TimeProvider.System);
+
+        var first = await service.CreateProposalAsync(owner.Id, ct); await service.ApproveAsync(first.Id, owner.Id, ct);
+        var second = await service.CreateProposalAsync(owner.Id, ct); await service.ApproveAsync(second.Id, owner.Id, ct);
+        Assert.False(first.IsActive); Assert.True(second.IsActive);
+        Assert.Equal(second.VersionLabel, (await db.Listings.FindAsync([target.Id], ct))!.LearningRuleVersion);
+
+        await service.DeactivateAsync(second.Id, owner.Id, ct);
+
+        Assert.True(first.IsActive); Assert.False(second.IsActive);
+        Assert.Equal(first.VersionLabel, (await db.Listings.FindAsync([target.Id], ct))!.LearningRuleVersion);
+        Assert.Equal(ListingState.AiRejected, (await db.Listings.FindAsync([target.Id], ct))!.State);
+        Assert.Single(await db.AiRuleProposals.Where(x => x.IsActive).ToListAsync(ct));
+    }
+
+    [Fact]
+    public async Task Legacy_cleared_vote_still_protects_listing_from_learning()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+        var owner = new Member { Email = "cleared-owner@example.test", Role = MemberRole.Owner };
+        var source = new Listing { ExternalId = "cleared-source", Address = "Source", Condition = "poor", AiConfidence = 1.0 };
+        var target = new Listing { ExternalId = "cleared-target", Address = "Target", Condition = "poor", AiConfidence = 1.0 };
+        db.AddRange(owner, source, target); await db.SaveChangesAsync(ct);
+        db.Votes.AddRange(
+            new Vote(source.Id, owner.Id, VoteChoice.Dislike, [], "Avoid poor condition", DateTimeOffset.UtcNow),
+            new Vote(target.Id, owner.Id, VoteChoice.Like, [], null, DateTimeOffset.UtcNow.AddMinutes(1)),
+            new Vote(target.Id, owner.Id, VoteChoice.NotVoted, [], null, DateTimeOffset.UtcNow.AddMinutes(2)));
+        await db.SaveChangesAsync(ct);
+        var service = new AiLearningService(db, new FakeRuleGenerator(), TimeProvider.System);
+
+        var proposal = await service.CreateProposalAsync(owner.Id, ct);
+        await service.ApproveAsync(proposal.Id, owner.Id, ct);
+
+        var saved = await db.Listings.FindAsync([target.Id], ct);
+        Assert.Equal(ListingState.Active, saved!.State);
+        Assert.Null(saved.LearningRuleVersion);
+    }
+
+    [Fact]
+    public async Task Ai_rule_approval_rejects_a_stale_impact_preview()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+        var owner = new Member { Email = "stale-owner@example.test", Role = MemberRole.Owner };
+        var source = new Listing { ExternalId = "stale-source", Address = "Source", Condition = "poor", AiConfidence = 1.0 };
+        var target = new Listing { ExternalId = "stale-target", Address = "Target", Condition = "poor", AiConfidence = 1.0 };
+        db.AddRange(owner, source, target); await db.SaveChangesAsync(ct);
+        db.Votes.Add(new Vote(source.Id, owner.Id, VoteChoice.Dislike, [], "Avoid poor condition", DateTimeOffset.UtcNow)); await db.SaveChangesAsync(ct);
+        var service = new AiLearningService(db, new FakeRuleGenerator(), TimeProvider.System);
+        var proposal = await service.CreateProposalAsync(owner.Id, ct);
+        db.Votes.Add(new Vote(target.Id, owner.Id, VoteChoice.Like, [], null, DateTimeOffset.UtcNow)); await db.SaveChangesAsync(ct);
+
+        var error = await Assert.ThrowsAsync<DomainException>(() => service.ApproveAsync(proposal.Id, owner.Id, ct));
+        Assert.Contains("stale", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Ai_rule_approval_waits_for_concurrent_vote_and_rechecks_eligibility()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        Guid targetId;
+        Guid ownerId;
+        Guid proposalId;
+        await using (var setup = Db())
+        {
+            var owner = new Member { Email = "race-owner@example.test", Role = MemberRole.Owner };
+            var source = new Listing { ExternalId = "race-source", Address = "Source", Condition = "poor", AiConfidence = 1.0 };
+            var target = new Listing { ExternalId = "race-target", Address = "Target", Condition = "poor", AiConfidence = 1.0 };
+            setup.AddRange(owner, source, target);
+            await setup.SaveChangesAsync(ct);
+            setup.Votes.Add(new Vote(source.Id, owner.Id, VoteChoice.Dislike, [], "Avoid poor condition", DateTimeOffset.UtcNow));
+            await setup.SaveChangesAsync(ct);
+            var proposal = await new AiLearningService(setup, new FakeRuleGenerator(), TimeProvider.System).CreateProposalAsync(owner.Id, ct);
+            targetId = target.Id; ownerId = owner.Id; proposalId = proposal.Id;
+        }
+
+        await using var blocker = new NpgsqlConnection(_connectionString);
+        await blocker.OpenAsync(ct);
+        await using var blockerTransaction = await blocker.BeginTransactionAsync(ct);
+        await using (var lockCommand = new NpgsqlCommand("SELECT 1 FROM listings WHERE \"Id\"=@id FOR KEY SHARE", blocker, blockerTransaction))
+        {
+            lockCommand.Parameters.AddWithValue("id", targetId);
+            await lockCommand.ExecuteScalarAsync(ct);
+        }
+
+        await using var approvalDb = Db();
+        var approval = new AiLearningService(approvalDb, new FakeRuleGenerator(), TimeProvider.System).ApproveAsync(proposalId, ownerId, ct);
+        await Task.Delay(150, ct);
+        Assert.False(approval.IsCompleted);
+
+        await using (var voteCommand = new NpgsqlCommand("""INSERT INTO votes ("ListingId","MemberId","Choice","Tags","CreatedAt") VALUES (@listing,@member,'like',ARRAY[]::reason_tag[],now())""", blocker, blockerTransaction))
+        {
+            voteCommand.Parameters.AddWithValue("listing", targetId);
+            voteCommand.Parameters.AddWithValue("member", ownerId);
+            await voteCommand.ExecuteNonQueryAsync(ct);
+        }
+        await blockerTransaction.CommitAsync(ct);
+
+        var error = await Assert.ThrowsAsync<DomainException>(() => approval);
+        Assert.Contains("stale", error.Message, StringComparison.OrdinalIgnoreCase);
+        await using var verify = Db();
+        Assert.Equal(ListingState.Active, (await verify.Listings.FindAsync([targetId], ct))!.State);
+    }
+
+    [Fact]
+    public async Task Ai_rule_deactivation_waits_for_concurrent_override_and_rechecks_protection()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        Guid targetId;
+        Guid ownerId;
+        Guid proposalId;
+        await using (var setup = Db())
+        {
+            var owner = new Member { Email = "deactivate-race-owner@example.test", Role = MemberRole.Owner };
+            var source = new Listing { ExternalId = "deactivate-race-source", Address = "Source", Condition = "poor", AiConfidence = 1.0 };
+            var target = new Listing { ExternalId = "deactivate-race-target", Address = "Target", Condition = "poor", AiConfidence = 1.0 };
+            setup.AddRange(owner, source, target);
+            await setup.SaveChangesAsync(ct);
+            setup.Votes.Add(new Vote(source.Id, owner.Id, VoteChoice.Dislike, [], "Avoid poor condition", DateTimeOffset.UtcNow));
+            await setup.SaveChangesAsync(ct);
+            var learning = new AiLearningService(setup, new FakeRuleGenerator(), TimeProvider.System);
+            var proposal = await learning.CreateProposalAsync(owner.Id, ct);
+            await learning.ApproveAsync(proposal.Id, owner.Id, ct);
+            targetId = target.Id; ownerId = owner.Id; proposalId = proposal.Id;
+        }
+
+        await using var blocker = new NpgsqlConnection(_connectionString);
+        await blocker.OpenAsync(ct);
+        await using var blockerTransaction = await blocker.BeginTransactionAsync(ct);
+        await using (var lockCommand = new NpgsqlCommand("SELECT 1 FROM listings WHERE \"Id\"=@id FOR KEY SHARE", blocker, blockerTransaction))
+        {
+            lockCommand.Parameters.AddWithValue("id", targetId);
+            await lockCommand.ExecuteScalarAsync(ct);
+        }
+
+        await using var deactivationDb = Db();
+        var deactivation = new AiLearningService(deactivationDb, new FakeRuleGenerator(), TimeProvider.System).DeactivateAsync(proposalId, ownerId, ct);
+        await Task.Delay(150, ct);
+        Assert.False(deactivation.IsCompleted);
+
+        await using (var overrideCommand = new NpgsqlCommand("""INSERT INTO listing_overrides ("ListingId","OwnerId","Action","CreatedAt") VALUES (@listing,@owner,'restore',now()); UPDATE listings SET "State"='restored' WHERE "Id"=@listing;""", blocker, blockerTransaction))
+        {
+            overrideCommand.Parameters.AddWithValue("listing", targetId);
+            overrideCommand.Parameters.AddWithValue("owner", ownerId);
+            await overrideCommand.ExecuteNonQueryAsync(ct);
+        }
+        await blockerTransaction.CommitAsync(ct);
+        await deactivation;
+
+        await using var verify = Db();
+        var saved = await verify.Listings.FindAsync([targetId], ct);
+        Assert.Equal(ListingState.Restored, saved!.State);
+    }
+
+    [Fact]
+    public async Task Ai_application_audit_survives_listing_purge_with_external_identity()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        Guid listingId;
+        Guid proposalId;
+        await using (var setup = Db())
+        {
+            var owner = new Member { Email = "audit-owner@example.test", Role = MemberRole.Owner };
+            var listing = new Listing { ExternalId = "audited-purge", Address = "Audit" };
+            setup.AddRange(owner, listing);
+            await setup.SaveChangesAsync(ct);
+            var proposal = new AiRuleProposal(owner.Id, 91, "Audit rule", """{"combinator":"all","conditions":[{"field":"condition","operator":"eq","value":"poor"}]}""", "[]", "{}", DateTimeOffset.UtcNow);
+            setup.AiRuleProposals.Add(proposal);
+            await setup.SaveChangesAsync(ct);
+            listingId = listing.Id; proposalId = proposal.Id;
+        }
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(ct);
+        await using (var insert = new NpgsqlCommand("""INSERT INTO ai_rule_applications ("ProposalId","ListingId","ListingExternalId","PreviousState","AppliedState","AppliedAt") VALUES (@proposal,@listing,'audited-purge','active','ai_rejected',now())""", connection))
+        {
+            insert.Parameters.AddWithValue("proposal", proposalId);
+            insert.Parameters.AddWithValue("listing", listingId);
+            await insert.ExecuteNonQueryAsync(ct);
+        }
+        await using (var delete = new NpgsqlCommand("""DELETE FROM listings WHERE "Id"=@listing""", connection))
+        {
+            delete.Parameters.AddWithValue("listing", listingId);
+            Assert.Equal(1, await delete.ExecuteNonQueryAsync(ct));
+        }
+        await using var verify = new NpgsqlCommand("""SELECT "ListingId","ListingExternalId" FROM ai_rule_applications WHERE "ProposalId"=@proposal""", connection);
+        verify.Parameters.AddWithValue("proposal", proposalId);
+        await using var reader = await verify.ExecuteReaderAsync(ct);
+        Assert.True(await reader.ReadAsync(ct));
+        Assert.Equal(listingId, reader.GetGuid(0));
+        Assert.Equal("audited-purge", reader.GetString(1));
+    }
+
+    [Fact]
     public async Task E2E_seed_is_idempotent_and_covers_active_and_rejected_review_flows()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -229,6 +531,11 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
         Assert.Equal(2, listings.Count);
         Assert.Contains(listings, x => x.State == ListingState.Active && x.Price == 4_500_000m);
         Assert.Contains(listings, x => x.State == ListingState.AiRejected && x.AiAssessed);
+    }
+
+    private sealed class FakeRuleGenerator : IAiRuleGenerator
+    {
+        public Task<GeneratedAiRule> GenerateAsync(IReadOnlyList<VoteNoteInput> notes, CancellationToken ct) => Task.FromResult(new GeneratedAiRule("Avoid renovation-heavy homes", """{"combinator":"all","conditions":[{"field":"condition","operator":"eq","value":"poor"}]}"""));
     }
 
     private sealed class CaptureEmail : IEmailSender
