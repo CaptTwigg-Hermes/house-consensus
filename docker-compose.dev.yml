@@ -1,5 +1,8 @@
 services:
   app:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Debug__AutoLogin: ${DEBUG_AUTO_LOGIN:-false}
     ports: ["127.0.0.1:8080:8080"]
   mailpit:
     ports: ["127.0.0.1:8025:8025"]

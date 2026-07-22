@@ -5,6 +5,8 @@ using HouseConsensus.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.AspNetCore.Http;
+using System.Security.Claims;
 using Npgsql;
 using Testcontainers.PostgreSql;
 namespace HouseConsensus.IntegrationTests;
@@ -51,6 +53,63 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
         { var owner = new Member { Email = "owner@example.test", Role = MemberRole.Owner }; var member = new Member { Email = "member@example.test" }; var listing = new Listing { ExternalId = "case-1", Address = "Example 1", FamilyFitScore = 0.9 }; db.AddRange(owner, member, listing); await db.SaveChangesAsync(ct); db.Votes.AddRange(new Vote { ListingId = listing.Id, MemberId = member.Id, Choice = VoteChoice.Dislike }, new Vote { ListingId = listing.Id, MemberId = member.Id, Choice = VoteChoice.Like, CreatedAt = DateTimeOffset.UtcNow.AddSeconds(1) }); listing.ApplyOverride(OverrideAction.Restore, owner.Id, "reviewed", DateTimeOffset.UtcNow); var comment = new Comment(listing.Id, member.Id, "original", DateTimeOffset.UtcNow); comment.Edit(member.Id, false, "revised", DateTimeOffset.UtcNow.AddSeconds(1)); comment.Delete(owner.Id, true, DateTimeOffset.UtcNow.AddSeconds(2)); db.Comments.Add(comment); db.Feedback.Add(new Feedback { MemberId = member.Id, ListingId = listing.Id, Body = "wrong score", ReviewedAt = DateTimeOffset.UtcNow }); member.Deactivate(); listing.Archive(DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); }
         await using (var db = Db()) { var listing = await db.Listings.Include(x => x.Overrides).SingleAsync(ct); var votes = await db.Votes.OrderBy(x => x.CreatedAt).ToListAsync(ct); Assert.Equal(ListingState.Archived, listing.State); Assert.Single(listing.Overrides); Assert.Equal(2, votes.Count); Assert.Equal(VoteChoice.Like, ConsensusRules.LatestVotes(votes).Single().Value.Choice); var comment = await db.Comments.Include(x => x.Revisions).SingleAsync(ct); Assert.True(comment.IsDeleted); Assert.Equal(2, comment.Revisions.Count); Assert.False((await db.Members.SingleAsync(x => x.Role == MemberRole.Member, ct)).IsActive); Assert.NotNull((await db.Feedback.SingleAsync(ct)).ReviewedAt); }
     }
+    [Fact]
+    public async Task Debug_auto_login_authenticates_the_active_configured_owner()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+        var owner = new Member { Email = "debug-owner@example.test", Role = MemberRole.Owner };
+        db.Members.Add(owner);
+        await db.SaveChangesAsync(ct);
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["INITIAL_OWNER_EMAIL"] = owner.Email,
+        }).Build();
+        var context = new DefaultHttpContext { RequestAborted = ct };
+        var nextCalled = false;
+        var middleware = new DebugAutoLoginMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, config);
+
+        await middleware.InvokeAsync(context, db);
+
+        Assert.True(nextCalled);
+        Assert.True(context.User.Identity?.IsAuthenticated);
+        Assert.Equal(owner.Id.ToString(), context.User.FindFirstValue(ClaimTypes.NameIdentifier));
+        Assert.True(context.User.IsInRole(MemberRole.Owner.ToString()));
+    }
+
+    [Fact]
+    public async Task Debug_auto_login_rejects_non_owner_inactive_owner_and_missing_member()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+        var member = new Member { Email = "debug-member@example.test", Role = MemberRole.Member };
+        var inactiveOwner = new Member { Email = "debug-inactive@example.test", Role = MemberRole.Owner };
+        inactiveOwner.Deactivate();
+        db.Members.AddRange(member, inactiveOwner);
+        await db.SaveChangesAsync(ct);
+
+        foreach (var email in new[] { member.Email, inactiveOwner.Email, "debug-missing@example.test" })
+        {
+            var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["INITIAL_OWNER_EMAIL"] = email,
+            }).Build();
+            var context = new DefaultHttpContext { RequestAborted = ct };
+            var middleware = new DebugAutoLoginMiddleware(_ => Task.CompletedTask, config);
+
+            await middleware.InvokeAsync(context, db);
+
+            Assert.False(context.User.Identity?.IsAuthenticated);
+        }
+    }
+
+    [Fact]
+    public void Debug_auto_login_cannot_be_enabled_outside_development()
+    {
+        Assert.Throws<InvalidOperationException>(() => DebugAutoLoginMiddleware.EnsureSafe(true, "Production"));
+        DebugAutoLoginMiddleware.EnsureSafe(true, "Development");
+    }
+
     [Fact]
     public async Task Magic_link_is_invite_only_expires_and_is_single_use()
     {

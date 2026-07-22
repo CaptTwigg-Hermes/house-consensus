@@ -17,6 +17,8 @@ using Npgsql;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
+var debugAutoLogin = builder.Configuration.GetValue("Debug:AutoLogin", false);
+DebugAutoLoginMiddleware.EnsureSafe(debugAutoLogin, builder.Environment.EnvironmentName);
 builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(builder.Configuration.GetConnectionString("Database") ?? "Host=postgres;Database=house_consensus;Username=house_consensus;Password=house_consensus", n => n.MapEnum<MemberRole>("member_role").MapEnum<VoteChoice>("vote_choice").MapEnum<ListingState>("listing_state").MapEnum<ReasonTag>("reason_tag").MapEnum<OverrideAction>("override_action")));
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(o => { o.Cookie.Name = "hc_session"; o.Cookie.HttpOnly = true; o.Cookie.SecurePolicy = builder.Environment.IsProduction() ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest; o.Cookie.SameSite = SameSiteMode.Strict; o.ExpireTimeSpan = TimeSpan.FromDays(30); o.SlidingExpiration = false; o.Events.OnValidatePrincipal = async c => { var id = c.Principal?.FindFirstValue(ClaimTypes.NameIdentifier); if (!Guid.TryParse(id, out var memberId)) { c.RejectPrincipal(); return; } var db = c.HttpContext.RequestServices.GetRequiredService<AppDbContext>(); var member = await db.Members.AsNoTracking().SingleOrDefaultAsync(x => x.Id == memberId && x.IsActive, c.HttpContext.RequestAborted); if (member is null) { c.RejectPrincipal(); await c.HttpContext.SignOutAsync(); } }; o.Events.OnRedirectToLogin = c => { c.Response.StatusCode = 401; return Task.CompletedTask; }; o.Events.OnRedirectToAccessDenied = c => { c.Response.StatusCode = 403; return Task.CompletedTask; }; });
 builder.Services.AddAuthorization(o => o.AddPolicy("owner", p => p.RequireClaim(ClaimTypes.Role, MemberRole.Owner.ToString())));
@@ -35,7 +37,9 @@ app.UseBlazorFrameworkFiles();
 app.UseStaticFiles();
 app.UseRateLimiter();
 app.Use(async (context, next) => { var unsafeApiRequest = context.Request.Path.StartsWithSegments("/api") && (HttpMethods.IsPost(context.Request.Method) || HttpMethods.IsPut(context.Request.Method) || HttpMethods.IsPatch(context.Request.Method) || HttpMethods.IsDelete(context.Request.Method)); if (unsafeApiRequest && context.Request.Headers["X-House-Consensus-CSRF"] != "1") { context.Response.StatusCode = StatusCodes.Status400BadRequest; await context.Response.WriteAsJsonAsync(new { error = "Missing same-origin request header." }); return; } await next(); });
-app.UseAuthentication(); app.UseAuthorization();
+app.UseAuthentication();
+if (debugAutoLogin) app.UseMiddleware<DebugAutoLoginMiddleware>();
+app.UseAuthorization();
 app.MapHealthChecks("/health"); app.MapHub<ConsensusHub>("/hubs/consensus");
 
 var auth = app.MapGroup("/api/auth");

@@ -34,6 +34,14 @@ def test_runtime_image_uses_the_dotnet_builtin_non_root_user():
     assert "adduser" not in dockerfile
 
 
+def test_dev_compose_supports_safe_debug_auto_login_from_dotenv():
+    compose = Path("docker-compose.dev.yml").read_text()
+
+    assert "ASPNETCORE_ENVIRONMENT: Development" in compose
+    assert "Debug__AutoLogin: ${DEBUG_AUTO_LOGIN:-false}" in compose
+    assert "Debug__AutoLogin" not in Path("docker-compose.yml").read_text()
+
+
 def test_dev_compose_provides_an_explicit_real_house_importer():
     compose = Path("docker-compose.dev.yml").read_text()
     dockerfile = Path("exporter/Dockerfile").read_text() if Path("exporter/Dockerfile").exists() else ""

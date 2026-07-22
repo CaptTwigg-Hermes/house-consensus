@@ -13,6 +13,8 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build --wait
 
 App: `http://127.0.0.1:8080`; Mailpit: `http://127.0.0.1:8025`. The first startup creates exactly one owner from `INITIAL_OWNER_EMAIL`. Base Compose exposes no host ports; the development overlay binds loopback only.
 
+Set `DEBUG_AUTO_LOGIN=true` in `.env` to authenticate automatically as `INITIAL_OWNER_EMAIL` when using `docker-compose.dev.yml`. The flag is wired only into the Development overlay; enabling it in any other ASP.NET environment aborts startup.
+
 ## Verification
 
 ```sh
