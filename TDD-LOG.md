@@ -24,6 +24,7 @@ The implementation was developed test-first at the source level. RED cases were 
 | 18 | Compose app and importer must share the external PostgreSQL 5433 database without downloading unused media | external connection settings plus explicit `--skip-media` import mode | RED: Compose still declared bundled PostgreSQL and CLI rejected `--skip-media`; GREEN: 2,743-row real migration and live app health |
 | 19 | House cards need the same decision density as live houseshopping without consuming the mobile viewport | enriched listing facts, photo-first cards, compact sticky search, bottom filter drawer and reusable SVG icons | RED: card/UI source contract and mobile acceptance checks; GREEN: rich desktop/mobile card flows with zero horizontal overflow |
 | 20 | Boligsiden rejects direct browser image bursts and the Leaflet stylesheet used an invalid integrity hash | allowlisted same-origin image proxy with bounded downloads and corrected official Leaflet SRI | RED: real-browser images failed with HTTP 403 and Leaflet CSS was blocked; GREEN: real first-card image loads at 3:2 and browser fetches proxy sources successfully |
+| 21 | Score badge wastes vertical space and hides how the family score is weighted | 34px score chip plus the original five-dimension weighted tooltip, exporter fields, API contract and migration | RED: tooltip/source contract absent and PostgreSQL breakdown columns undefined; GREEN: focused UI test, exporter integration test and mobile browser acceptance |
 
 Run the full gate on a Docker-enabled host with: `docker build -f Dockerfile.test -t house-consensus-tests . && docker run --rm -v /var/run/docker.sock:/var/run/docker.sock house-consensus-tests`.
 
@@ -31,9 +32,9 @@ Run the full gate on a Docker-enabled host with: `docker build -f Dockerfile.tes
 ## Latest verification
 
 - Release solution build: **GREEN**, 0 compiler/analyzer errors (the invariant-mode host SDK emitted locale-resource warnings).
-- Unit tests: **GREEN**, 32/32 (including image-source allowlisting, client culture/filter, audited comments, and browser-contract regressions).
+- Unit tests: **GREEN**, 33/33 (including image-source allowlisting, client culture/filter, audited comments, and browser-contract regressions).
 - Hosted WASM Release publish: **GREEN**; static framework, manifest, service worker, and server assembly verified in the publish artifact.
-- Exporter tests: **GREEN**, 22/22 against PostgreSQL 18.4 on the dedicated test instance; Ruff is GREEN.
+- Exporter tests: **GREEN**, 23/23 against PostgreSQL 18.4 on the dedicated test instance; Ruff is GREEN.
 - Houseshopping export-failure isolation: **GREEN**, 3/3 focused tests.
 - TypeScript/Playwright: **GREEN**, typecheck plus 8/8 Chromium flows against the app, PostgreSQL and Mailpit.
 - PostgreSQL integration tests: **GREEN**, 7/7 using the guarded external test database.

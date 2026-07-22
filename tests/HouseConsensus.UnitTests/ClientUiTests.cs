@@ -92,6 +92,33 @@ public sealed class ClientUiTests
         Assert.Contains("aspect-ratio: 3/2", css, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Score_chip_is_compact_and_explains_the_weighted_breakdown()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var card = File.ReadAllText(Path.Combine(root, "src/Client/Components/ListingCard.razor"));
+        var css = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/css/app.css"));
+        var seed = File.ReadAllText(Path.Combine(root, "src/Server/Data/E2EDataSeeder.cs"));
+
+        Assert.Contains("<button type=\"button\" class=\"score-chip\"", card, StringComparison.Ordinal);
+        Assert.Contains("aria-describedby=\"@TooltipId\"", card, StringComparison.Ordinal);
+        Assert.Contains("id=\"@TooltipId\"", card, StringComparison.Ordinal);
+        Assert.Contains("score-tooltip", card, StringComparison.Ordinal);
+        Assert.Contains("Listing.FamilyPrivacyScore", card, StringComparison.Ordinal);
+        Assert.Contains("Listing.KidsSpaceScore", card, StringComparison.Ordinal);
+        Assert.Contains("Listing.GardenScore", card, StringComparison.Ordinal);
+        Assert.Contains("Listing.SharedLivingScore", card, StringComparison.Ordinal);
+        Assert.Contains("Listing.PracticalScore", card, StringComparison.Ordinal);
+        Assert.Contains("Listing.FamilyPrivacyWeight", card, StringComparison.Ordinal);
+        Assert.Contains("Listing.PracticalWeight", card, StringComparison.Ordinal);
+        Assert.Contains("FamilyPrivacyScore =", seed, StringComparison.Ordinal);
+        Assert.Contains("PracticalScore =", seed, StringComparison.Ordinal);
+        Assert.Contains("FamilyPrivacyWeight =", seed, StringComparison.Ordinal);
+        Assert.Contains("PracticalWeight =", seed, StringComparison.Ordinal);
+        Assert.Contains("height: 34px", css, StringComparison.Ordinal);
+        Assert.Contains(".score-chip:focus-within .score-tooltip", css, StringComparison.Ordinal);
+    }
+
     private sealed class CaptureHandler : HttpMessageHandler
     {
         public HttpRequestMessage? Request { get; private set; }

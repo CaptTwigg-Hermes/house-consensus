@@ -54,6 +54,16 @@ public sealed class Listing
     public bool? SeparateEntrance { get; set; }
     public bool? SecondKitchen { get; set; }
     public int? PrivacyScore { get; set; }
+    public double? FamilyPrivacyScore { get; set; }
+    public double? KidsSpaceScore { get; set; }
+    public double? GardenScore { get; set; }
+    public double? SharedLivingScore { get; set; }
+    public double? PracticalScore { get; set; }
+    public double? FamilyPrivacyWeight { get; set; }
+    public double? KidsSpaceWeight { get; set; }
+    public double? GardenWeight { get; set; }
+    public double? SharedLivingWeight { get; set; }
+    public double? PracticalWeight { get; set; }
     public DateTimeOffset ImportedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? ArchivedAt { get; private set; }
     public List<ListingOverride> Overrides { get; } = [];

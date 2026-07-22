@@ -1,5 +1,24 @@
 @inject I18n L
 <article class="listing-card @(Listing.Consensus ? "consensus-card" : "")" data-testid="listing-card" data-listing-id="@Listing.Id" data-price="@Listing.Price">
+    @if (HasScoreBreakdown)
+    {
+        <button type="button" class="score-chip" aria-describedby="@TooltipId" aria-label="@($"{L["FamilyFit"]}: {Math.Round(Listing.FamilyFitScore)} {L["OutOf100"]}")">
+            <strong>@Math.Round(Listing.FamilyFitScore)</strong><small>/100</small>
+            <span id="@TooltipId" class="score-tooltip" role="tooltip">
+                <span class="score-tooltip-heading"><span>@L["Dimension"]</span><span>@L["Score"]</span><span>@L["Contribution"]</span></span>
+                @ScoreRow(L["Privacy"], Listing.FamilyPrivacyScore!.Value, Listing.FamilyPrivacyWeight!.Value)
+                @ScoreRow(L["KidsSpace"], Listing.KidsSpaceScore!.Value, Listing.KidsSpaceWeight!.Value)
+                @ScoreRow(L["Garden"], Listing.GardenScore!.Value, Listing.GardenWeight!.Value)
+                @ScoreRow(L["SharedLiving"], Listing.SharedLivingScore!.Value, Listing.SharedLivingWeight!.Value)
+                @ScoreRow(L["Practical"], Listing.PracticalScore!.Value, Listing.PracticalWeight!.Value)
+                <span class="score-tooltip-total"><span>@L["Total"]</span><span>@Listing.FamilyFitScore.ToString("0.#")</span></span>
+            </span>
+        </button>
+    }
+    else
+    {
+        <span class="score-chip" aria-label="@($"{L["FamilyFit"]}: {Math.Round(Listing.FamilyFitScore)} {L["OutOf100"]}")"><strong>@Math.Round(Listing.FamilyFitScore)</strong><small>/100</small></span>
+    }
     <NavLink class="card-main" href="@($"listing/{Listing.Id}")" aria-label="@($"{Listing.Address}, {Price}")">
         <div class="card-image">
             @if (!string.IsNullOrWhiteSpace(Listing.PreviewImageUrl))
@@ -8,7 +27,6 @@
             }
             <div class="image-placeholder" aria-hidden="true"><span>⌂</span></div>
             <div class="card-image-shade"></div>
-            <span class="score-chip"><strong>@Math.Round(Listing.FamilyFitScore)</strong><small>/100</small></span>
             <div class="image-badges">
                 @if (Listing.Consensus) { <span class="badge consensus">♥ @L["ConsensusShort"]</span> }
                 @if (Listing.Quiet is true) { <span class="badge quiet">@L["Quiet"]</span> }
@@ -46,4 +64,14 @@
     private string Price => Listing.Price.HasValue ? $"{Listing.Price.Value:N0} kr." : L["PriceOnRequest"];
     private string? PricePerArea => Listing.Price.HasValue && Listing.LivingArea > 0 ? $"{Listing.Price.Value / Listing.LivingArea.Value:N0} kr/m²" : null;
     private bool HasFitSignals => Listing.SeparateEntrance is true || Listing.SecondKitchen is true || Listing.GroundFloorBedroom is true || Listing.PrivacyScore.HasValue || Listing.BuildableHeadroom > 0;
+    private bool HasScoreBreakdown => Listing.FamilyPrivacyScore.HasValue && Listing.KidsSpaceScore.HasValue && Listing.GardenScore.HasValue && Listing.SharedLivingScore.HasValue && Listing.PracticalScore.HasValue && Listing.FamilyPrivacyWeight.HasValue && Listing.KidsSpaceWeight.HasValue && Listing.GardenWeight.HasValue && Listing.SharedLivingWeight.HasValue && Listing.PracticalWeight.HasValue;
+    private string TooltipId => $"score-tooltip-{Listing.Id:N}";
+    private static RenderFragment ScoreRow(string label, double score, double weight) => builder =>
+    {
+        builder.OpenElement(0, "span"); builder.AddAttribute(1, "class", "score-tooltip-row");
+        builder.OpenElement(2, "span"); builder.AddContent(3, $"{label} ({weight:0.#}%)"); builder.CloseElement();
+        builder.OpenElement(4, "span"); builder.AddContent(5, $"{score:0}/100"); builder.CloseElement();
+        builder.OpenElement(6, "span"); builder.AddContent(7, $"{score * weight / 100:0.0}"); builder.CloseElement();
+        builder.CloseElement();
+    };
 }

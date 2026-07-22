@@ -213,6 +213,7 @@ a {
 }
 
 .listing-card {
+  position: relative;
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -1151,28 +1152,87 @@ body {
   z-index: 3;
   top: 14px;
   left: 14px;
-  min-width: 64px;
-  height: 48px;
+  min-width: 54px;
+  height: 34px;
   display: flex;
   align-items: baseline;
   justify-content: center;
-  padding: 0 10px;
+  padding: 0 9px;
   border: 1px solid rgba(255, 255, 255, .3);
-  border-radius: 14px;
+  border-radius: 11px;
   color: #fff;
   background: rgba(24, 57, 47, .88);
   box-shadow: 0 6px 18px rgba(0, 0, 0, .16);
   backdrop-filter: blur(10px);
+  cursor: help;
+  font-family: inherit;
 }
 
 .score-chip strong {
-  font-size: 1.35rem;
+  font-size: 1.15rem;
 }
 
 .score-chip small {
   margin-left: 2px;
-  font-size: .65rem;
+  font-size: .62rem;
   opacity: .74;
+}
+
+.score-tooltip {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  width: max-content;
+  min-width: 238px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 10px;
+  color: #e8f0ed;
+  background: rgba(15, 32, 27, .97);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .34);
+  font-size: .7rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-3px);
+  transition: opacity .14s ease, transform .14s ease, visibility .14s;
+}
+
+.score-chip:hover .score-tooltip,
+.score-chip:focus-within .score-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.score-tooltip-heading,
+.score-tooltip-row {
+  display: grid;
+  grid-template-columns: minmax(112px, 1fr) 52px 52px;
+  gap: 7px;
+  padding: 2px 0;
+  white-space: nowrap;
+}
+
+.score-tooltip-heading {
+  padding-bottom: 4px;
+  color: rgba(232, 240, 237, .62);
+  font-size: .62rem;
+}
+
+.score-tooltip-heading span:not(:first-child),
+.score-tooltip-row span:not(:first-child) { text-align: right; }
+
+.score-tooltip-total {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(255, 255, 255, .15);
+  color: #fff;
+  font-weight: 700;
 }
 
 .image-badges {

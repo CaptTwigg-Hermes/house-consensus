@@ -34,7 +34,17 @@ public static class E2EDataSeeder
             BuildableHeadroom = 75,
             GroundFloorBedroom = true,
             SeparateEntrance = true,
-            PrivacyScore = 4
+            PrivacyScore = 4,
+            FamilyPrivacyScore = 95,
+            KidsSpaceScore = 95,
+            GardenScore = 90,
+            SharedLivingScore = 90,
+            PracticalScore = 80,
+            FamilyPrivacyWeight = 30,
+            KidsSpaceWeight = 20,
+            GardenWeight = 20,
+            SharedLivingWeight = 15,
+            PracticalWeight = 15
         };
         var rejected = new Listing
         {

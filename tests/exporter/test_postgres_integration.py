@@ -135,3 +135,69 @@ def test_export_populates_house_card_facts(database_url):
         "https://images.example.test/house.webp", 249, 1563, 8, 1948,
         2, 3, 1, "A2020", True, 220, True, True, True, 5,
     )
+
+
+def test_exports_family_score_breakdown(database_url):
+    exporter = PostgresExporter(database_url)
+    case = _case(
+        family_score=81,
+        vision_privacy_score=5,
+        family_score_breakdown={
+            "privacy": 90,
+            "kids_space": 80,
+            "garden": 70,
+            "shared_living": 80,
+            "practical": 80,
+        },
+    )
+
+    exporter.export([case], run_id="score-breakdown")
+
+    with psycopg.connect(database_url) as conn:
+        scores = conn.execute(
+            "select \"FamilyPrivacyScore\",\"KidsSpaceScore\",\"GardenScore\","
+            "\"SharedLivingScore\",\"PracticalScore\",\"FamilyPrivacyWeight\","
+            "\"KidsSpaceWeight\",\"GardenWeight\",\"SharedLivingWeight\",\"PracticalWeight\" "
+            "from listings where \"ExternalId\"='one'"
+        ).fetchone()
+    assert scores == (90, 80, 70, 80, 80, 30, 20, 20, 15, 15)
+    assert sum(score * weight / 100 for score, weight in zip(scores[:5], scores[5:])) == 81
+
+    inconsistent = _case(
+        "bad",
+        family_score=81,
+        vision_privacy_score=5,
+        family_score_breakdown={
+            "privacy": 0, "kids_space": 0, "garden": 0,
+            "shared_living": 0, "practical": 0,
+        },
+    )
+    exporter.export([inconsistent], run_id="bad-score-breakdown")
+    with psycopg.connect(database_url) as conn:
+        rejected_breakdown = conn.execute(
+            'select "FamilyPrivacyScore","FamilyPrivacyWeight" '
+            "from listings where \"ExternalId\"='bad'"
+        ).fetchone()
+    assert rejected_breakdown == (None, None)
+
+
+    renormalized = _case(
+        "renormalized",
+        family_score=33.9,
+        vision_privacy_score=1,
+        family_score_breakdown={
+            "privacy": 0, "kids_space": 33, "garden": 46,
+            "shared_living": 6, "practical": 47,
+            "weights": {
+                "privacy": 0, "kids_space": 20 / 0.7, "garden": 20 / 0.7,
+                "shared_living": 15 / 0.7, "practical": 15 / 0.7,
+            },
+        },
+    )
+    exporter.export([renormalized], run_id="renormalized-score-breakdown")
+    with psycopg.connect(database_url) as conn:
+        weights = conn.execute(
+            "select \"FamilyPrivacyWeight\",\"KidsSpaceWeight\" "
+            "from listings where \"ExternalId\"='renormalized'"
+        ).fetchone()
+    assert weights == pytest.approx((0, 20 / 0.7))

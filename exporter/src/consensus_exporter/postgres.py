@@ -50,6 +50,46 @@ def _boolean(data: dict, *keys: str) -> bool | None:
     return None
 
 
+def _score_breakdown(data: dict, expected_total: float | None) -> tuple[float | None, ...]:
+    breakdown = data.get("family_score_breakdown")
+    if not isinstance(breakdown, dict):
+        return (None,) * 10
+
+    def score(key: str) -> float | None:
+        value = breakdown.get(key)
+        try:
+            return float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    scores = tuple(score(key) for key in ("privacy", "kids_space", "garden", "shared_living", "practical"))
+    if any(value is None for value in scores):
+        return (None,) * 10
+
+    weight_data = breakdown.get("weights")
+    if isinstance(weight_data, dict):
+        try:
+            weights = tuple(float(weight_data[key]) for key in ("privacy", "kids_space", "garden", "shared_living", "practical"))
+        except (KeyError, TypeError, ValueError):
+            weights = ()
+    else:
+        weights = ()
+    if not weights:
+        vision_keys = (
+            "vision_separate_entrance", "vision_second_kitchen", "vision_internal_connection",
+            "vision_split_type", "vision_en_suite_count", "vision_privacy_score",
+            "vision_two_dwellings", "vision_two_family_fit", "vision_dwelling_evidence",
+            "vision_bathrooms",
+        )
+        weights = (30.0, 20.0, 20.0, 15.0, 15.0) if any(data.get(key) is not None for key in vision_keys) else (
+            0.0, 20.0 / 0.7, 20.0 / 0.7, 15.0 / 0.7, 15.0 / 0.7,
+        )
+    calculated_total = round(sum(value * weight / 100 for value, weight in zip(scores, weights)), 1)
+    if expected_total is None or abs(calculated_total - float(expected_total)) > 0.11:
+        return (None,) * 10
+    return (*scores, *weights)
+
+
 def _card_facts(case: ExportCase) -> tuple:
     raw = case.raw
     energy = _first(raw, "energy_label", "energyLabel")
@@ -70,6 +110,7 @@ def _card_facts(case: ExportCase) -> tuple:
         _boolean(raw, "vision_separate_entrance"),
         _boolean(raw, "vision_second_kitchen"),
         _integer(raw, "vision_privacy_score"),
+        *_score_breakdown(raw, case.family_score),
     )
 
 
@@ -133,9 +174,11 @@ class PostgresExporter:
                      "AiConfidence","AiEvidence","ModelVersion","RuleVersion","SourceUrl","ImportedAt","ArchivedAt",
                      "PreviewImageUrl","LivingArea","LotArea","Rooms","YearBuilt","Bathrooms","Bedrooms","Floors",
                      "EnergyLabel","Quiet","BuildableHeadroom","GroundFloorBedroom","SeparateEntrance",
-                     "SecondKitchen","PrivacyScore")
+                     "SecondKitchen","PrivacyScore","FamilyPrivacyScore","KidsSpaceScore","GardenScore",
+                     "SharedLivingScore","PracticalScore","FamilyPrivacyWeight","KidsSpaceWeight","GardenWeight",
+                     "SharedLivingWeight","PracticalWeight")
                     VALUES (%s,%s,%s,%s,%s,%s,%s::listing_state,%s,%s,%s,%s,%s,%s,%s,%s,
-                            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT("ExternalId") DO UPDATE SET
                      "Address"=excluded."Address","City"=excluded."City","Price"=excluded."Price",
                      "FamilyFitScore"=excluded."FamilyFitScore",
@@ -157,7 +200,13 @@ class PostgresExporter:
                      "BuildableHeadroom"=excluded."BuildableHeadroom",
                      "GroundFloorBedroom"=excluded."GroundFloorBedroom",
                      "SeparateEntrance"=excluded."SeparateEntrance","SecondKitchen"=excluded."SecondKitchen",
-                     "PrivacyScore"=excluded."PrivacyScore"
+                     "PrivacyScore"=excluded."PrivacyScore",
+                     "FamilyPrivacyScore"=excluded."FamilyPrivacyScore","KidsSpaceScore"=excluded."KidsSpaceScore",
+                     "GardenScore"=excluded."GardenScore","SharedLivingScore"=excluded."SharedLivingScore",
+                     "PracticalScore"=excluded."PracticalScore",
+                     "FamilyPrivacyWeight"=excluded."FamilyPrivacyWeight","KidsSpaceWeight"=excluded."KidsSpaceWeight",
+                     "GardenWeight"=excluded."GardenWeight","SharedLivingWeight"=excluded."SharedLivingWeight",
+                     "PracticalWeight"=excluded."PracticalWeight"
                     RETURNING "Id"
                     """,
                     (

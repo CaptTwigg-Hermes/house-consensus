@@ -35,6 +35,19 @@ test('Mobile browse keeps controls compact and opens filters in a bottom drawer'
   await expect(card.locator('.property-facts')).toBeVisible();
   await expect(card.locator('.card-image img')).toHaveAttribute('src', /\/api\/listings\/.+\/image$/);
 
+  const score = card.locator('.score-chip');
+  await expect(score).toHaveJSProperty('tagName', 'BUTTON');
+  expect((await score.boundingBox())!.height).toBeLessThanOrEqual(36);
+  const tooltip = score.locator('.score-tooltip');
+  const tooltipId = await tooltip.getAttribute('id');
+  expect(tooltipId).toBeTruthy();
+  await expect(score).toHaveAttribute('aria-describedby', tooltipId!);
+  await score.focus();
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toContainText(/Privacy|Privatliv/);
+  await expect(tooltip).toContainText(/Children's space|Børnerum/);
+  await expect(tooltip).toContainText(/Total/);
+
   await page.getByTestId('filter-open').click();
   await expect(page.getByTestId('filter-price-max')).toBeVisible();
   await expect(page.locator('.filter-drawer')).toBeVisible();

@@ -22,5 +22,10 @@ public sealed record ListingDto(
     int? Bedrooms = null, int? Floors = null, string? EnergyLabel = null,
     bool? Quiet = null, int? BuildableHeadroom = null,
     bool? GroundFloorBedroom = null, bool? SeparateEntrance = null,
-    bool? SecondKitchen = null, int? PrivacyScore = null);
+    bool? SecondKitchen = null, int? PrivacyScore = null,
+    double? FamilyPrivacyScore = null, double? KidsSpaceScore = null,
+    double? GardenScore = null, double? SharedLivingScore = null,
+    double? PracticalScore = null, double? FamilyPrivacyWeight = null,
+    double? KidsSpaceWeight = null, double? GardenWeight = null,
+    double? SharedLivingWeight = null, double? PracticalWeight = null);
 
