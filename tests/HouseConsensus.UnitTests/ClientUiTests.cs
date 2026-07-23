@@ -7,6 +7,27 @@ namespace HouseConsensus.UnitTests;
 public sealed class ClientUiTests
 {
     [Fact]
+    public void Ai_evidence_component_uses_safe_fallback_for_unparseable_and_nested_json()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var evidence = File.ReadAllText(Path.Combine(root, "src/Client/Components/AiEvidencePanel.razor"));
+        Assert.Contains("AiEvidenceText.SafeFallback", evidence, StringComparison.Ordinal);
+        Assert.DoesNotContain("summaries.Add(Evidence.Trim())", evidence, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("{broken", "Evidence unavailable")]
+    [InlineData("[1,2]", "Evidence unavailable")]
+    [InlineData("\"unterminated", "Evidence unavailable")]
+    [InlineData("{\"nested\":true}", "Evidence unavailable")]
+    [InlineData("true", "Evidence unavailable")]
+    [InlineData("123", "Evidence unavailable")]
+    [InlineData("null", "Evidence unavailable")]
+    [InlineData("Clear prose reason", "Clear prose reason")]
+    public void Ai_evidence_fallback_never_exposes_json(string raw, string expected)
+        => Assert.Equal(expected, AiEvidenceText.SafeFallback(raw, "Evidence unavailable"));
+
+    [Fact]
     public void Browse_query_encodes_all_existing_filters_and_omits_empty_values()
     {
         var uri = BrowseQuery.Build("Aarhus C & V", 2_500_000m, 5_000_000m);

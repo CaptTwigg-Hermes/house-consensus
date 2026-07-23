@@ -1,9 +1,11 @@
 from __future__ import annotations
+
 import argparse
 import os
 import uuid
+
 from .media import MediaCache
-from .postgres import PostgresExporter
+from .postgres import PostgresExporter, tombstone_listing
 from .source import load_sqlite_cases
 
 
@@ -35,9 +37,24 @@ def main() -> int:
         action="store_true",
         help="skip optional media downloads",
     )
+    parser.add_argument(
+        "--tombstone-external-id",
+        help="record a verified-delisted external ID and archive its listing",
+    )
+    parser.add_argument("--tombstone-source-url")
+    parser.add_argument("--verification-method", default="http_404")
     args = parser.parse_args()
     if not args.database_url:
         parser.error("--database-url or CONSENSUS_DATABASE_URL is required")
+    if args.tombstone_external_id:
+        tombstone_listing(
+            args.database_url,
+            external_id=args.tombstone_external_id,
+            source_url=args.tombstone_source_url,
+            verification_method=args.verification_method,
+        )
+        print(f"tombstoned={args.tombstone_external_id}")
+        return 0
     cases = load_sqlite_cases(args.sqlite)
     result = PostgresExporter(
         args.database_url,

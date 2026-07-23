@@ -40,7 +40,7 @@
         }
         catch (JsonException)
         {
-            summaries.Add(Evidence.Trim());
+            summaries.Add(AiEvidenceText.SafeFallback(Evidence, L["EvidenceUnavailable"]));
         }
     }
 
@@ -73,7 +73,7 @@
 
     private string Display(JsonElement value) => value.ValueKind switch
     {
-        JsonValueKind.String => value.GetString() ?? "",
+        JsonValueKind.String => AiEvidenceText.SafeFallback(value.GetString() ?? "", L["EvidenceUnavailable"]),
         JsonValueKind.True => L["Yes"],
         JsonValueKind.False => L["No"],
         JsonValueKind.Number => value.GetRawText(),

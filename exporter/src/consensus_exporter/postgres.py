@@ -1,6 +1,7 @@
 """Transactional PostgreSQL export with immutable provenance and evidence."""
 
 from __future__ import annotations
+
 import hashlib
 import json
 import math
@@ -9,9 +10,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
+
 import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
+
 from .media import MediaCache, discover_media
 from .models import ExportCase
 
@@ -20,6 +23,41 @@ _SCHEMA = Path(__file__).with_name("schema.sql")
 
 def ensure_schema(conn) -> None:
     conn.execute(_SCHEMA.read_text())
+
+
+def tombstone_listing(
+    database_url: str,
+    *,
+    external_id: str,
+    source_url: str | None = None,
+    verification_method: str = "http_404",
+    verified_at: datetime | None = None,
+) -> None:
+    external_id = external_id.strip()
+    if not external_id:
+        raise ValueError("external_id is required")
+    verified_at = verified_at or datetime.now(timezone.utc)
+    with psycopg.connect(database_url) as conn:
+        conn.execute(
+            "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (external_id,),
+        )
+        conn.execute(
+            """insert into delisted_listings
+            (external_id,source_url,verified_at,verification_method)
+            values (%s,%s,%s,%s)
+            on conflict (external_id) do update set
+            source_url=excluded.source_url,
+            verified_at=excluded.verified_at,
+            verification_method=excluded.verification_method""",
+            (external_id, source_url, verified_at, verification_method),
+        )
+        conn.execute(
+            """update listings set "State"='archived'::listing_state,
+            "ArchivedAt"=coalesce("ArchivedAt",%s)
+            where "ExternalId"=%s""",
+            (verified_at, external_id),
+        )
 
 
 def _canonical(value) -> tuple[str, str]:
@@ -305,7 +343,8 @@ class PostgresExporter:
             _purge_legacy_hard_rejects(conn, hard_rejected_ids)
             learning_rule = _active_learning_rule(conn)
             votes_table_exists = _table_exists(conn, "votes")
-            if _table_exists(conn, "delisted_listings"):
+            tombstone_table_exists = _table_exists(conn, "delisted_listings")
+            if tombstone_table_exists:
                 delisted_ids = {
                     row[0] for row in conn.execute("select external_id from delisted_listings").fetchall()
                 }
@@ -314,7 +353,18 @@ class PostgresExporter:
                 "INSERT INTO export_runs(run_id,source_scope,fetched_at) VALUES (%s,%s,%s) ON CONFLICT(run_id) DO NOTHING",
                 (run_id, self.source_scope, fetched_at),
             )
+            exported = 0
             for case in cases:
+                if tombstone_table_exists:
+                    conn.execute(
+                        "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                        (case.source_id,),
+                    )
+                    if conn.execute(
+                        "select exists(select 1 from delisted_listings where external_id=%s)",
+                        (case.source_id,),
+                    ).fetchone()[0]:
+                        continue
                 _, payload_hash = _canonical(case.raw)
                 evidence = case.ai_evidence or {}
                 state = "ai_rejected" if case.pipeline_decision == "ai_rejected" else "active"
@@ -507,6 +557,7 @@ class PostgresExporter:
                             media_cached += 1
                         except Exception:
                             media_errors += 1
+                exported += 1
             archived = conn.execute(
                 """UPDATE listings l SET "State"='archived',"ArchivedAt"=%s
                 FROM listing_export_state s WHERE s.listing_id=l."Id" AND s.source_scope=%s
@@ -522,4 +573,4 @@ class PostgresExporter:
                 "UPDATE export_runs SET completed_at=%s WHERE run_id=%s",
                 (datetime.now(timezone.utc), run_id),
             )
-        return ExportResult(len(cases), archived, media_cached, media_errors)
+        return ExportResult(exported, archived, media_cached, media_errors)

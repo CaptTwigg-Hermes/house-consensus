@@ -2,6 +2,8 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+
+import consensus_exporter.postgres as postgres_module
 import psycopg
 import pytest
 from consensus_exporter.models import ExportCase
@@ -163,6 +165,66 @@ def test_export_populates_house_card_facts(database_url):
     assert actual[21:] == (
         "extra_house", "good", "southwest", "likely", "4000", True, True, "two_family",
     )
+
+
+def test_tombstone_operation_archives_listing_and_records_identity(database_url):
+    exporter = PostgresExporter(database_url, ensure_schema_on_export=False)
+    exporter.export([_case("gone-via-operation")], run_id="before-tombstone")
+
+    postgres_module.tombstone_listing(
+        database_url,
+        external_id="  gone-via-operation  ",
+        source_url="https://www.boligsiden.dk/cases/gone-via-operation",
+        verification_method="http_404",
+    )
+
+    with psycopg.connect(database_url) as conn:
+        tombstone = conn.execute(
+            "select source_url, verification_method from delisted_listings where external_id=%s",
+            ("gone-via-operation",),
+        ).fetchone()
+        state = conn.execute(
+            'select "State"::text from listings where "ExternalId"=%s',
+            ("gone-via-operation",),
+        ).fetchone()
+    assert tombstone == (
+        "https://www.boligsiden.dk/cases/gone-via-operation",
+        "http_404",
+    )
+    assert state == ("archived",)
+
+
+def test_concurrent_uncommitted_tombstone_blocks_reimport(database_url):
+    exporter = PostgresExporter(database_url, ensure_schema_on_export=False)
+    external_id = "gone-concurrently"
+
+    with psycopg.connect(database_url) as tombstone_conn:
+        tombstone_conn.execute(
+            "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (external_id,),
+        )
+        tombstone_conn.execute(
+            "insert into delisted_listings(external_id,verified_at) values (%s,now())",
+            (external_id,),
+        )
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                exporter.export,
+                [_case(external_id)],
+                run_id="concurrent-tombstone",
+            )
+            time.sleep(0.15)
+            assert not future.done(), "export did not serialize with tombstoning"
+            tombstone_conn.commit()
+            result = future.result(timeout=5)
+
+    with psycopg.connect(database_url) as conn:
+        count = conn.execute(
+            'select count(*) from listings where "ExternalId"=%s',
+            (external_id,),
+        ).fetchone()[0]
+    assert result.exported == 0
+    assert count == 0
 
 
 def test_verified_delisted_tombstone_prevents_reimport(database_url):

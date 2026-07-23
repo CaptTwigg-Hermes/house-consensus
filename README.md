@@ -53,6 +53,16 @@ The importer reads `../houseshopping/state/house.db` by default. Pass `-SourceDb
 
 `/workspace/houseshopping` runs `export_consensus` after publish in an isolated subprocess when `CONSENSUS_EXPORT=1` is configured. That stage is non-fatal, logs failure to stderr, and leaves existing alert stdout and pipeline status unchanged.
 
+Record a listing independently verified as delisted before the next export. This transaction writes the durable tombstone and archives any current listing; future imports serialize on the same external ID and skip it:
+
+```sh
+uv run --project exporter house-consensus-export \
+  --database-url "$CONSENSUS_DATABASE_URL" \
+  --tombstone-external-id "SOURCE_EXTERNAL_ID" \
+  --tombstone-source-url "https://example.invalid/original-listing" \
+  --verification-method http_404
+```
+
 ## Production handoff and backup
 
 Do not deploy the loopback development overlay. For TrueNAS/Dockge keep the external PostgreSQL connection, use TLS through Cloudflare Tunnel, platform-managed required secrets, and no public service ports. Production cookies are always Secure. Schedule `scripts/backup-postgres.sh` daily; it makes an AES-256 encrypted dump and keeps 30 days. Keep `BACKUP_PASSPHRASE_FILE` as a protected mounted secret and test restores into a disposable database regularly.

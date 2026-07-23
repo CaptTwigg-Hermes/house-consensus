@@ -49,3 +49,38 @@ def test_cli_can_skip_unused_media_downloads(monkeypatch):
 
     assert cli.main() == 0
     assert captured["media_cache"] is None
+
+
+def test_cli_tombstones_without_loading_sqlite(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        cli,
+        "tombstone_listing",
+        lambda database_url, **kwargs: captured.update(database_url=database_url, **kwargs),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "load_sqlite_cases",
+        lambda _: (_ for _ in ()).throw(AssertionError("SQLite source loaded")),
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "house-consensus-export",
+            "--database-url",
+            "postgresql://example.test/db",
+            "--tombstone-external-id",
+            "gone-123",
+            "--tombstone-source-url",
+            "https://www.boligsiden.dk/cases/gone-123",
+        ],
+    )
+
+    assert cli.main() == 0
+    assert captured == {
+        "database_url": "postgresql://example.test/db",
+        "external_id": "gone-123",
+        "source_url": "https://www.boligsiden.dk/cases/gone-123",
+        "verification_method": "http_404",
+    }

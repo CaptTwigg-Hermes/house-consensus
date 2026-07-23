@@ -96,6 +96,7 @@ public sealed class I18n
         ["ScoreBreakdownUnavailable"] = ("Detailed score factors are not available for this import yet.", "Detaljerede scorefaktorer er endnu ikke tilgængelige for denne import."),
         ["EvidenceSummary"] = ("Assessment", "Vurdering"),
         ["EvidenceDetails"] = ("Evidence details", "Dokumentation"),
+        ["EvidenceUnavailable"] = ("Evidence could not be displayed safely.", "Dokumentationen kunne ikke vises sikkert."),
         ["ModelVersion"] = ("Model", "Model"),
         ["RuleVersion"] = ("Rules", "Regler"),
         ["FeedbackIntro"] = ("Review household feedback and export the full record.", "Gennemgå husstandens feedback og eksportér hele historikken."),
