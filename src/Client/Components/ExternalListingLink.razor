@@ -1,0 +1,11 @@
+@inject I18n L
+@if (SafeUrl is { } url)
+{
+    <a class="btn ghost source-link" target="_blank" rel="noopener noreferrer" href="@url" @onclick:stopPropagation="true">@L["Source"] ↗</a>
+}
+@code {
+    [Parameter] public string? Url { get; set; }
+    private string? SafeUrl => Uri.TryCreate(Url, UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+        ? uri.AbsoluteUri : null;
+}

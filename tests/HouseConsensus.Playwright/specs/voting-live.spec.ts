@@ -5,7 +5,7 @@ test('two members voting Like produces a live unanimous match', async ({ browser
   const household = await createTwoMemberHousehold(browser, mailpit, testInfo, testInfo.project.use.baseURL as string);
   try {
     await household.ownerPage.goto('/browse');
-    const href = await household.ownerPage.getByTestId('listing-card').first().getByRole('link').getAttribute('href');
+    const href = await household.ownerPage.getByTestId('listing-card').first().locator('.card-main').getAttribute('href');
     expect(href).toBeTruthy();
     await Promise.all([household.ownerPage.goto(href!), household.memberPage.goto(href!)]);
     await household.ownerPage.getByTestId('vote-interested').click();

@@ -7,6 +7,7 @@
     @if (Listing.YearBuilt.HasValue) { <span><strong>@Listing.YearBuilt</strong><small>@L["YearBuilt"]</small></span> }
     @if (Listing.Bathrooms.HasValue) { <span><strong>@Listing.Bathrooms</strong><small>@L["Bathrooms"]</small></span> }
     @if (Listing.EnergyLabel is not null) { <span class="energy-fact"><strong>@Listing.EnergyLabel</strong><small>@L["Energy"]</small></span> }
+    @if (Listing.CommuteMinutes.HasValue) { <span class="commute-fact"><strong>@Listing.CommuteMinutes min</strong><small>@L["Commute"]</small></span> }
 </div>
 
 @code {

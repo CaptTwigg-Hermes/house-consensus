@@ -15,7 +15,7 @@ App: `http://127.0.0.1:8080`; Mailpit: `http://127.0.0.1:8025`. The first startu
 
 Set `DEBUG_AUTO_LOGIN=true` in `.env` to authenticate automatically as `INITIAL_OWNER_EMAIL` when using `docker-compose.dev.yml`. The flag is wired only into the Development overlay; enabling it in any other ASP.NET environment aborts startup.
 
-Owner-triggered AI learning is disabled until `AI_LEARNING_BASE_URL` is configured. Use an authenticated HTTPS endpoint and optionally `AI_LEARNING_API_KEY`. Plain HTTP is accepted only for loopback, unless the deployment explicitly sets `AI_LEARNING_ALLOW_INSECURE_HTTP=true` for a trusted private network. `AI_LEARNING_MODEL` defaults to `gemma4:12b`.
+Owner-triggered AI learning defaults to the trusted LAN Ollama endpoint at `192.168.50.227:11434` with `gemma4:12b`. Override `AI_LEARNING_BASE_URL`, `AI_LEARNING_MODEL`, and optionally `AI_LEARNING_API_KEY` for another deployment. Public endpoints must use HTTPS. Plain HTTP requires both `AI_LEARNING_ALLOW_INSECURE_HTTP=true` and an exact host match in `AI_LEARNING_INSECURE_HTTP_ALLOWED_HOSTS`; the Compose default allowlists only `192.168.50.227`.
 
 ## Verification
 

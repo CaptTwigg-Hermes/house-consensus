@@ -46,7 +46,7 @@ test('Mobile browse keeps controls compact and opens filters in a bottom drawer'
   const tooltipId = await tooltip.getAttribute('id');
   expect(tooltipId).toBeTruthy();
   await expect(score).toHaveAttribute('aria-describedby', tooltipId!);
-  await score.focus();
+  await score.hover();
   await expect(tooltip).toBeVisible();
   await expect(tooltip).toContainText(/Privacy|Privatliv/);
   await expect(tooltip).toContainText(/Children's space|Børnerum/);
@@ -70,4 +70,21 @@ test('Browse persists applied parity filters independently', async ({ page, mail
   const keys = await page.evaluate(() => Object.keys(localStorage));
   expect(keys).toContain('hc.filters.browse');
   expect(keys).not.toContain('hc.filters.myvotes');
+});
+
+
+test('Listing detail shows commute and readable AI evidence without a conversation editor', async ({ page, mailpit }, testInfo) => {
+  await requestMagicLink(page, mailpit, identity(testInfo, 'owner'));
+  await page.goto('/browse');
+  const card = page.getByTestId('listing-card').first();
+  await expect(card.getByTestId('commute-table')).toContainText(/Høje Taastrup St\./);
+  await expect(card.getByTestId('commute-table')).toContainText(/20 min/);
+  await expect(card.getByTestId('commute-table')).toContainText(/31 min/);
+  await expect(card.getByRole('link', { name: /open original listing|åbn original annonce/i })).toHaveAttribute('target', '_blank');
+  await card.locator('.card-main').click();
+  const evidence = page.getByTestId('ai-evidence');
+  await expect(evidence).toBeVisible();
+  await expect(evidence).toContainText('Two private household zones');
+  await expect(evidence.locator('pre')).toHaveCount(0);
+  await expect(page.locator('.comment-form')).toHaveCount(0);
 });

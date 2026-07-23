@@ -199,6 +199,63 @@ public sealed class ClientUiTests
 
 
     [Fact]
+    public void Detail_and_vote_cards_surface_commute_readable_evidence_and_unclipped_notes()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var facts = File.ReadAllText(Path.Combine(root, "src/Client/Components/PropertyFacts.razor"));
+        var detail = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Detail.razor"));
+        var votes = File.ReadAllText(Path.Combine(root, "src/Client/Pages/MyVotes.razor"));
+        var listingLink = File.ReadAllText(Path.Combine(root, "src/Client/Components/ExternalListingLink.razor"));
+        var css = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/css/app.css"));
+
+        Assert.Contains("Listing.CommuteMinutes", facts, StringComparison.Ordinal);
+        Assert.Contains("AiEvidencePanel", detail, StringComparison.Ordinal);
+        Assert.Contains("uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps", listingLink, StringComparison.Ordinal);
+        Assert.Contains("liveSubscription?.Dispose()", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("comment-form", detail, StringComparison.Ordinal);
+        Assert.Contains("my-vote-current", votes, StringComparison.Ordinal);
+        Assert.Matches(@"\.household-votes \.vote-note-excerpt\s*\{[^}]*grid-column:\s*2/-1", css);
+        Assert.Matches(@"\.my-vote-copy\s*\{[^}]*min-width:\s*0", css);
+    }
+
+    [Fact]
+    public void Cards_and_review_show_full_commute_safe_listing_links_and_readable_ai_reasons()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var card = File.ReadAllText(Path.Combine(root, "src/Client/Components/ListingCard.razor"));
+        var commute = File.ReadAllText(Path.Combine(root, "src/Client/Components/CommuteTable.razor"));
+        var link = File.ReadAllText(Path.Combine(root, "src/Client/Components/ExternalListingLink.razor"));
+        var review = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Owner/Review.razor"));
+        var detail = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Detail.razor"));
+        var votes = File.ReadAllText(Path.Combine(root, "src/Client/Pages/MyVotes.razor"));
+        var contracts = File.ReadAllText(Path.Combine(root, "src/Shared/Contracts.cs"));
+
+        Assert.Contains("CommuteJson", contracts, StringComparison.Ordinal);
+        Assert.Contains("CommuteTable", card, StringComparison.Ordinal);
+        Assert.Contains("CommuteTable", detail, StringComparison.Ordinal);
+        Assert.Contains("CommuteTable", review, StringComparison.Ordinal);
+        Assert.Contains("CommuteTable", votes, StringComparison.Ordinal);
+        Assert.Contains("ExternalListingLink", card, StringComparison.Ordinal);
+        Assert.Contains("ExternalListingLink", review, StringComparison.Ordinal);
+        Assert.Contains("AiEvidencePanel", review, StringComparison.Ordinal);
+        Assert.Contains("PropertyFacts", review, StringComparison.Ordinal);
+        Assert.Contains("public", commute, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("bike", commute, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("car", commute, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Uri.UriSchemeHttp", link, StringComparison.Ordinal);
+        Assert.Contains("Uri.UriSchemeHttps", link, StringComparison.Ordinal);
+        Assert.Contains("target=\"_blank\"", link, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void E2e_routes_and_seed_data_are_disabled_in_production()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var program = File.ReadAllText(Path.Combine(root, "src/Server/Program.cs"));
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(program, "!app.Environment.IsProduction\\(\\) && app.Configuration.GetValue\\(\"E2E:SeedData\", false\\)").Count);
+    }
+
+    [Fact]
     public void Browse_field_migration_has_valid_rollback_sql()
     {
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);

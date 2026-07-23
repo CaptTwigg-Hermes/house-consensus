@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS listings (
     "KidsSpaceWeight" double precision, "GardenWeight" double precision,
     "SharedLivingWeight" double precision, "PracticalWeight" double precision,
     "Latitude" double precision, "Longitude" double precision,
-    "MonthlyExpense" integer, "DaysOnMarket" integer, "CommuteMinutes" integer,
+    "MonthlyExpense" integer, "DaysOnMarket" integer, "CommuteMinutes" integer, "CommuteJson" text,
     "BuildableStatus" text, "Condition" text, "GardenOrientation" text, "MultigenFit" text,
     "PostalCode" text, "Preferred" boolean, "IsNew" boolean, "FamilyUnits" text, "LearningRuleVersion" text
 );
@@ -53,6 +53,7 @@ ALTER TABLE listings ADD COLUMN IF NOT EXISTS "Longitude" double precision;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "MonthlyExpense" integer;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "DaysOnMarket" integer;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "CommuteMinutes" integer;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "CommuteJson" text;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "BuildableStatus" text;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "Condition" text;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "GardenOrientation" text;
@@ -69,6 +70,13 @@ CREATE TABLE IF NOT EXISTS listing_overrides (
     "OwnerId" uuid NOT NULL, "Action" override_action NOT NULL,
     "Reason" text, "CreatedAt" timestamptz NOT NULL
 );
+CREATE TABLE IF NOT EXISTS delisted_listings (
+    external_id text PRIMARY KEY,
+    source_url text,
+    verified_at timestamptz NOT NULL,
+    verification_method text NOT NULL DEFAULT 'http_404'
+);
+
 CREATE TABLE IF NOT EXISTS export_runs (
     run_id text PRIMARY KEY, source_scope text NOT NULL,
     fetched_at timestamptz NOT NULL, completed_at timestamptz

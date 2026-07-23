@@ -2,6 +2,8 @@
 @inject ApiClient Api
 @inject I18n L
 @inject IJSRuntime JS
+@inject LiveUpdates Live
+@implements IDisposable
 <PageTitle>@L["Browse"] · @L["AppName"]</PageTitle>
 <header class="page-head browse-head"><div><p class="eyebrow">@L["Browse"]</p><h1>@L["Browse"]</h1><p>@L["BrowseIntro"]</p></div>@if (allItems is not null) { <span class="count">@Visible.Count</span> }</header>
 <section class="browse-toolbar" aria-label="@L["Filters"]">
@@ -23,7 +25,12 @@ else { <div id="browse-map" data-testid="browse-map" class="map" aria-label="@L[
     private string view = "list";
     private bool filtersOpen, stateLoaded;
     private IReadOnlyList<ListingDto> Visible => allItems is null ? [] : applied.Apply(allItems);
-    protected override async Task OnInitializedAsync() => allItems = await Api.GetAsync<List<ListingDto>>("api/listings/browse") ?? [];
+    protected override async Task OnInitializedAsync()
+    {
+        Live.Changed += LiveChanged;
+        await Live.StartAsync();
+        await Reload();
+    }
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender || stateLoaded) return;
@@ -41,4 +48,7 @@ else { <div id="browse-map" data-testid="browse-map" class="map" aria-label="@L[
     private Task ShowList() { view = "list"; return Task.CompletedTask; }
     private async Task ShowMap() { view = "map"; await Task.Delay(1); await RenderMap(); }
     private async Task RenderMap() => await JS.InvokeVoidAsync("hc.renderMap", "browse-map", Visible.Where(x => x.Latitude.HasValue && x.Longitude.HasValue).Select(x => new { x.Id, x.Address, x.City, x.Latitude, x.Longitude, title = x.Address, price = x.Price, score = x.FamilyFitScore, image = $"/api/listings/{x.Id}/image", url = $"listing/{x.Id}" }));
+    private async Task Reload() => allItems = await Api.GetAsync<List<ListingDto>>("api/listings/browse") ?? [];
+    private void LiveChanged() => _ = InvokeAsync(async () => { await Reload(); StateHasChanged(); if (view == "map") { await Task.Delay(1); await RenderMap(); } });
+    public void Dispose() => Live.Changed -= LiveChanged;
 }

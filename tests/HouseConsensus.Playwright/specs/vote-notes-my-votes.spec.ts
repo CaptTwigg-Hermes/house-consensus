@@ -6,7 +6,7 @@ test('vote notes appear on compact My Votes cards and remain editable', async ({
   await page.goto('/browse');
   const card = page.getByTestId('listing-card').first();
   await expect(card).toBeVisible();
-  const href = await card.getByRole('link').getAttribute('href');
+  const href = await card.locator('.card-main').getAttribute('href');
   expect(href).toBeTruthy();
   await page.goto(href!);
   await page.getByTestId('vote-reject').click();
@@ -19,6 +19,11 @@ test('vote notes appear on compact My Votes cards and remain editable', async ({
   const voted = page.getByTestId('my-vote-card').first();
   await expect(voted).toBeVisible();
   await expect(voted.locator('.my-vote-image img')).toHaveAttribute('src', /\/api\/listings\/.+\/image$/);
+  await expect(voted.locator('.my-vote-current.dislike')).toBeVisible();
+  await expect(voted.getByTestId('commute-table')).toContainText(/20 min/);
+  const imageBox = (await voted.locator('.my-vote-image').boundingBox())!;
+  const copyBox = (await voted.locator('.my-vote-copy').boundingBox())!;
+  expect(copyBox.x).toBeGreaterThanOrEqual(imageBox.x + imageBox.width - 1);
   await expect(voted).toContainText('Kitchen needs too much work');
   await voted.getByTestId('my-vote-edit-note-open').click();
   await voted.getByTestId('my-vote-edit-note').fill('Kitchen and bathroom need too much work');

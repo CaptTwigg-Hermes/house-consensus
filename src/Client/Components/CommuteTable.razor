@@ -1,0 +1,50 @@
+@using System.Text.Json
+@inject I18n L
+@if (rows.Count > 0)
+{
+    <section class="commute-table @(Compact ? "compact" : "")" data-testid="commute-table">
+        <h3>@L["CommuteDetails"]</h3>
+        <div class="commute-grid commute-head"><span>@L["Destination"]</span><span>@L["Car"]</span><span>@L["PublicTransport"]</span><span>@L["Bike"]</span></div>
+        @foreach (var row in rows)
+        {
+            <div class="commute-grid"><strong>@row.Label</strong><span>@row.Car</span><span>@row.Public</span><span>@row.Bike</span></div>
+        }
+    </section>
+}
+@code {
+    [Parameter] public string? Json { get; set; }
+    [Parameter] public bool Compact { get; set; }
+    private readonly List<CommuteRow> rows = [];
+
+    protected override void OnParametersSet()
+    {
+        rows.Clear();
+        if (string.IsNullOrWhiteSpace(Json)) return;
+        try
+        {
+            using var document = JsonDocument.Parse(Json);
+            if (!document.RootElement.TryGetProperty("destinations", out var destinations) || destinations.ValueKind != JsonValueKind.Object) return;
+            foreach (var destination in destinations.EnumerateObject())
+            {
+                if (destination.Value.ValueKind != JsonValueKind.Object) continue;
+                var value = destination.Value;
+                var label = value.TryGetProperty("label", out var labelNode) && labelNode.ValueKind == JsonValueKind.String
+                    ? labelNode.GetString() ?? destination.Name : destination.Name;
+                rows.Add(new(label, Cell(value, "car"), Cell(value, "public"), Cell(value, "bike")));
+            }
+        }
+        catch (JsonException) { }
+    }
+
+    private string Cell(JsonElement destination, string mode)
+    {
+        if (!destination.TryGetProperty(mode, out var cell) || cell.ValueKind != JsonValueKind.Object) return "—";
+        if (!cell.TryGetProperty("min", out var minutes) || !minutes.TryGetDouble(out var value)) return "—";
+        var result = $"{Math.Round(value):0} min";
+        if (cell.TryGetProperty("km", out var km) && km.TryGetDouble(out var distance)) result += $" · {distance:0.#} km";
+        if (cell.TryGetProperty("transfers", out var transfers) && transfers.TryGetInt32(out var count)) result += $" · {count} {(count == 1 ? L["Transfer"] : L["Transfers"])}";
+        return result;
+    }
+
+    private sealed record CommuteRow(string Label, string Car, string Public, string Bike);
+}

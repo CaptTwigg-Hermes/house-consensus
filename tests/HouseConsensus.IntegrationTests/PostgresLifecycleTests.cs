@@ -518,6 +518,23 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
         Assert.Equal("audited-purge", reader.GetString(1));
     }
 
+    [Theory]
+    [InlineData("http://public.example.test")]
+    [InlineData("http://localhost:11434")]
+    public async Task Ai_learning_rejects_non_allowlisted_plain_http_hosts(string baseUrl)
+    {
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["AiLearning:BaseUrl"] = baseUrl,
+            ["AiLearning:AllowInsecureHttp"] = "true",
+            ["AiLearning:InsecureHttpAllowedHosts"] = "192.168.50.227",
+        }).Build();
+        var generator = new OllamaAiRuleGenerator(new HttpClient(), config);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => generator.GenerateAsync([], TestContext.Current.CancellationToken));
+        Assert.Contains("allowlisted", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task E2E_seed_is_idempotent_and_covers_active_and_rejected_review_flows()
     {

@@ -248,6 +248,8 @@ def _card_facts(case: ExportCase) -> tuple:
         _integer(raw, "monthly_expense", "monthlyExpense"),
         _integer(raw, "days_on_market", "daysOnMarket"),
         _commute_minutes(raw),
+        json.dumps(raw.get("commute"), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        if isinstance(raw.get("commute"), dict) else None,
         _first(raw, "buildable_status"),
         _first(raw, "vision_condition"),
         _first(raw, "vision_garden_orientation"),
@@ -303,6 +305,11 @@ class PostgresExporter:
             _purge_legacy_hard_rejects(conn, hard_rejected_ids)
             learning_rule = _active_learning_rule(conn)
             votes_table_exists = _table_exists(conn, "votes")
+            if _table_exists(conn, "delisted_listings"):
+                delisted_ids = {
+                    row[0] for row in conn.execute("select external_id from delisted_listings").fetchall()
+                }
+                cases = [case for case in cases if case.source_id not in delisted_ids]
             conn.execute(
                 "INSERT INTO export_runs(run_id,source_scope,fetched_at) VALUES (%s,%s,%s) ON CONFLICT(run_id) DO NOTHING",
                 (run_id, self.source_scope, fetched_at),
@@ -353,10 +360,10 @@ class PostgresExporter:
                      "SecondKitchen","PrivacyScore","FamilyPrivacyScore","KidsSpaceScore","GardenScore",
                      "SharedLivingScore","PracticalScore","FamilyPrivacyWeight","KidsSpaceWeight","GardenWeight",
                      "SharedLivingWeight","PracticalWeight","Latitude","Longitude","MonthlyExpense",
-                     "DaysOnMarket","CommuteMinutes","BuildableStatus","Condition","GardenOrientation","MultigenFit","PostalCode","Preferred","IsNew","FamilyUnits","LearningRuleVersion")
+                     "DaysOnMarket","CommuteMinutes","CommuteJson","BuildableStatus","Condition","GardenOrientation","MultigenFit","PostalCode","Preferred","IsNew","FamilyUnits","LearningRuleVersion")
                     VALUES (%s,%s,%s,%s,%s,%s,%s::listing_state,%s,%s,%s,%s,%s,%s,%s,%s,
                             %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT("ExternalId") DO UPDATE SET
                      "Address"=excluded."Address","City"=excluded."City","Price"=excluded."Price",
                      "FamilyFitScore"=excluded."FamilyFitScore",
@@ -387,7 +394,7 @@ class PostgresExporter:
                      "PracticalWeight"=excluded."PracticalWeight","Latitude"=excluded."Latitude",
                      "Longitude"=excluded."Longitude","MonthlyExpense"=excluded."MonthlyExpense",
                      "DaysOnMarket"=excluded."DaysOnMarket","CommuteMinutes"=excluded."CommuteMinutes",
-                     "BuildableStatus"=excluded."BuildableStatus","Condition"=excluded."Condition",
+                     "CommuteJson"=excluded."CommuteJson","BuildableStatus"=excluded."BuildableStatus","Condition"=excluded."Condition",
                      "GardenOrientation"=excluded."GardenOrientation","MultigenFit"=excluded."MultigenFit",
                      "PostalCode"=excluded."PostalCode","Preferred"=excluded."Preferred","IsNew"=excluded."IsNew","FamilyUnits"=excluded."FamilyUnits",
                      "LearningRuleVersion"=CASE WHEN EXISTS (SELECT 1 FROM listing_overrides o WHERE o."ListingId"=current."Id") THEN current."LearningRuleVersion" ELSE excluded."LearningRuleVersion" END
@@ -439,10 +446,10 @@ class PostgresExporter:
                     previous_version = existing[2] if existing else None
                     conn.execute(
                         """INSERT INTO ai_rule_applications
-                        ("ProposalId","ListingId","PreviousState","PreviousLearningRuleVersion","AppliedState","AppliedAt")
-                        VALUES (%s,%s,%s::listing_state,%s,%s::listing_state,%s)
+                        ("ProposalId","ListingId","ListingExternalId","PreviousState","PreviousLearningRuleVersion","AppliedState","AppliedAt")
+                        VALUES (%s,%s,%s,%s::listing_state,%s,%s::listing_state,%s)
                         ON CONFLICT ("ProposalId","ListingId") DO NOTHING""",
-                        (learning_rule[0], listing_id, previous_state, previous_version, state, fetched_at),
+                        (learning_rule[0], listing_id, case.source_id, previous_state, previous_version, state, fetched_at),
                     )
                 conn.execute(
                     """INSERT INTO listing_imports

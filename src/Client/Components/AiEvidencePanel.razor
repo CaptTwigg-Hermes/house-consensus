@@ -1,0 +1,91 @@
+@using System.Text.Json
+@inject I18n L
+
+<section class="ai-evidence" data-testid="ai-evidence">
+    <div class="evidence-meta">
+        @if (Confidence.HasValue) { <span class="evidence-confidence"><strong>@Confidence.Value.ToString("P0")</strong> @L["Confidence"]</span> }
+        @if (!string.IsNullOrWhiteSpace(ModelVersion)) { <span>@L["ModelVersion"]: @ModelVersion</span> }
+    </div>
+    @if (summaries.Count > 0)
+    {
+        <div class="evidence-highlights"><h3>@L["EvidenceSummary"]</h3>@foreach (var item in summaries) { <p>@item</p> }</div>
+    }
+    @if (facts.Count > 0)
+    {
+        <div class="evidence-facts"><h3>@L["EvidenceDetails"]</h3><dl>@foreach (var item in facts) { <div><dt>@Humanize(item.Key)</dt><dd>@item.Value</dd></div> }</dl></div>
+    }
+    @if (summaries.Count == 0 && facts.Count == 0) { <p class="muted">@L["NotAssessed"]</p> }
+</section>
+
+@code {
+    [Parameter] public string? Evidence { get; set; }
+    [Parameter] public double? Confidence { get; set; }
+    [Parameter] public string? ModelVersion { get; set; }
+    private readonly List<string> summaries = [];
+    private readonly List<KeyValuePair<string, string>> facts = [];
+    private static readonly HashSet<string> SummaryKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "vision_summary", "vision_fit_reason", "vision_dwelling_evidence", "two_family_reasons",
+        "reason", "reasons", "summary", "rationale"
+    };
+
+    protected override void OnParametersSet()
+    {
+        summaries.Clear(); facts.Clear();
+        if (string.IsNullOrWhiteSpace(Evidence)) return;
+        try
+        {
+            using var document = JsonDocument.Parse(Evidence);
+            Flatten(document.RootElement, "");
+        }
+        catch (JsonException)
+        {
+            summaries.Add(Evidence.Trim());
+        }
+    }
+
+    private void Flatten(JsonElement element, string prefix)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (property.NameEquals("model_version") || property.NameEquals("rule_version")) continue;
+                Flatten(property.Value, property.Name);
+            }
+            return;
+        }
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            var values = element.EnumerateArray().Select(Display).Where(x => !string.IsNullOrWhiteSpace(x)).ToArray();
+            if (values.Length > 0) Add(prefix, string.Join(" · ", values));
+            return;
+        }
+        var value = Display(element);
+        if (!string.IsNullOrWhiteSpace(value) && value != "null") Add(prefix, value);
+    }
+
+    private void Add(string key, string value)
+    {
+        if (SummaryKeys.Contains(key)) summaries.Add(value);
+        else facts.Add(new(key, value));
+    }
+
+    private string Display(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.String => value.GetString() ?? "",
+        JsonValueKind.True => L["Yes"],
+        JsonValueKind.False => L["No"],
+        JsonValueKind.Number => value.GetRawText(),
+        JsonValueKind.Object => string.Join(" · ", value.EnumerateObject().Select(x => $"{Humanize(x.Name)}: {Display(x.Value)}")),
+        JsonValueKind.Array => string.Join(" · ", value.EnumerateArray().Select(Display)),
+        _ => ""
+    };
+
+    private string Humanize(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return L["Evidence"];
+        var words = value.Replace("vision_", "", StringComparison.OrdinalIgnoreCase).Replace('_', ' ');
+        return char.ToUpperInvariant(words[0]) + words[1..];
+    }
+}

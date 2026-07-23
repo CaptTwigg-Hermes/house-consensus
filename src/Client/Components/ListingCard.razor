@@ -1,24 +1,24 @@
 @inject I18n L
 <article class="listing-card @(Listing.Consensus ? "consensus-card" : "")" data-testid="listing-card" data-listing-id="@Listing.Id" data-price="@Listing.Price">
-    @if (HasScoreBreakdown)
-    {
-        <button type="button" class="score-chip" aria-describedby="@TooltipId" aria-label="@($"{L["FamilyFit"]}: {Math.Round(Listing.FamilyFitScore)} {L["OutOf100"]}")">
-            <strong>@Math.Round(Listing.FamilyFitScore)</strong><small>/100</small>
-            <span id="@TooltipId" class="score-tooltip" role="tooltip">
+    <button type="button" class="score-chip" aria-describedby="@TooltipId" aria-label="@($"{L["FamilyFit"]}: {Math.Round(Listing.FamilyFitScore)} {L["OutOf100"]}")">
+        <strong>@Math.Round(Listing.FamilyFitScore)</strong><small>/100</small>
+        <span id="@TooltipId" class="score-tooltip" role="tooltip">
+            @if (HasScoreBreakdown)
+            {
                 <span class="score-tooltip-heading"><span>@L["Dimension"]</span><span>@L["Score"]</span><span>@L["Contribution"]</span></span>
                 @ScoreRow(L["Privacy"], Listing.FamilyPrivacyScore!.Value, Listing.FamilyPrivacyWeight!.Value)
                 @ScoreRow(L["KidsSpace"], Listing.KidsSpaceScore!.Value, Listing.KidsSpaceWeight!.Value)
                 @ScoreRow(L["Garden"], Listing.GardenScore!.Value, Listing.GardenWeight!.Value)
                 @ScoreRow(L["SharedLiving"], Listing.SharedLivingScore!.Value, Listing.SharedLivingWeight!.Value)
                 @ScoreRow(L["Practical"], Listing.PracticalScore!.Value, Listing.PracticalWeight!.Value)
-                <span class="score-tooltip-total"><span>@L["Total"]</span><span>@Listing.FamilyFitScore.ToString("0.#")</span></span>
-            </span>
-        </button>
-    }
-    else
-    {
-        <span class="score-chip" aria-label="@($"{L["FamilyFit"]}: {Math.Round(Listing.FamilyFitScore)} {L["OutOf100"]}")"><strong>@Math.Round(Listing.FamilyFitScore)</strong><small>/100</small></span>
-    }
+            }
+            else
+            {
+                <span class="score-tooltip-empty">@L["ScoreBreakdownUnavailable"]</span>
+            }
+            <span class="score-tooltip-total"><span>@L["Total"]</span><span>@Listing.FamilyFitScore.ToString("0.#")</span></span>
+        </span>
+    </button>
     <NavLink class="card-main" href="@($"listing/{Listing.Id}")" aria-label="@($"{Listing.Address}, {Price}")">
         <div class="card-image">
             @if (!string.IsNullOrWhiteSpace(Listing.PreviewImageUrl))
@@ -39,6 +39,7 @@
                 <div class="card-price"><strong>@Price</strong>@if (PricePerArea is not null) { <small>@PricePerArea</small> }</div>
             </div>
             <PropertyFacts Listing="Listing" />
+            <CommuteTable Json="@Listing.CommuteJson" Compact="true" />
             @if (HasFitSignals)
             {
                 <div class="fit-signals" aria-label="@L["FamilyFitSignals"]">
@@ -55,6 +56,7 @@
             </footer>
         </div>
     </NavLink>
+    <div class="card-external"><ExternalListingLink Url="@Listing.SourceUrl" /></div>
     @if (ShowVoting) { <VoteButtons ListingId="Listing.Id" OnVoted="OnVoted" /> }
 </article>
 @code {

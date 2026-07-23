@@ -93,6 +93,18 @@ app.MapPost("/api/learning/{id:guid}/approve", async (Guid id, ClaimsPrincipal u
 app.MapPost("/api/learning/{id:guid}/reject", async (Guid id, ClaimsPrincipal user, AiLearningService learning, CancellationToken ct) => { try { var proposal = await learning.RejectAsync(id, user.MemberId(), ct); return proposal is null ? Results.NotFound() : Results.Ok(ToAiRuleProposalDto(proposal)); } catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); } }).RequireAuthorization("owner");
 app.MapPost("/api/learning/{id:guid}/deactivate", async (Guid id, ClaimsPrincipal user, AiLearningService learning, CancellationToken ct) => { var proposal = await learning.DeactivateAsync(id, user.MemberId(), ct); return proposal is null ? Results.NotFound() : Results.Ok(ToAiRuleProposalDto(proposal)); }).RequireAuthorization("owner");
 
+if (!app.Environment.IsProduction() && app.Configuration.GetValue("E2E:SeedData", false))
+{
+    app.MapPost("/api/e2e/reset-review-listing", async (AppDbContext db, CancellationToken ct) =>
+    {
+        var listing = await db.Listings.SingleAsync(x => x.ExternalId == "e2e-rejected", ct);
+        await db.ListingOverrides.Where(x => x.ListingId == listing.Id).ExecuteDeleteAsync(ct);
+        listing.ApplyImportDecision(true);
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
+    }).RequireAuthorization("owner");
+}
+
 app.MapFallbackToFile("index.html");
 await Bootstrap(app);
 app.Run();
@@ -107,17 +119,21 @@ static async Task Bootstrap(WebApplication app)
         await ((NpgsqlConnection)db.Database.GetDbConnection()).ReloadTypesAsync();
     }
     var owner = MagicLinkService.Normalize(app.Configuration["INITIAL_OWNER_EMAIL"] ?? ""); if (!string.IsNullOrWhiteSpace(owner) && !await db.Members.AnyAsync()) { db.Members.Add(new Member { Email = owner, Role = MemberRole.Owner }); await db.SaveChangesAsync(); }
-    if (app.Configuration.GetValue("E2E:SeedData", false)) await E2EDataSeeder.SeedAsync(db);
+    if (!app.Environment.IsProduction() && app.Configuration.GetValue("E2E:SeedData", false)) await E2EDataSeeder.SeedAsync(db);
 }
 static bool IsEmail(string value) => System.Net.Mail.MailAddress.TryCreate(value, out var parsed) && parsed.Address == value.Trim();
 static async Task SignIn(HttpContext c, Member m) { var claims = new[] { new Claim(ClaimTypes.NameIdentifier, m.Id.ToString()), new Claim(ClaimTypes.Email, m.Email), new Claim(ClaimTypes.Role, m.Role.ToString()) }; await c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme)), new AuthenticationProperties { IsPersistent = true, ExpiresUtc = DateTimeOffset.UtcNow.AddDays(30) }); }
 static MemberDto ToMemberDto(Member m) => new(m.Id, m.Email, m.DisplayName, m.Language, m.Role, m.IsActive);
 static VoteDto ToVoteDto(Vote v) => new(v.Id, v.ListingId, v.MemberId, v.Choice, v.Tags, v.CreatedAt, v.Note);
 static AiRuleProposalDto ToAiRuleProposalDto(AiRuleProposal x) { var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true }; var impact = JsonSerializer.Deserialize<AiRuleImpactDto>(x.ImpactPreviewJson, options) ?? new(0, 0, 0, 0, 0, []); var notes = JsonSerializer.Deserialize<List<AiRuleSourceNoteDto>>(x.SupportingNotesJson, options) ?? []; return new(x.Id, x.Version, x.VersionLabel, x.Summary, x.RuleJson, impact, notes, x.Status, x.IsActive, x.CreatedAt, x.ReviewedAt); }
-static async Task<List<ListingDto>> ListingDtos(IQueryable<Listing> query, AppDbContext db, CancellationToken ct) { var items = await query.AsNoTracking().ToListAsync(ct); var ids = items.Select(x => x.Id).ToArray(); var votes = await db.Votes.AsNoTracking().Where(x => ids.Contains(x.ListingId)).ToListAsync(ct); var active = await db.Members.AsNoTracking().Where(x => x.IsActive).Select(x => x.Id).ToListAsync(ct); return items.Select(x => { var vs = votes.Where(v => v.ListingId == x.Id).ToList(); return new ListingDto(x.Id, x.ExternalId, x.Address, x.City, x.Price, x.FamilyFitScore, x.State, x.AiAssessed, x.AiConfidence, x.AiEvidence, x.ModelVersion, x.RuleVersion, x.SourceUrl, ConsensusRules.HasConsensus(active, vs), ConsensusRules.LatestVotes(vs).Values.Select(ToVoteDto).ToArray(), x.PreviewImageUrl, x.LivingArea, x.LotArea, x.Rooms, x.YearBuilt, x.Bathrooms, x.Bedrooms, x.Floors, x.EnergyLabel, x.Quiet, x.BuildableHeadroom, x.GroundFloorBedroom, x.SeparateEntrance, x.SecondKitchen, x.PrivacyScore, x.FamilyPrivacyScore, x.KidsSpaceScore, x.GardenScore, x.SharedLivingScore, x.PracticalScore, x.FamilyPrivacyWeight, x.KidsSpaceWeight, x.GardenWeight, x.SharedLivingWeight, x.PracticalWeight, x.Latitude, x.Longitude, x.MonthlyExpense, x.DaysOnMarket, x.CommuteMinutes, x.BuildableStatus, x.Condition, x.GardenOrientation, x.MultigenFit, x.ImportedAt, x.PostalCode, x.Preferred, x.IsNew, x.FamilyUnits); }).ToList(); }
+static async Task<List<ListingDto>> ListingDtos(IQueryable<Listing> query, AppDbContext db, CancellationToken ct) { var items = await query.AsNoTracking().ToListAsync(ct); var ids = items.Select(x => x.Id).ToArray(); var votes = await db.Votes.AsNoTracking().Where(x => ids.Contains(x.ListingId)).ToListAsync(ct); var active = await db.Members.AsNoTracking().Where(x => x.IsActive).Select(x => x.Id).ToListAsync(ct); return items.Select(x => { var vs = votes.Where(v => v.ListingId == x.Id).ToList(); return new ListingDto(x.Id, x.ExternalId, x.Address, x.City, x.Price, x.FamilyFitScore, x.State, x.AiAssessed, x.AiConfidence, x.AiEvidence, x.ModelVersion, x.RuleVersion, x.SourceUrl, ConsensusRules.HasConsensus(active, vs), ConsensusRules.LatestVotes(vs).Values.Select(ToVoteDto).ToArray(), x.PreviewImageUrl, x.LivingArea, x.LotArea, x.Rooms, x.YearBuilt, x.Bathrooms, x.Bedrooms, x.Floors, x.EnergyLabel, x.Quiet, x.BuildableHeadroom, x.GroundFloorBedroom, x.SeparateEntrance, x.SecondKitchen, x.PrivacyScore, x.FamilyPrivacyScore, x.KidsSpaceScore, x.GardenScore, x.SharedLivingScore, x.PracticalScore, x.FamilyPrivacyWeight, x.KidsSpaceWeight, x.GardenWeight, x.SharedLivingWeight, x.PracticalWeight, x.Latitude, x.Longitude, x.MonthlyExpense, x.DaysOnMarket, x.CommuteMinutes, x.BuildableStatus, x.Condition, x.GardenOrientation, x.MultigenFit, x.ImportedAt, x.PostalCode, x.Preferred, x.IsNew, x.FamilyUnits, x.CommuteJson); }).ToList(); }
 static async Task<bool> HasConsensus(Guid listingId, AppDbContext db, CancellationToken ct) => ConsensusRules.HasConsensus(await db.Members.Where(x => x.IsActive).Select(x => x.Id).ToListAsync(ct), await db.Votes.Where(x => x.ListingId == listingId).ToListAsync(ct));
 static async Task<IResult> ChangeComment(Guid id, ClaimsPrincipal user, AppDbContext db, IHubContext<ConsensusHub> hub, TimeProvider clock, string? body, bool delete, CancellationToken ct) { var c = await db.Comments.Include(x => x.Revisions).SingleOrDefaultAsync(x => x.Id == id, ct); if (c is null || !await CanAccessListing(c.ListingId, user, db, ct)) return Results.NotFound(); try { if (delete) c.Delete(user.MemberId(), user.IsInRole(MemberRole.Owner.ToString()), clock.GetUtcNow()); else c.Edit(user.MemberId(), user.IsInRole(MemberRole.Owner.ToString()), body!, clock.GetUtcNow()); await db.SaveChangesAsync(ct); await hub.Clients.Group($"listing:{c.ListingId}").SendAsync("CommentChanged", c.Id, delete ? "deleted" : "edited", ct); return Results.Ok(new { c.Id, c.Body, c.IsDeleted, c.UpdatedAt }); } catch (DomainException ex) { return Results.Json(new { error = ex.Message }, statusCode: 403); } }
-static string Csv(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
+static string Csv(string value)
+{
+    if (value.Length > 0 && value[0] is '=' or '+' or '-' or '@' or '\t' or '\r') value = $"'{value}";
+    return $"\"{value.Replace("\"", "\"\"")}\"";
+}
 static async Task NotifyMembershipConsensus(Guid memberId, bool active, AppDbContext db, IHubContext<ConsensusHub> hub, CancellationToken ct) { await hub.Clients.All.SendAsync("MembershipChanged", memberId, active, ct); var listingIds = await db.Listings.Where(x => x.State == ListingState.Active || x.State == ListingState.Restored).Select(x => x.Id).ToListAsync(ct); foreach (var listingId in listingIds) await hub.Clients.All.SendAsync("ConsensusChanged", listingId, await HasConsensus(listingId, db, ct), ct); }
 static async Task<bool> CanAccessListing(Guid id, ClaimsPrincipal user, AppDbContext db, CancellationToken ct) { var state = await db.Listings.Where(x => x.Id == id).Select(x => (ListingState?)x.State).SingleOrDefaultAsync(ct); return state.HasValue && (state is ListingState.Active or ListingState.Restored or ListingState.Archived || user.IsInRole(MemberRole.Owner.ToString())); }
 public static partial class Program { }

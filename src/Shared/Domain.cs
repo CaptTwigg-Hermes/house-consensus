@@ -61,6 +61,7 @@ public sealed class Listing
     public int? MonthlyExpense { get; set; }
     public int? DaysOnMarket { get; set; }
     public int? CommuteMinutes { get; set; }
+    public string? CommuteJson { get; set; }
     public string? BuildableStatus { get; set; }
     public string? Condition { get; set; }
     public string? GardenOrientation { get; set; }
@@ -245,6 +246,7 @@ public sealed class AiRuleApplication
     public long Id { get; init; }
     public Guid ProposalId { get; init; }
     public Guid ListingId { get; init; }
+    public required string ListingExternalId { get; init; }
     public ListingState PreviousState { get; init; }
     public string? PreviousLearningRuleVersion { get; init; }
     public ListingState AppliedState { get; init; }

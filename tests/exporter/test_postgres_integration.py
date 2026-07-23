@@ -124,7 +124,13 @@ def test_export_populates_house_card_facts(database_url):
         _coordinates={"lat": 55.7, "lon": 12.4},
         monthly_expense=5244,
         days_on_market=18,
-        commute={"destinations": {"work": {"car": {"min": 31}}, "station": {"car": {"min": 22}}}},
+        commute={
+            "status": "ok",
+            "destinations": {
+                "work": {"label": "Capt Twigg", "car": {"min": 31, "km": 26.4}, "bike": {"min": 74, "km": 23.1}, "public": {"min": 52, "transfers": 1}},
+                "station": {"label": "Girlfriend", "car": {"min": 22, "km": 18.0}},
+            },
+        },
         buildable_status="extra_house",
         vision_condition="good",
         vision_garden_orientation="southwest",
@@ -143,15 +149,37 @@ def test_export_populates_house_card_facts(database_url):
                       "Bathrooms","Bedrooms","Floors","EnergyLabel","Quiet",
                       "BuildableHeadroom","GroundFloorBedroom","SeparateEntrance",
                       "SecondKitchen","PrivacyScore","Latitude","Longitude",
-                      "MonthlyExpense","DaysOnMarket","CommuteMinutes","BuildableStatus",
+                      "MonthlyExpense","DaysOnMarket","CommuteMinutes","CommuteJson","BuildableStatus",
                       "Condition","GardenOrientation","MultigenFit","PostalCode","Preferred","IsNew","FamilyUnits"
                FROM listings WHERE "ExternalId"='card' '''
         ).fetchone()
-    assert actual == (
+    assert actual[:20] == (
         "https://images.example.test/house.webp", 249, 1563, 8, 1948,
         2, 3, 1, "A2020", True, 220, True, True, True, 5,
-        55.7, 12.4, 5244, 18, 22, "extra_house", "good", "southwest", "likely", "4000", True, True, "two_family",
+        55.7, 12.4, 5244, 18, 22,
     )
+    commute = __import__("json").loads(actual[20])
+    assert commute["destinations"]["work"]["public"] == {"min": 52, "transfers": 1}
+    assert actual[21:] == (
+        "extra_house", "good", "southwest", "likely", "4000", True, True, "two_family",
+    )
+
+
+def test_verified_delisted_tombstone_prevents_reimport(database_url):
+    with psycopg.connect(database_url) as conn:
+        conn.execute(
+            "insert into delisted_listings(external_id,source_url,verified_at) values (%s,%s,now())",
+            ("gone", "https://www.boligsiden.dk/cases/gone"),
+        )
+        conn.commit()
+
+    result = PostgresExporter(database_url).export([_case("gone")], run_id="delisted")
+
+    assert result.exported == 0
+    with psycopg.connect(database_url) as conn:
+        assert conn.execute(
+            'select count(*) from listings where "ExternalId"=%s', ("gone",)
+        ).fetchone() == (0,)
 
 
 def test_exports_family_score_breakdown(database_url):
@@ -288,8 +316,9 @@ def test_active_owner_approved_learning_rule_applies_to_future_unvoted_imports(d
             ('{"combinator":"all","conditions":[{"field":"condition","operator":"eq","value":"poor"}]}',),
         )
         conn.execute('''CREATE TABLE ai_rule_applications (
-            "ProposalId" uuid, "ListingId" uuid, "PreviousState" listing_state,
-            "PreviousLearningRuleVersion" text, "AppliedState" listing_state, "AppliedAt" timestamptz,
+            "ProposalId" uuid, "ListingId" uuid, "ListingExternalId" text,
+            "PreviousState" listing_state, "PreviousLearningRuleVersion" text,
+            "AppliedState" listing_state, "AppliedAt" timestamptz,
             UNIQUE ("ProposalId","ListingId"))''')
     exporter = PostgresExporter(database_url)
     exporter.export([

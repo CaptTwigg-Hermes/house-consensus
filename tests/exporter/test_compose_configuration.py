@@ -75,3 +75,12 @@ def test_main_compose_uses_external_postgres_5433_for_app_and_importer():
     assert "dbname=${POSTGRES_DB:-house_consensus} user=${POSTGRES_USER:-house_consensus}" in dev
     assert "  postgres:\n" not in base
     assert "postgres-data" not in base
+
+
+def test_main_compose_configures_reachable_private_ai_learning_endpoint():
+    compose = Path("docker-compose.yml").read_text()
+
+    assert "AiLearning__BaseUrl: ${AI_LEARNING_BASE_URL:-http://192.168.50.227:11434}" in compose
+    assert "AiLearning__Model: ${AI_LEARNING_MODEL:-gemma4:12b}" in compose
+    assert "AiLearning__AllowInsecureHttp: ${AI_LEARNING_ALLOW_INSECURE_HTTP:-true}" in compose
+    assert "AiLearning__InsecureHttpAllowedHosts: ${AI_LEARNING_INSECURE_HTTP_ALLOWED_HOSTS:-192.168.50.227}" in compose
