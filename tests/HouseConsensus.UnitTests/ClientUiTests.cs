@@ -160,6 +160,7 @@ public sealed class ClientUiTests
         Assert.Contains("x.Latitude.HasValue && x.Longitude.HasValue", browse, StringComparison.Ordinal);
         Assert.Contains("listing.latitude", js, StringComparison.Ordinal);
         Assert.Contains("listing.image", js, StringComparison.Ordinal);
+        Assert.Contains("scrollWheelZoom: true", js, StringComparison.Ordinal);
         Assert.Contains("listing.score", js, StringComparison.Ordinal);
         Assert.DoesNotContain("nominatim", js, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("setTimeout(resolve, 1100)", js, StringComparison.Ordinal);

@@ -15,6 +15,11 @@ test('Browse applies price filters and renders the filtered homes on the map', a
   await page.getByRole('button', { name: /map|kort/i }).click();
   await expect(page.getByTestId('browse-map')).toBeVisible();
   await expect(page.getByTestId('browse-map')).toHaveClass(/leaflet-container/);
+  const map = page.getByTestId('browse-map');
+  const zoomBeforeWheel = await page.evaluate(() => (window as unknown as { hc: { maps: Record<string, { getZoom(): number }> } }).hc.maps['browse-map']!.getZoom());
+  await map.hover();
+  await page.mouse.wheel(0, -600);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { hc: { maps: Record<string, { getZoom(): number }> } }).hc.maps['browse-map']!.getZoom())).toBeGreaterThan(zoomBeforeWheel);
   const marker = page.locator('.leaflet-marker-icon').first();
   await expect(marker).toBeVisible();
   await marker.click();

@@ -5,7 +5,7 @@ window.hc = {
   renderMap: function (id, listings) {
     if (!window.L) return;
     if (this.maps[id]) { this.maps[id].remove(); delete this.maps[id]; }
-    const map = L.map(id, { scrollWheelZoom: false }).setView([55.68, 12.2], 9);
+    const map = L.map(id, { scrollWheelZoom: true }).setView([55.68, 12.2], 9);
     this.maps[id] = map;
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(map);
     const group = L.markerClusterGroup ? L.markerClusterGroup({ showCoverageOnHover: false }) : L.layerGroup();
