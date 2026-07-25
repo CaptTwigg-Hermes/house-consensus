@@ -51,7 +51,7 @@
                 </div>
             }
             <footer class="card-footer">
-                <span class="vote-dots" aria-label="@L["Everyone"]">@foreach (var vote in Listing.Votes) { <i class="@(vote.Choice == VoteChoice.Like ? "like" : "dislike")" title="@L.Enum(vote.Choice)">@(vote.Choice == VoteChoice.Like ? "♥" : "×")</i> }</span>
+                <span class="vote-dots" aria-label="@L["Everyone"]">@foreach (var vote in Listing.Votes) { <i class="@(vote.Choice == VoteChoice.Like ? "like" : "dislike")" title="@L.Enum(vote.Choice)"><span class="vote-symbol">@(vote.Choice == VoteChoice.Like ? "♥" : "×")</span></i> }</span>
                 <span class="detail-link">@L["ViewDetails"] <b aria-hidden="true">→</b></span>
             </footer>
         </div>

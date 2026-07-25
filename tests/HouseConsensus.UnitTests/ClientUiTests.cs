@@ -193,6 +193,20 @@ public sealed class ClientUiTests
     }
 
     [Fact]
+    public void Dislike_vote_mark_has_no_extra_bottom_leading()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var card = File.ReadAllText(Path.Combine(root, "src/Client/Components/ListingCard.razor"));
+        var css = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/css/app.css"));
+
+        Assert.Contains("vote-symbol", card, StringComparison.Ordinal);
+        Assert.Contains(".vote-dots .vote-symbol", css, StringComparison.Ordinal);
+        Assert.Contains("line-height: 1", css, StringComparison.Ordinal);
+        Assert.Contains(".vote-dots .dislike .vote-symbol", css, StringComparison.Ordinal);
+        Assert.Contains("translateY(1.5px)", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Score_chip_is_compact_and_explains_the_weighted_breakdown()
     {
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);

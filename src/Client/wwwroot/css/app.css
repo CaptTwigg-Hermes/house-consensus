@@ -330,12 +330,21 @@ a {
   color: #fff
 }
 
+.vote-dots .vote-symbol {
+  display: block;
+  line-height: 1;
+}
+
 .vote-dots .like {
   background: var(--forest-2)
 }
 
 .vote-dots .dislike {
   background: var(--red)
+}
+
+.vote-dots .dislike .vote-symbol {
+  transform: translateY(1.5px);
 }
 
 .vote-actions {
