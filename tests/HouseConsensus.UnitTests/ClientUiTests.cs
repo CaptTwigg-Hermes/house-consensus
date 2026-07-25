@@ -15,6 +15,20 @@ public sealed class ClientUiTests
         Assert.DoesNotContain("summaries.Add(Evidence.Trim())", evidence, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Ai_evidence_keeps_shared_supporting_signals_out_of_assessment()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var component = File.ReadAllText(Path.Combine(root, "src/Client/Components/AiEvidencePanel.razor"));
+        var summaryKeysStart = component.IndexOf("SummaryKeys", StringComparison.Ordinal);
+        var summaryKeysEnd = component.IndexOf("};", summaryKeysStart, StringComparison.Ordinal);
+        var summaryKeys = component[summaryKeysStart..summaryKeysEnd];
+
+        Assert.Contains("\"vision_summary\"", summaryKeys, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"two_family_reasons\"", summaryKeys, StringComparison.Ordinal);
+        Assert.Contains("else facts.Add", component, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("{broken", "Evidence unavailable")]
     [InlineData("[1,2]", "Evidence unavailable")]
