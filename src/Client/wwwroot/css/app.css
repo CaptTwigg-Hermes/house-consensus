@@ -213,7 +213,6 @@ a {
 
 .card-grid {
   display: grid;
-  align-items: start;
   gap: 14px
 }
 
@@ -1114,11 +1113,16 @@ body {
 }
 
 .listing-card {
+  display: flex;
+  flex-direction: column;
   border-radius: 22px;
   box-shadow: 0 10px 30px rgba(24, 57, 47, .07);
 }
 
 .card-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   padding: 0;
 }
 
@@ -1278,6 +1282,9 @@ body {
 }
 
 .card-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   padding: 18px;
 }
 
@@ -1383,7 +1390,7 @@ body {
   align-items: center;
   justify-content: space-between;
   min-height: 30px;
-  margin-top: 15px;
+  margin-top: auto;
   padding-top: 13px;
   border-top: 1px solid #ebe7dd;
 }

@@ -3,19 +3,33 @@ import { identity, requestMagicLink } from '../helpers/household.js';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-test('Browse cards do not stretch empty space below the original listing link', async ({ page }) => {
+test('Browse cards stay equal height without space below the original listing link', async ({ page }) => {
   const css = await readFile(resolve(__dirname, '../../../src/Client/wwwroot/css/app.css'), 'utf8');
   await page.setViewportSize({ width: 900, height: 800 });
   await page.setContent(`<style>${css}</style><section class="card-grid">
-    <article class="listing-card" data-testid="short-card"><a class="card-main"><div class="card-body" style="height:100px"><footer class="card-footer"><span class="vote-dots"><i class="dislike"><span class="vote-symbol">×</span></i></span></footer></div></a><div class="card-external"><a class="btn ghost source-link">Open original listing</a></div></article>
-    <article class="listing-card"><a class="card-main"><div class="card-body" style="height:220px"><footer class="card-footer"><span class="vote-dots"><i class="like"><span class="vote-symbol">♥</span></i></span></footer></div></a><div class="card-external"><a class="btn ghost source-link">Open original listing</a></div></article>
+    <article class="listing-card" data-testid="short-card"><a class="card-main"><div class="card-image"></div><div class="card-body"><div style="height:40px;flex:none"></div><footer class="card-footer"><span class="vote-dots"><i class="dislike"><span class="vote-symbol">×</span></i></span></footer></div></a><div class="card-external"><a class="btn ghost source-link">Open original listing</a></div></article>
+    <article class="listing-card"><a class="card-main"><div class="card-image"></div><div class="card-body"><div style="height:160px;flex:none"></div><footer class="card-footer"><span class="vote-dots"><i class="like"><span class="vote-symbol">♥</span></i></span></footer></div></a><div class="card-external"><a class="btn ghost source-link">Open original listing</a></div></article>
   </section>`);
 
-  const gapAfterExternalLink = await page.getByTestId('short-card').evaluate(card => {
-    const external = card.querySelector<HTMLElement>('.card-external')!;
-    return card.getBoundingClientRect().bottom - external.getBoundingClientRect().bottom;
-  });
-  expect(gapAfterExternalLink).toBeLessThanOrEqual(2);
+  const geometry = await page.locator('.listing-card').evaluateAll(cards => cards.map(card => {
+    const cardBox = card.getBoundingClientRect();
+    const footerBox = card.querySelector<HTMLElement>('.card-footer')!.getBoundingClientRect();
+    const externalBox = card.querySelector<HTMLElement>('.card-external')!.getBoundingClientRect();
+    const sourceLinkBox = card.querySelector<HTMLElement>('.source-link')!.getBoundingClientRect();
+    return {
+      height: cardBox.height,
+      footerTop: footerBox.top,
+      externalTop: externalBox.top,
+      gapAfterExternal: cardBox.bottom - externalBox.bottom,
+      gapUnderSourceLink: cardBox.bottom - sourceLinkBox.bottom
+    };
+  }));
+  expect(Math.max(...geometry.map(item => item.gapAfterExternal))).toBeLessThanOrEqual(2);
+  expect(Math.abs(geometry[0]!.height - geometry[1]!.height)).toBeLessThanOrEqual(2);
+  expect(Math.abs(geometry[0]!.footerTop - geometry[1]!.footerTop)).toBeLessThanOrEqual(2);
+  expect(Math.abs(geometry[0]!.externalTop - geometry[1]!.externalTop)).toBeLessThanOrEqual(2);
+  expect(Math.min(...geometry.map(item => item.gapUnderSourceLink))).toBeGreaterThanOrEqual(14);
+  expect(Math.max(...geometry.map(item => item.gapUnderSourceLink))).toBeLessThanOrEqual(16);
 });
 
 
