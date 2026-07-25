@@ -229,7 +229,6 @@ public sealed class ClientUiTests
         var listingLink = File.ReadAllText(Path.Combine(root, "src/Client/Components/ExternalListingLink.razor"));
         var css = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/css/app.css"));
 
-        Assert.Contains("Listing.CommuteMinutes", facts, StringComparison.Ordinal);
         Assert.Contains("AiEvidencePanel", detail, StringComparison.Ordinal);
         Assert.Contains("uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps", listingLink, StringComparison.Ordinal);
         Assert.Contains("liveSubscription?.Dispose()", detail, StringComparison.Ordinal);
@@ -250,6 +249,8 @@ public sealed class ClientUiTests
         var detail = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Detail.razor"));
         var votes = File.ReadAllText(Path.Combine(root, "src/Client/Pages/MyVotes.razor"));
         var contracts = File.ReadAllText(Path.Combine(root, "src/Shared/Contracts.cs"));
+        var facts = File.ReadAllText(Path.Combine(root, "src/Client/Components/PropertyFacts.razor"));
+        var css = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/css/app.css"));
 
         Assert.Contains("CommuteJson", contracts, StringComparison.Ordinal);
         Assert.Contains("CommuteTable", card, StringComparison.Ordinal);
@@ -266,6 +267,9 @@ public sealed class ClientUiTests
         Assert.Contains("Uri.UriSchemeHttp", link, StringComparison.Ordinal);
         Assert.Contains("Uri.UriSchemeHttps", link, StringComparison.Ordinal);
         Assert.Contains("target=\"_blank\"", link, StringComparison.Ordinal);
+        Assert.DoesNotContain("Listing.CommuteMinutes", facts, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"\.commute-table\s*\{[^}]*overflow-x:\s*auto", css);
+        Assert.DoesNotMatch(@"\.commute-grid\s*\{[^}]*min-width:\s*(350|390)px", css);
     }
 
     [Fact]

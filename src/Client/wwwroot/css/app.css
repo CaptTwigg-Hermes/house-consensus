@@ -1771,14 +1771,14 @@ textarea:focus-visible {
 
 
 /* Full source commute matrix shared by browse, detail, votes, and review. */
-.commute-table { margin-top: 12px; overflow-x: auto; }
+.commute-table { margin-top: 12px; }
 .commute-table h3 { margin: 0 0 8px; font-size: .95rem; color: var(--forest); }
-.commute-grid { display: grid; grid-template-columns: minmax(100px, 1.35fr) repeat(3, minmax(76px, 1fr)); gap: 8px; min-width: 390px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: .82rem; align-items: center; }
+.commute-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) repeat(3, minmax(0, 1fr)); gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: .82rem; align-items: center; }
 .commute-grid span:not(:first-child) { font-variant-numeric: tabular-nums; }
 .commute-head { color: var(--muted); font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
 .commute-table.compact { margin-top: 8px; }
 .commute-table.compact h3 { display: none; }
-.commute-table.compact .commute-grid { font-size: .74rem; min-width: 350px; }
+.commute-table.compact .commute-grid { font-size: .74rem; }
 .card-external { padding: 0 18px 14px; }
 .card-external .source-link { width: 100%; justify-content: center; }
 .review-card > header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }

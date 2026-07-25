@@ -182,7 +182,7 @@ class ExportCase:
                 "lng",
                 default=coordinates.get("lon") or coordinates.get("lng"),
             ),
-            source_url=_first(merged, "link", "caseUrl", "url"),
+            source_url=_first(merged, "maegler_url", "caseUrl", "link", "url"),
             family_score=_first(merged, "family_score"),
             non_ai_passed=non_ai_passed,
             ai_status=ai_status,

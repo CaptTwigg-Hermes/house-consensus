@@ -71,3 +71,16 @@ def test_match_coordinates_are_normalized_from_pipeline_private_field():
         {"id": "coords", "_coordinates": {"lat": 55.7, "lon": 12.4}},
     )
     assert (case.latitude, case.longitude) == (55.7, 12.4)
+
+
+def test_realtor_url_is_preferred_over_boligsiden_aggregator_url():
+    case = ExportCase.from_records(
+        {"caseID": "original-link"},
+        {
+            "id": "original-link",
+            "link": "https://www.boligsiden.dk/adresse/example",
+            "maegler_url": "https://estate.example/bolig/original-link",
+        },
+    )
+
+    assert case.source_url == "https://estate.example/bolig/original-link"
