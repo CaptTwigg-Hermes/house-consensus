@@ -213,6 +213,7 @@ a {
 
 .card-grid {
   display: grid;
+  align-items: start;
   gap: 14px
 }
 

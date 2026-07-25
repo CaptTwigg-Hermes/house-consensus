@@ -1,5 +1,23 @@
 import { test, expect } from '../fixtures/test.js';
 import { identity, requestMagicLink } from '../helpers/household.js';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+
+test('Browse cards do not stretch empty space below the original listing link', async ({ page }) => {
+  const css = await readFile(resolve(__dirname, '../../../src/Client/wwwroot/css/app.css'), 'utf8');
+  await page.setViewportSize({ width: 900, height: 800 });
+  await page.setContent(`<style>${css}</style><section class="card-grid">
+    <article class="listing-card" data-testid="short-card"><a class="card-main"><div class="card-body" style="height:100px"><footer class="card-footer"><span class="vote-dots"><i class="dislike"><span class="vote-symbol">×</span></i></span></footer></div></a><div class="card-external"><a class="btn ghost source-link">Open original listing</a></div></article>
+    <article class="listing-card"><a class="card-main"><div class="card-body" style="height:220px"><footer class="card-footer"><span class="vote-dots"><i class="like"><span class="vote-symbol">♥</span></i></span></footer></div></a><div class="card-external"><a class="btn ghost source-link">Open original listing</a></div></article>
+  </section>`);
+
+  const gapAfterExternalLink = await page.getByTestId('short-card').evaluate(card => {
+    const external = card.querySelector<HTMLElement>('.card-external')!;
+    return card.getBoundingClientRect().bottom - external.getBoundingClientRect().bottom;
+  });
+  expect(gapAfterExternalLink).toBeLessThanOrEqual(2);
+});
+
 
 test('Browse applies price filters and renders the filtered homes on the map', async ({ page, mailpit }, testInfo) => {
   await requestMagicLink(page, mailpit, identity(testInfo, 'owner'));
