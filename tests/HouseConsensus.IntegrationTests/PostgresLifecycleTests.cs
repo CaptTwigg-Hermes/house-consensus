@@ -7,6 +7,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using System.Net;
+using System.Net.Http.Json;
 using System.Security.Claims;
 using Npgsql;
 using Testcontainers.PostgreSql;
@@ -549,6 +553,107 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
         Assert.Contains(listings, x => x.State == ListingState.Active && x.Price == 4_500_000m);
         Assert.Contains(listings, x => x.State == ListingState.AiRejected && x.AiAssessed);
     }
+
+    [Fact]
+    public async Task Cloudflare_owner_invite_creates_pending_invite_without_sending_magic_link()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var now = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        var mail = new CaptureEmail();
+        await using var db = Db();
+        var owner = new Member { Email = "cf-owner-invite@example.test", Role = MemberRole.Owner };
+        db.Members.Add(owner);
+        await db.SaveChangesAsync(ct);
+        var config = Config(("PublicOrigin", "https://example.test"));
+        var links = new MagicLinkService(db, mail, config, now);
+        var service = new InviteService(db, links, new CloudflareAccessOptions(true, "team.cloudflareaccess.com", "audience"), now);
+
+        var invite = await service.CreateAsync("CF-NEW@example.test", owner.Id, ct);
+
+        Assert.Null(invite.AcceptedAt);
+        Assert.Equal(0, mail.SendCount);
+        Assert.Equal(invite.Id, (await db.Invites.SingleAsync(x => x.Email == "cf-new@example.test", ct)).Id);
+    }
+
+    [Fact]
+    public async Task Cloudflare_member_resolution_preserves_active_member_identity_and_rejects_unknown_or_inactive()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+        var active = new Member { Email = "cf-active@example.test", Role = MemberRole.Owner };
+        var inactive = new Member { Email = "cf-inactive@example.test" };
+        inactive.Deactivate();
+        db.Members.AddRange(active, inactive);
+        await db.SaveChangesAsync(ct);
+        var service = new CloudflareMemberService(db, TimeProvider.System);
+
+        Assert.Equal(active.Id, (await service.ResolveAsync("CF-ACTIVE@example.test", ct))?.Id);
+        Assert.Null(await service.ResolveAsync(inactive.Email, ct));
+        Assert.Null(await service.ResolveAsync("cf-unknown@example.test", ct));
+    }
+
+    [Fact]
+    public async Task Cloudflare_member_resolution_atomically_accepts_a_pending_unexpired_invite_under_concurrency()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var now = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        Guid inviteId;
+        await using (var setup = Db())
+        {
+            var owner = new Member { Email = "cf-inviter@example.test", Role = MemberRole.Owner };
+            setup.Members.Add(owner);
+            await setup.SaveChangesAsync(ct);
+            var invite = new Invite { Email = "cf-invitee@example.test", InvitedById = owner.Id, ExpiresAt = now.GetUtcNow().AddHours(1) };
+            setup.Invites.Add(invite);
+            await setup.SaveChangesAsync(ct);
+            inviteId = invite.Id;
+        }
+
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var attempts = Enumerable.Range(0, 4).Select(async _ =>
+        {
+            await start.Task;
+            await using var db = Db();
+            return await new CloudflareMemberService(db, now).ResolveAsync("CF-INVITEE@example.test", ct);
+        }).ToArray();
+        start.SetResult();
+        var members = await Task.WhenAll(attempts);
+
+        Assert.All(members, member => Assert.Equal(MemberRole.Member, member?.Role));
+        Assert.Single(members.Select(x => x!.Id).Distinct());
+        await using var verify = Db();
+        Assert.NotNull((await verify.Invites.FindAsync([inviteId], ct))!.AcceptedAt);
+        Assert.Equal(1, await verify.Members.CountAsync(x => x.Email == "cf-invitee@example.test", ct));
+    }
+
+    [Fact]
+    public async Task Actual_production_application_disables_magic_link_routes_and_does_not_redirect_tunnel_HTTP()
+    {
+        await using var factory = new WebApplicationFactory<CloudflareAccessOptions>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Production");
+            builder.UseSetting("CloudflareAccess:Enabled", "true");
+            builder.UseSetting("CloudflareAccess:TeamDomain", "team.cloudflareaccess.com");
+            builder.UseSetting("CloudflareAccess:Audience", "exact-production-audience");
+            builder.UseSetting("ConnectionStrings:Database", _connectionString);
+            builder.UseSetting("Database:AutoMigrate", "false");
+            builder.UseSetting("INITIAL_OWNER_EMAIL", "");
+        });
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.Add("X-House-Consensus-CSRF", "1");
+
+        var request = await client.PostAsync("/api/auth/request", new StringContent("{\"email\":\"member@example.test\"}", System.Text.Encoding.UTF8, "application/json"), TestContext.Current.CancellationToken);
+        var consume = await client.GetAsync("/api/auth/consume?token=unused", TestContext.Current.CancellationToken);
+        var root = await client.GetAsync("/", TestContext.Current.CancellationToken);
+        var mode = await client.GetFromJsonAsync<AuthModeDto>("/api/auth/mode", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.NotFound, request.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, consume.StatusCode);
+        Assert.DoesNotContain(root.StatusCode, new[] { HttpStatusCode.MovedPermanently, HttpStatusCode.Redirect, HttpStatusCode.TemporaryRedirect, HttpStatusCode.PermanentRedirect });
+        Assert.True(mode?.CloudflareAccess);
+    }
+
+    private static IConfiguration Config(params (string Key, string Value)[] values) => new ConfigurationBuilder().AddInMemoryCollection(values.ToDictionary(x => x.Key, x => (string?)x.Value)).Build();
 
     private sealed class FakeRuleGenerator : IAiRuleGenerator
     {

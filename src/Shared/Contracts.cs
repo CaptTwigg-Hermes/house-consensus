@@ -11,6 +11,7 @@ public sealed record SubmitFeedback(Guid? ListingId, string Body);
 public sealed record ReviewFeedback(bool Reviewed);
 public sealed record ApplyListingOverride(OverrideAction Action, string? Reason);
 public sealed record UpdateLanguage(string Language);
+public sealed record AuthModeDto(bool CloudflareAccess);
 public sealed record MemberDto(Guid Id, string Email, string DisplayName, string Language, MemberRole Role, bool IsActive);
 public sealed record VoteDto(long Id, Guid ListingId, Guid MemberId, VoteChoice Choice, ReasonTag[] Tags, DateTimeOffset CreatedAt, string? Note = null);
 public sealed record ListingDto(

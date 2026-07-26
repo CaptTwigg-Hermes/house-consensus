@@ -1,6 +1,6 @@
 # House Consensus
 
-Private invite-only household house-evaluation app. This monorepo contains a .NET 10 hosted Blazor WebAssembly client, ASP.NET Core API/cookie auth/SignalR server, PostgreSQL persistence, Python houseshopping exporter, and Playwright tests. `SPEC.md` is authoritative.
+Private invite-only household house-evaluation app. This monorepo contains a .NET 10 hosted Blazor WebAssembly client, ASP.NET Core API/Cloudflare Access auth/SignalR server, PostgreSQL persistence, Python houseshopping exporter, and Playwright tests. `SPEC.md` is authoritative.
 
 ## Local stack
 
@@ -67,14 +67,16 @@ uv run --project exporter house-consensus-export \
 
 Every push to `main` publishes `ghcr.io/capttwigg-hermes/house-consensus:latest` plus an immutable commit-SHA tag. `docker-compose.production.yml` uses `pull_policy: always`, so a Dockge **Update/Recreate** pulls the newest published image without cloning or building the repository.
 
-1. Copy `docker-compose.production.yml` into a Dockge stack.
-2. Set the required environment values: `POSTGRES_PASSWORD`, `INITIAL_OWNER_EMAIL`, and `PUBLIC_ORIGIN`.
-3. Set `APP_BIND_IP` to the TrueNAS LAN IP when Cloudflare Tunnel reaches the app through the host. The safe default is loopback only.
-4. For a private GHCR package, authenticate Docker/Dockge to `ghcr.io` with a GitHub token that has `read:packages`, or make the package public.
-5. After a green publish workflow, use Dockge **Update** (or run `docker compose -f docker-compose.production.yml pull && docker compose -f docker-compose.production.yml up -d`).
+1. Copy `docker-compose.production.yml` into a Dockge stack. This stack uses the existing TrueNAS Cloudflare Tunnel; it does not create another connector or require a tunnel token.
+2. Set `POSTGRES_PASSWORD`, `INITIAL_OWNER_EMAIL`, and `PUBLIC_ORIGIN` in Dockge. `PUBLIC_ORIGIN` is the HTTPS hostname already published by Cloudflare.
+3. In Cloudflare Zero Trust, open the existing Access application. Copy its application audience (`AUD`) into `CLOUDFLARE_ACCESS_AUDIENCE`. Set `CLOUDFLARE_ACCESS_TEAM_DOMAIN` to the team hostname only, such as `team-name.cloudflareaccess.com`.
+4. Point the existing tunnel route at this app's host and port. Set `APP_BIND_IP` to the TrueNAS LAN IP only when the connector cannot reach the loopback default. The origin rejects requests without a valid signed Access assertion even on the LAN.
+5. Ensure the Access policy allows the household identities. Cloudflare authenticates identity; House Consensus still requires an active member or pending owner-created invitation and retains owner/member authorization.
+6. For a private GHCR package, authenticate Docker/Dockge to `ghcr.io` with a GitHub token that has `read:packages`, or make the package public.
+7. After a green publish workflow, use Dockge **Update** (or run `docker compose -f docker-compose.production.yml pull && docker compose -f docker-compose.production.yml up -d`).
 
 The `latest` tag updates only after a successful image build from `main`. Use `ghcr.io/capttwigg-hermes/house-consensus:sha-<full-commit-sha>` in the Compose file when a deployment must be pinned.
 
 ## Production handoff and backup
 
-Do not deploy the loopback development overlay. For TrueNAS/Dockge keep the external PostgreSQL connection, use TLS through Cloudflare Tunnel, platform-managed required secrets, and no public service ports. Production cookies are always Secure. Schedule `scripts/backup-postgres.sh` daily; it makes an AES-256 encrypted dump and keeps 30 days. Keep `BACKUP_PASSPHRASE_FILE` as a protected mounted secret and test restores into a disposable database regularly.
+Do not deploy the loopback development overlay. Production requires Cloudflare Access and validates `Cf-Access-Jwt-Assertion` using Cloudflare's rotating keys, exact issuer, application audience, and token lifetime. Cloudflare terminates public HTTPS; the app does not redirect the tunnel's internal HTTP hop. Raw identity headers are not trusted. Magic links remain available only for non-production test/development flows. For TrueNAS/Dockge keep the external PostgreSQL connection, use TLS through the existing Cloudflare Tunnel, platform-managed required secrets, and no public service ports. Schedule `scripts/backup-postgres.sh` daily; it makes an AES-256 encrypted dump and keeps 30 days. Keep `BACKUP_PASSPHRASE_FILE` as a protected mounted secret and test restores into a disposable database regularly.

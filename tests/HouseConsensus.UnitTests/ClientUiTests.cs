@@ -1,11 +1,51 @@
 using System.Net;
 using HouseConsensus.Client.Services;
 using Xunit;
+using Microsoft.JSInterop;
+using HouseConsensus.Client.Components;
+using Microsoft.AspNetCore.Components.Web;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace HouseConsensus.UnitTests;
 
 public sealed class ClientUiTests
 {
+    [Fact]
+    public void Cloudflare_access_users_never_receive_the_magic_link_form()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var gate = File.ReadAllText(Path.Combine(root, "src/Client/Components/AuthGate.razor"));
+        var auth = File.ReadAllText(Path.Combine(root, "src/Client/Services/AuthState.cs"));
+        var program = File.ReadAllText(Path.Combine(root, "src/Server/Program.cs"));
+
+        Assert.Contains("Auth.CloudflareAccess", gate, StringComparison.Ordinal);
+        Assert.Contains("CloudflareAccessDenied", gate, StringComparison.Ordinal);
+        Assert.Contains("api/auth/mode", auth, StringComparison.Ordinal);
+        Assert.Contains("auth.MapGet(\"/mode\"", program, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Rendered_Cloudflare_access_gate_contains_no_magic_link_form()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(new HttpClient(new CloudflareUnauthenticatedHandler()) { BaseAddress = new Uri("https://example.test/") });
+        services.AddSingleton<ApiClient>();
+        services.AddSingleton<IJSRuntime>(new CaptureJsRuntime());
+        services.AddSingleton<AuthState>();
+        services.AddSingleton<I18n>();
+        await using var provider = services.BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(provider, provider.GetRequiredService<ILoggerFactory>());
+
+        var html = await renderer.Dispatcher.InvokeAsync(async () =>
+            (await renderer.RenderComponentAsync<AuthGate>()).ToHtmlString());
+
+        Assert.Contains("data-testid=\"cloudflare-access-denied\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-testid=\"auth-email\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("<form", html, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void Ai_evidence_component_uses_safe_fallback_for_unparseable_and_nested_json()
     {
@@ -70,6 +110,30 @@ public sealed class ClientUiTests
         Assert.Equal(HttpMethod.Put, handler.Request!.Method);
         Assert.Equal("https://example.test/api/comments/11111111-1111-1111-1111-111111111111", handler.Request.RequestUri!.ToString());
         Assert.Contains("updated", handler.Body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Cloudflare_logout_navigates_the_top_level_browser_to_the_Access_logout_endpoint()
+    {
+        var handler = new LogoutHandler("/cdn-cgi/access/logout");
+        var js = new CaptureJsRuntime();
+        var state = new AuthState(new ApiClient(new HttpClient(handler) { BaseAddress = new Uri("https://example.test/") }), js);
+
+        await state.LogoutAsync();
+
+        Assert.Equal("hc.navigate", js.Identifier);
+        Assert.Equal("/cdn-cgi/access/logout", js.Argument);
+    }
+
+    [Fact]
+    public async Task Cookie_logout_does_not_redirect_to_Cloudflare()
+    {
+        var js = new CaptureJsRuntime();
+        var state = new AuthState(new ApiClient(new HttpClient(new LogoutHandler(null)) { BaseAddress = new Uri("https://example.test/") }), js);
+
+        await state.LogoutAsync();
+
+        Assert.Null(js.Identifier);
     }
 
     [Fact]
@@ -315,6 +379,39 @@ public sealed class ClientUiTests
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
         var migration = File.ReadAllText(Path.Combine(root, "src/Server/Data/Migrations/202607220002_AddBrowseFields.cs"));
         Assert.Contains("ALTER TABLE listings DROP COLUMN \"MultigenFit\"", migration, StringComparison.Ordinal);
+    }
+
+    private sealed class CloudflareUnauthenticatedHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/api/auth/mode", StringComparison.Ordinal) == true)
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"cloudflareAccess\":true}", System.Text.Encoding.UTF8, "application/json") });
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized));
+        }
+    }
+
+    private sealed class LogoutHandler(string? location) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.NoContent);
+            if (location is not null) response.Headers.Add("X-House-Consensus-Logout", location);
+            return Task.FromResult(response);
+        }
+    }
+
+    private sealed class CaptureJsRuntime : IJSRuntime
+    {
+        public string? Identifier { get; private set; }
+        public string? Argument { get; private set; }
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) => InvokeAsync<TValue>(identifier, default, args);
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args)
+        {
+            Identifier = identifier;
+            Argument = args?.FirstOrDefault()?.ToString();
+            return ValueTask.FromResult(default(TValue)!);
+        }
     }
 
     private sealed class CaptureHandler : HttpMessageHandler

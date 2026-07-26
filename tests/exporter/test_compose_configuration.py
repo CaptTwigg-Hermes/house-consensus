@@ -84,3 +84,22 @@ def test_main_compose_configures_reachable_private_ai_learning_endpoint():
     assert "AiLearning__Model: ${AI_LEARNING_MODEL:-gemma4:12b}" in compose
     assert "AiLearning__AllowInsecureHttp: ${AI_LEARNING_ALLOW_INSECURE_HTTP:-true}" in compose
     assert "AiLearning__InsecureHttpAllowedHosts: ${AI_LEARNING_INSECURE_HTTP_ALLOWED_HOSTS:-192.168.50.227}" in compose
+
+
+
+def test_production_compose_uses_existing_cloudflare_tunnel_and_requires_access_validation():
+    compose = Path("docker-compose.production.yml").read_text()
+    env_example = Path(".env.production.example").read_text() if Path(".env.production.example").exists() else ""
+    readme = Path("README.md").read_text()
+
+    assert "cloudflared:" not in compose
+    assert "TUNNEL_TOKEN" not in compose
+    assert 'CloudflareAccess__Enabled: "true"' in compose
+    assert "CloudflareAccess__TeamDomain: ${CLOUDFLARE_ACCESS_TEAM_DOMAIN:?" in compose
+    assert "CloudflareAccess__Audience: ${CLOUDFLARE_ACCESS_AUDIENCE:?" in compose
+    assert "${APP_BIND_IP:-127.0.0.1}:${APP_PORT:-8080}:8080" in compose
+    assert "existing TrueNAS Cloudflare Tunnel" in readme
+    assert "CLOUDFLARE_ACCESS_TEAM_DOMAIN=" in env_example
+    assert "CLOUDFLARE_ACCESS_AUDIENCE=" in env_example
+    assert "mailpit:" not in compose
+    assert "Email__SmtpHost" not in compose

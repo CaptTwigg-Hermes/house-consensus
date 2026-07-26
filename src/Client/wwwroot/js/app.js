@@ -1,5 +1,6 @@
 window.hc = {
   browserLanguage: () => localStorage.getItem('hc.culture') || navigator.language || 'en',
+  navigate: path => { window.location.assign(path); },
   setCulture: language => { localStorage.setItem('hc.culture', language); document.documentElement.lang = language; location.reload(); },
   maps: {},
   renderMap: function (id, listings) {

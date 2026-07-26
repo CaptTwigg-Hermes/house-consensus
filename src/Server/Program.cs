@@ -22,20 +22,20 @@ var builder = WebApplication.CreateBuilder(args);
 var debugAutoLogin = builder.Configuration.GetValue("Debug:AutoLogin", false);
 DebugAutoLoginMiddleware.EnsureSafe(debugAutoLogin, builder.Environment.EnvironmentName);
 builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(builder.Configuration.GetConnectionString("Database") ?? "Host=postgres;Database=house_consensus;Username=house_consensus;Password=house_consensus", n => n.MapEnum<MemberRole>("member_role").MapEnum<VoteChoice>("vote_choice").MapEnum<ListingState>("listing_state").MapEnum<ReasonTag>("reason_tag").MapEnum<OverrideAction>("override_action")));
-builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(o => { o.Cookie.Name = "hc_session"; o.Cookie.HttpOnly = true; o.Cookie.SecurePolicy = builder.Environment.IsProduction() ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest; o.Cookie.SameSite = SameSiteMode.Strict; o.ExpireTimeSpan = TimeSpan.FromDays(30); o.SlidingExpiration = false; o.Events.OnValidatePrincipal = async c => { var id = c.Principal?.FindFirstValue(ClaimTypes.NameIdentifier); if (!Guid.TryParse(id, out var memberId)) { c.RejectPrincipal(); return; } var db = c.HttpContext.RequestServices.GetRequiredService<AppDbContext>(); var member = await db.Members.AsNoTracking().SingleOrDefaultAsync(x => x.Id == memberId && x.IsActive, c.HttpContext.RequestAborted); if (member is null) { c.RejectPrincipal(); await c.HttpContext.SignOutAsync(); } }; o.Events.OnRedirectToLogin = c => { c.Response.StatusCode = 401; return Task.CompletedTask; }; o.Events.OnRedirectToAccessDenied = c => { c.Response.StatusCode = 403; return Task.CompletedTask; }; });
+var cloudflareAccess = AuthenticationSetup.Add(builder.Services, builder.Configuration, builder.Environment.IsProduction());
 builder.Services.AddAuthorization(o => o.AddPolicy("owner", p => p.RequireClaim(ClaimTypes.Role, MemberRole.Owner.ToString())));
 builder.Services.Configure<ForwardedHeadersOptions>(o => { o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto; o.ForwardLimit = 1; });
 var magicRequestPermitLimit = builder.Configuration.GetValue("Auth:MagicRequestPermitLimit", 5);
 var magicConsumePermitLimit = builder.Configuration.GetValue("Auth:MagicConsumePermitLimit", 20);
 builder.Services.AddRateLimiter(o => { o.RejectionStatusCode = StatusCodes.Status429TooManyRequests; o.AddPolicy("magic-request", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = magicRequestPermitLimit, Window = TimeSpan.FromMinutes(15), QueueLimit = 0 })); o.AddPolicy("magic-consume", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = magicConsumePermitLimit, Window = TimeSpan.FromMinutes(15), QueueLimit = 0 })); });
 builder.Services.AddSignalR(); builder.Services.AddHealthChecks().AddDbContextCheck<AppDbContext>();
-builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddScoped<MagicLinkService>(); builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
+builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddScoped<MagicLinkService>(); builder.Services.AddScoped<InviteService>(); builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddMemoryCache(options => options.SizeLimit = 128 * 1024 * 1024); builder.Services.AddHttpClient<ListingImageService>(client => { client.Timeout = TimeSpan.FromSeconds(15); client.DefaultRequestHeaders.UserAgent.ParseAdd("HouseConsensus/1.0"); });
 builder.Services.AddHttpClient<IAiRuleGenerator, OllamaAiRuleGenerator>(client => client.Timeout = TimeSpan.FromSeconds(120));
 builder.Services.AddScoped<AiLearningService>();
 var app = builder.Build();
 app.UseForwardedHeaders();
-if (app.Environment.IsProduction()) { app.UseHsts(); app.UseHttpsRedirection(); }
+if (app.Environment.IsProduction()) { app.UseHsts(); if (!cloudflareAccess.Enabled) app.UseHttpsRedirection(); }
 app.UseExceptionHandler(e => e.Run(async c => { c.Response.StatusCode = 500; await c.Response.WriteAsJsonAsync(new { error = "An unexpected error occurred." }); }));
 app.UseBlazorFrameworkFiles();
 app.UseStaticFiles();
@@ -47,15 +47,19 @@ app.UseAuthorization();
 app.MapHealthChecks("/health"); app.MapHub<ConsensusHub>("/hubs/consensus");
 
 var auth = app.MapGroup("/api/auth");
-auth.MapPost("/request", async (RequestMagicLink request, MagicLinkService links, CancellationToken ct) => { if (!IsEmail(request.Email)) return Results.BadRequest(new { error = "Invalid email." }); await links.RequestAsync(request.Email, ct); return Results.Accepted(value: new { message = "If the address is eligible, a link has been sent." }); }).AllowAnonymous().RequireRateLimiting("magic-request");
-auth.MapGet("/consume", async (string token, MagicLinkService links, HttpContext context, CancellationToken ct) => { var member = await links.ConsumeAsync(token, ct); if (member is null) return Results.BadRequest(new { error = "Invalid or expired link." }); await SignIn(context, member); return Results.Redirect("/"); }).AllowAnonymous().RequireRateLimiting("magic-consume");
-auth.MapPost("/logout", async (HttpContext c) => { await c.SignOutAsync(); return Results.NoContent(); }).RequireAuthorization();
+auth.MapGet("/mode", () => Results.Ok(new AuthModeDto(cloudflareAccess.Enabled))).AllowAnonymous();
+if (!cloudflareAccess.Enabled)
+{
+    auth.MapPost("/request", async (RequestMagicLink request, MagicLinkService links, CancellationToken ct) => { if (!IsEmail(request.Email)) return Results.BadRequest(new { error = "Invalid email." }); await links.RequestAsync(request.Email, ct); return Results.Accepted(value: new { message = "If the address is eligible, a link has been sent." }); }).AllowAnonymous().RequireRateLimiting("magic-request");
+    auth.MapGet("/consume", async (string token, MagicLinkService links, HttpContext context, CancellationToken ct) => { var member = await links.ConsumeAsync(token, ct); if (member is null) return Results.BadRequest(new { error = "Invalid or expired link." }); await SignIn(context, member); return Results.Redirect("/"); }).AllowAnonymous().RequireRateLimiting("magic-consume");
+}
+auth.MapPost("/logout", async (HttpContext c) => { if (cloudflareAccess.Enabled) { c.Response.Headers["X-House-Consensus-Logout"] = "/cdn-cgi/access/logout"; return Results.NoContent(); } await c.SignOutAsync(); return Results.NoContent(); }).RequireAuthorization();
 auth.MapGet("/me", async (ClaimsPrincipal user, AppDbContext db, CancellationToken ct) => { var m = await db.Members.FindAsync([user.MemberId()], ct); return m is null ? Results.NotFound() : Results.Ok(ToMemberDto(m)); }).RequireAuthorization();
 auth.MapPut("/language", async (UpdateLanguage request, ClaimsPrincipal user, AppDbContext db, CancellationToken ct) => { var m = await db.Members.FindAsync([user.MemberId()], ct); if (m is null) return Results.NotFound(); try { m.SetLanguage(request.Language); await db.SaveChangesAsync(ct); return Results.Ok(ToMemberDto(m)); } catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); } }).RequireAuthorization();
 
 var members = app.MapGroup("/api/members").RequireAuthorization("owner");
 members.MapGet("/", async (AppDbContext db, CancellationToken ct) => (await db.Members.OrderBy(x => x.Email).ToListAsync(ct)).Select(ToMemberDto));
-members.MapPost("/invites", async (CreateInvite request, ClaimsPrincipal user, AppDbContext db, MagicLinkService links, TimeProvider clock, CancellationToken ct) => { var email = MagicLinkService.Normalize(request.Email); if (!IsEmail(email)) return Results.BadRequest(new { error = "Invalid email." }); if (await db.Members.AnyAsync(x => x.Email == email, ct)) return Results.Conflict(new { error = "Already a member." }); var invite = new Invite { Email = email, InvitedById = user.MemberId(), ExpiresAt = clock.GetUtcNow().AddDays(7) }; db.Invites.Add(invite); await db.SaveChangesAsync(ct); await links.RequestAsync(email, ct); return Results.Created($"/api/members/invites/{invite.Id}", new { invite.Id, invite.Email, invite.ExpiresAt }); });
+members.MapPost("/invites", async (CreateInvite request, ClaimsPrincipal user, InviteService invites, CancellationToken ct) => { var email = MagicLinkService.Normalize(request.Email); if (!IsEmail(email)) return Results.BadRequest(new { error = "Invalid email." }); try { var invite = await invites.CreateAsync(email, user.MemberId(), ct); return Results.Created($"/api/members/invites/{invite.Id}", new { invite.Id, invite.Email, invite.ExpiresAt }); } catch (InviteConflictException) { return Results.Conflict(new { error = "Already a member." }); } });
 members.MapPost("/{id:guid}/deactivate", async (Guid id, ClaimsPrincipal user, AppDbContext db, IHubContext<ConsensusHub> hub, CancellationToken ct) => { if (id == user.MemberId()) return Results.BadRequest(new { error = "Owner cannot deactivate themselves." }); var member = await db.Members.FindAsync([id], ct); if (member is null) return Results.NotFound(); member.Deactivate(); await db.SaveChangesAsync(ct); await NotifyMembershipConsensus(id, false, db, hub, ct); return Results.NoContent(); });
 members.MapPost("/{id:guid}/reactivate", async (Guid id, AppDbContext db, IHubContext<ConsensusHub> hub, CancellationToken ct) => { var member = await db.Members.FindAsync([id], ct); if (member is null) return Results.NotFound(); member.Reactivate(); await db.SaveChangesAsync(ct); await NotifyMembershipConsensus(id, true, db, hub, ct); return Results.NoContent(); });
 
@@ -105,6 +109,7 @@ if (!app.Environment.IsProduction() && app.Configuration.GetValue("E2E:SeedData"
     }).RequireAuthorization("owner");
 }
 
+app.Map("/api/{**path}", () => Results.NotFound());
 app.MapFallbackToFile("index.html");
 await Bootstrap(app);
 app.Run();

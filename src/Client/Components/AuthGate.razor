@@ -12,15 +12,25 @@ else if (Auth.User is null)
     <main class="auth-shell">
         <section class="auth-card">
             <div class="brand-mark" aria-hidden="true">⌂</div>
-            <p class="eyebrow">@L["Private"]</p><h1>@L["SignInTitle"]</h1><p>@L["SignInBody"]</p>
-            @if (sent) { <div class="notice success" role="status" data-testid="auth-link-sent">@L["LinkSent"]</div> }
+            <p class="eyebrow">@L["Private"]</p>
+            @if (Auth.CloudflareAccess)
+            {
+                <h1>@L["CloudflareAccessTitle"]</h1><p>@L["CloudflareAccessBody"]</p>
+                <div class="notice error" role="alert" data-testid="cloudflare-access-denied">@L["CloudflareAccessDenied"]</div>
+                <a class="btn primary wide" href="/cdn-cgi/access/logout">@L["CloudflareSignOut"]</a>
+            }
             else
             {
-                <form @onsubmit="Send" @onsubmit:preventDefault>
-                    <label for="email">@L["Email"]</label><input id="email" data-testid="auth-email" type="email" autocomplete="email" required @bind="email" />
-                    <button class="btn primary wide" disabled="@busy">@(busy ? "…" : L["SendLink"])</button>
-                </form>
-                @if (error) { <div class="notice error" role="alert">@L["Error"]</div> }
+                <h1>@L["SignInTitle"]</h1><p>@L["SignInBody"]</p>
+                @if (sent) { <div class="notice success" role="status" data-testid="auth-link-sent">@L["LinkSent"]</div> }
+                else
+                {
+                    <form @onsubmit="Send" @onsubmit:preventDefault>
+                        <label for="email">@L["Email"]</label><input id="email" data-testid="auth-email" type="email" autocomplete="email" required @bind="email" />
+                        <button class="btn primary wide" disabled="@busy">@(busy ? "…" : L["SendLink"])</button>
+                    </form>
+                    @if (error) { <div class="notice error" role="alert">@L["Error"]</div> }
+                }
             }
         </section>
     </main>

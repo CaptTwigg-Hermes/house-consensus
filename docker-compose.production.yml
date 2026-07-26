@@ -9,8 +9,9 @@ services:
       ConnectionStrings__Database: "Host=${POSTGRES_HOST:-192.168.50.2};Port=${POSTGRES_PORT:-5433};Database=${POSTGRES_DB:-house_consensus};Username=${POSTGRES_USER:-house_consensus};Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}"
       INITIAL_OWNER_EMAIL: ${INITIAL_OWNER_EMAIL:?INITIAL_OWNER_EMAIL must be set}
       PublicOrigin: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN must be set}
-      Email__SmtpHost: mailpit
-      Email__SmtpPort: "1025"
+      CloudflareAccess__Enabled: "true"
+      CloudflareAccess__TeamDomain: ${CLOUDFLARE_ACCESS_TEAM_DOMAIN:?CLOUDFLARE_ACCESS_TEAM_DOMAIN must be set}
+      CloudflareAccess__Audience: ${CLOUDFLARE_ACCESS_AUDIENCE:?CLOUDFLARE_ACCESS_AUDIENCE must be set}
       AiLearning__BaseUrl: ${AI_LEARNING_BASE_URL:-http://192.168.50.227:11434}
       AiLearning__Model: ${AI_LEARNING_MODEL:-gemma4:12b}
       AiLearning__AllowInsecureHttp: ${AI_LEARNING_ALLOW_INSECURE_HTTP:-true}
@@ -27,15 +28,6 @@ services:
       timeout: 3s
       retries: 12
       start_period: 20s
-
-  mailpit:
-    image: axllent/mailpit:v1.27
-    pull_policy: always
-    restart: unless-stopped
-    expose: ["1025", "8025"]
-    ports:
-      - "${MAILPIT_BIND_IP:-127.0.0.1}:${MAILPIT_PORT:-8025}:8025"
-    networks: [internal]
 
 networks:
   internal: {}
