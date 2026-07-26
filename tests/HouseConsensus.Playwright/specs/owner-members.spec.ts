@@ -1,5 +1,5 @@
 import { test, expect } from '../fixtures/test.js';
-import { identity, inviteMember, requestMagicLink } from '../helpers/household.js';
+import { identity, inviteMember, requestMagicLink, sameOriginPath } from '../helpers/household.js';
 
 test('owner can deactivate and reactivate a member while ownership remains protected', async ({ page, context, mailpit }, testInfo) => {
   const owner = identity(testInfo, 'owner');
@@ -8,7 +8,7 @@ test('owner can deactivate and reactivate a member while ownership remains prote
   const inviteLink = await inviteMember(page, mailpit, member);
   const memberContext = await context.browser()!.newContext({ baseURL: testInfo.project.use.baseURL as string });
   const memberPage = await memberContext.newPage();
-  await memberPage.goto(inviteLink);
+  await memberPage.goto(sameOriginPath(inviteLink));
   await expect(memberPage.getByTestId('app-shell')).toBeVisible();
 
   await page.reload();

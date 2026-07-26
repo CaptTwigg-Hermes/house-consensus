@@ -22,6 +22,11 @@ services:
       - "8025:8025"
     tmpfs: ["/data"]
 
+  mock-ollama:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock-ollama
+
   app:
     image: ${HOUSECONSENSUS_IMAGE:-houseconsensus:local}
     build:
@@ -30,6 +35,7 @@ services:
     depends_on:
       db: { condition: service_healthy }
       mailpit: { condition: service_started }
+      mock-ollama: { condition: service_started }
     environment:
       ASPNETCORE_ENVIRONMENT: E2E
       ASPNETCORE_URLS: http://+:8080
@@ -41,6 +47,10 @@ services:
       E2E__SeedData: "true"
       Auth__MagicRequestPermitLimit: "100"
       Auth__MagicConsumePermitLimit: "100"
+      AiLearning__BaseUrl: http://mock-ollama:11434
+      AiLearning__Model: deterministic-e2e
+      AiLearning__AllowInsecureHttp: "true"
+      AiLearning__InsecureHttpAllowedHosts: mock-ollama
     ports:
       - "8080:8080"
 

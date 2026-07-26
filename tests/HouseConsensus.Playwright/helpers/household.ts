@@ -11,6 +11,11 @@ export interface Household {
   memberPage: Page;
 }
 
+export function sameOriginPath(link: string): string {
+  const url = new URL(link);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 export function identity(testInfo: TestInfo, role: string): Identity {
   if (role === 'owner') return { name: 'Owner', email: 'owner@example.test' };
   const slug = `${testInfo.workerIndex}-${testInfo.testId}-${role}-${Date.now()}`
@@ -24,7 +29,7 @@ export async function requestMagicLink(page: Page, mailpit: MailpitClient, perso
   await page.getByRole('button', { name: /send (magic|sign-in) link|continue/i }).click();
   await expect(page.getByTestId('auth-link-sent')).toBeVisible();
   const link = await mailpit.waitForLink(person.email, { subject: /sign|login|magic/i });
-  await page.goto(link);
+  await page.goto(sameOriginPath(link));
   const name = page.getByTestId('profile-name');
   if (await name.isVisible().catch(() => false)) {
     await name.fill(person.name);
@@ -61,7 +66,7 @@ export async function createTwoMemberHousehold(
 
   const memberContext = await browser.newContext({ baseURL });
   const memberPage = await memberContext.newPage();
-  await memberPage.goto(inviteLink);
+  await memberPage.goto(sameOriginPath(inviteLink));
   const name = memberPage.getByTestId('profile-name');
   if (await name.isVisible().catch(() => false)) {
     await name.fill(member.name);

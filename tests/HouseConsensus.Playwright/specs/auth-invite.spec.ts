@@ -1,5 +1,5 @@
 import { test, expect } from '../fixtures/test.js';
-import { identity, inviteMember, requestMagicLink } from '../helpers/household.js';
+import { identity, inviteMember, requestMagicLink, sameOriginPath } from '../helpers/household.js';
 
 test('owner invites a member who accepts through a Mailpit-delivered magic link', async ({ page, context, mailpit }, testInfo) => {
   const owner = identity(testInfo, 'owner');
@@ -10,7 +10,7 @@ test('owner invites a member who accepts through a Mailpit-delivered magic link'
 
   const memberContext = await context.browser()!.newContext({ baseURL: testInfo.project.use.baseURL as string });
   const memberPage = await memberContext.newPage();
-  await memberPage.goto(inviteLink);
+  await memberPage.goto(sameOriginPath(inviteLink));
   await expect(memberPage.getByTestId('app-shell')).toBeVisible();
   await expect(memberPage.getByTestId('current-user-email')).toHaveText(member.email);
   await memberContext.close();

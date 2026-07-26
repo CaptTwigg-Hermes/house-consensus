@@ -43,12 +43,24 @@ def test_e2e_browser_allows_internal_http_and_image_contains_css_fixture():
     config = Path("tests/HouseConsensus.Playwright/playwright.config.ts").read_text()
 
     assert "E2E_BASE_URL: http://app:8080" in compose
-    assert "--unsafely-treat-insecure-origin-as-secure=${baseURL}" in config
-    assert "HttpsFirstModeV2,HttpsFirstBalancedModeAutoEnable" in config
     assert "context: ../.." in compose
     assert "dockerfile: tests/HouseConsensus.Playwright/Dockerfile" in compose
     assert "COPY tests/HouseConsensus.Playwright/package.json" in dockerfile
     assert "COPY src/Client/wwwroot/css/app.css /src/Client/wwwroot/css/app.css" in dockerfile
+    runner = Path("tests/HouseConsensus.Playwright/scripts/run-e2e.sh").read_text()
+    helper = Path("tests/HouseConsensus.Playwright/helpers/household.ts").read_text()
+    assert "getent ahostsv4 app" in runner
+    assert 'export E2E_BASE_URL="$BASE_URL"' in runner
+    assert "sameOriginPath" in helper
+    assert "page.goto(sameOriginPath(link))" in helper
+    assert "memberPage.goto(sameOriginPath(inviteLink))" in helper
+    auth_invite = Path("tests/HouseConsensus.Playwright/specs/auth-invite.spec.ts").read_text()
+    owner_members = Path("tests/HouseConsensus.Playwright/specs/owner-members.spec.ts").read_text()
+    assert "memberPage.goto(sameOriginPath(inviteLink))" in auth_invite
+    assert "memberPage.goto(sameOriginPath(inviteLink))" in owner_members
+    assert "mock-ollama:" in compose
+    assert "AiLearning__BaseUrl: http://mock-ollama:11434" in compose
+    assert "AiLearning__Model: deterministic-e2e" in compose
 
 
 def test_runtime_image_uses_the_dotnet_builtin_non_root_user():
