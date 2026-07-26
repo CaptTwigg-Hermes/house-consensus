@@ -22,6 +22,12 @@ export default defineConfig({
     testIdAttribute: 'data-testid',
     locale: 'en-GB',
     timezoneId: 'Europe/Copenhagen',
+    launchOptions: {
+      args: [
+        `--unsafely-treat-insecure-origin-as-secure=${baseURL}`,
+        '--disable-features=HttpsFirstModeV2,HttpsFirstBalancedModeAutoEnable'
+      ]
+    },
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure'

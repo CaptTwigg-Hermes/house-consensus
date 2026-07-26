@@ -46,7 +46,8 @@ services:
 
   playwright:
     build:
-      context: .
+      context: ../..
+      dockerfile: tests/HouseConsensus.Playwright/Dockerfile
     depends_on:
       app: { condition: service_started }
       mailpit: { condition: service_started }

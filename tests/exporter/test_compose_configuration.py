@@ -36,6 +36,21 @@ def test_e2e_artifacts_do_not_bind_mount_unc_checkout_paths():
     assert "playwright-report:/tests/playwright-report" in compose
 
 
+def test_e2e_browser_allows_internal_http_and_image_contains_css_fixture():
+    compose = Path("tests/HouseConsensus.Playwright/compose.e2e.yml").read_text()
+    dockerfile = Path("tests/HouseConsensus.Playwright/Dockerfile").read_text()
+
+    config = Path("tests/HouseConsensus.Playwright/playwright.config.ts").read_text()
+
+    assert "E2E_BASE_URL: http://app:8080" in compose
+    assert "--unsafely-treat-insecure-origin-as-secure=${baseURL}" in config
+    assert "HttpsFirstModeV2,HttpsFirstBalancedModeAutoEnable" in config
+    assert "context: ../.." in compose
+    assert "dockerfile: tests/HouseConsensus.Playwright/Dockerfile" in compose
+    assert "COPY tests/HouseConsensus.Playwright/package.json" in dockerfile
+    assert "COPY src/Client/wwwroot/css/app.css /src/Client/wwwroot/css/app.css" in dockerfile
+
+
 def test_runtime_image_uses_the_dotnet_builtin_non_root_user():
     dockerfile = Path("Dockerfile").read_text()
 
