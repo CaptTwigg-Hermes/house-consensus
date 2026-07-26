@@ -27,6 +27,15 @@ def test_e2e_compose_enables_seed_data_and_test_rate_limit():
     assert 'Auth__MagicConsumePermitLimit: "100"' in compose
 
 
+def test_e2e_artifacts_do_not_bind_mount_unc_checkout_paths():
+    compose = Path("tests/HouseConsensus.Playwright/compose.e2e.yml").read_text()
+
+    assert "./test-results:/tests/test-results" not in compose
+    assert "./playwright-report:/tests/playwright-report" not in compose
+    assert "playwright-test-results:/tests/test-results" in compose
+    assert "playwright-report:/tests/playwright-report" in compose
+
+
 def test_runtime_image_uses_the_dotnet_builtin_non_root_user():
     dockerfile = Path("Dockerfile").read_text()
 

@@ -55,5 +55,9 @@ services:
       E2E_BASE_URL: http://app:8080
       MAILPIT_API_URL: http://mailpit:8025
     volumes:
-      - ./test-results:/tests/test-results
-      - ./playwright-report:/tests/playwright-report
+      - playwright-test-results:/tests/test-results
+      - playwright-report:/tests/playwright-report
+
+volumes:
+  playwright-test-results:
+  playwright-report:
