@@ -1,0 +1,41 @@
+name: house-consensus
+
+services:
+  app:
+    image: ghcr.io/capttwigg-hermes/house-consensus:latest
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      ConnectionStrings__Database: "Host=${POSTGRES_HOST:-192.168.50.2};Port=${POSTGRES_PORT:-5433};Database=${POSTGRES_DB:-house_consensus};Username=${POSTGRES_USER:-house_consensus};Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}"
+      INITIAL_OWNER_EMAIL: ${INITIAL_OWNER_EMAIL:?INITIAL_OWNER_EMAIL must be set}
+      PublicOrigin: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN must be set}
+      Email__SmtpHost: mailpit
+      Email__SmtpPort: "1025"
+      AiLearning__BaseUrl: ${AI_LEARNING_BASE_URL:-http://192.168.50.227:11434}
+      AiLearning__Model: ${AI_LEARNING_MODEL:-gemma4:12b}
+      AiLearning__AllowInsecureHttp: ${AI_LEARNING_ALLOW_INSECURE_HTTP:-true}
+      AiLearning__InsecureHttpAllowedHosts: ${AI_LEARNING_INSECURE_HTTP_ALLOWED_HOSTS:-192.168.50.227}
+      AiLearning__ApiKey: ${AI_LEARNING_API_KEY:-}
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+    ports:
+      - "${APP_BIND_IP:-127.0.0.1}:${APP_PORT:-8080}:8080"
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  mailpit:
+    image: axllent/mailpit:v1.27
+    pull_policy: always
+    restart: unless-stopped
+    expose: ["1025", "8025"]
+    ports:
+      - "${MAILPIT_BIND_IP:-127.0.0.1}:${MAILPIT_PORT:-8025}:8025"
+    networks: [internal]
+
+networks:
+  internal: {}

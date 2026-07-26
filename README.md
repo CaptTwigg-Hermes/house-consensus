@@ -63,6 +63,18 @@ uv run --project exporter house-consensus-export \
   --verification-method http_404
 ```
 
+## Production image and Dockge Compose
+
+Every push to `main` publishes `ghcr.io/capttwigg-hermes/house-consensus:latest` plus an immutable commit-SHA tag. `docker-compose.production.yml` uses `pull_policy: always`, so a Dockge **Update/Recreate** pulls the newest published image without cloning or building the repository.
+
+1. Copy `docker-compose.production.yml` into a Dockge stack.
+2. Set the required environment values: `POSTGRES_PASSWORD`, `INITIAL_OWNER_EMAIL`, and `PUBLIC_ORIGIN`.
+3. Set `APP_BIND_IP` to the TrueNAS LAN IP when Cloudflare Tunnel reaches the app through the host. The safe default is loopback only.
+4. For a private GHCR package, authenticate Docker/Dockge to `ghcr.io` with a GitHub token that has `read:packages`, or make the package public.
+5. After a green publish workflow, use Dockge **Update** (or run `docker compose -f docker-compose.production.yml pull && docker compose -f docker-compose.production.yml up -d`).
+
+The `latest` tag updates only after a successful image build from `main`. Use `ghcr.io/capttwigg-hermes/house-consensus:sha-<full-commit-sha>` in the Compose file when a deployment must be pinned.
+
 ## Production handoff and backup
 
 Do not deploy the loopback development overlay. For TrueNAS/Dockge keep the external PostgreSQL connection, use TLS through Cloudflare Tunnel, platform-managed required secrets, and no public service ports. Production cookies are always Secure. Schedule `scripts/backup-postgres.sh` daily; it makes an AES-256 encrypted dump and keeps 30 days. Keep `BACKUP_PASSPHRASE_FILE` as a protected mounted secret and test restores into a disposable database regularly.
