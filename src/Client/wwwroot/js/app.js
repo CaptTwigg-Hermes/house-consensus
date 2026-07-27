@@ -31,4 +31,4 @@ window.hc = {
   loadState: key => { try { const value = localStorage.getItem(key); return value ? JSON.parse(value) : null; } catch { return null; } }
 };
 document.documentElement.lang = window.hc.browserLanguage().startsWith('da') ? 'da' : 'en';
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('service-worker.js');

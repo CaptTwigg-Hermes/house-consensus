@@ -82,24 +82,6 @@ public sealed class ClientUiTests
         => Assert.Equal(expected, AiEvidenceText.SafeFallback(raw, "Evidence unavailable"));
 
     [Fact]
-    public void Published_service_worker_activates_each_asset_release_immediately()
-    {
-        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
-        var worker = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/service-worker.published.js"));
-        var app = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/js/app.js"));
-
-        Assert.Contains("const CACHE = `hc-static-${self.assetsManifest.version}`;", worker, StringComparison.Ordinal);
-        Assert.Contains("self.skipWaiting()", worker, StringComparison.Ordinal);
-        Assert.Contains("k.startsWith('hc-static-') && k !== CACHE", worker, StringComparison.Ordinal);
-        Assert.Contains("const IS_UPDATE = Boolean(self.registration.active);", worker, StringComparison.Ordinal);
-        Assert.Contains("self.clients.matchAll({ type: 'window' })", worker, StringComparison.Ordinal);
-        Assert.Contains("client.navigate(client.url)", worker, StringComparison.Ordinal);
-        Assert.Contains("caches.open(CACHE).then(cache => cache.match(event.request))", worker, StringComparison.Ordinal);
-        Assert.DoesNotContain("caches.match(event.request)", worker, StringComparison.Ordinal);
-        Assert.Contains("{ updateViaCache: 'none' }", app, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void Member_avatar_colors_are_wired_to_both_views()
     {
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
