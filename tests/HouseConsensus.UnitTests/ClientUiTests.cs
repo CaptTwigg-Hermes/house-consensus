@@ -89,8 +89,8 @@ public sealed class ClientUiTests
         var detail = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Detail.razor"));
         var css = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/css/app.css"));
 
-        Assert.Contains("--avatar-color: @AvatarColor.Css(member.Id)", members, StringComparison.Ordinal);
-        Assert.Contains("--avatar-color: @AvatarColor.Css(vote.MemberId)", detail, StringComparison.Ordinal);
+        Assert.Contains("--avatar-color: @AvatarColor.Css(member.Id); background-color: var(--avatar-color)", members, StringComparison.Ordinal);
+        Assert.Contains("--avatar-color: @AvatarColor.Css(vote.MemberId); background-color: var(--avatar-color)", detail, StringComparison.Ordinal);
         Assert.Contains(".avatar {\n  width: 32px;\n  height: 32px;\n  border-radius: 50%;\n  background: var(--avatar-color, var(--forest));", css, StringComparison.Ordinal);
     }
 
