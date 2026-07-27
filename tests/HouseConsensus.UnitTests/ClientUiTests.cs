@@ -294,6 +294,18 @@ public sealed class ClientUiTests
     }
 
     [Fact]
+    public void Listing_card_like_hearts_use_the_member_avatar_color()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var card = File.ReadAllText(Path.Combine(root, "src/Client/Components/ListingCard.razor"));
+
+        Assert.Contains("style=\"@VoteStyle(vote)\"", card, StringComparison.Ordinal);
+        Assert.Contains("vote.Choice == VoteChoice.Like", card, StringComparison.Ordinal);
+        Assert.Contains("AvatarColor.Css(vote.MemberId)", card, StringComparison.Ordinal);
+        Assert.Contains("background-color: var(--avatar-color)", card, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Dislike_vote_mark_has_no_extra_bottom_leading()
     {
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
