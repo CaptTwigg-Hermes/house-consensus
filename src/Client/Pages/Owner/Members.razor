@@ -16,5 +16,5 @@
     protected override async Task OnInitializedAsync() => await Load(); private async Task Load() => items = await Api.GetAsync<List<MemberDto>>("api/members") ?? [];
     private async Task Invite() { busy = true; invited = false; try { using var r = await Api.Invite(email); await ApiClient.EnsureSuccess(r); invited = true; email = ""; await Load(); } finally { busy = false; } }
     private async Task Change(MemberDto member) { using var r = await Api.ChangeMember(member.Id, !member.IsActive); await ApiClient.EnsureSuccess(r); await Load(); }
-    private static string Initials(MemberDto m) { var value = string.IsNullOrWhiteSpace(m.DisplayName) ? m.Email : m.DisplayName; return string.Concat(value.Split([' ', '@'], StringSplitOptions.RemoveEmptyEntries).Take(2).Select(x => char.ToUpperInvariant(x[0]))); }
+    private static string Initials(MemberDto m) => AvatarInitials.From(m.DisplayName, m.Email);
 }

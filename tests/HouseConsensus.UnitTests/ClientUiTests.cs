@@ -82,6 +82,16 @@ public sealed class ClientUiTests
         => Assert.Equal(expected, AiEvidenceText.SafeFallback(raw, "Evidence unavailable"));
 
     [Fact]
+    public void Listing_vote_avatars_use_member_initials_instead_of_guid_fragments()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var detail = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Detail.razor"));
+
+        Assert.Contains("@vote.MemberInitials", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("vote.MemberId.ToString()", detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Browse_query_encodes_all_existing_filters_and_omits_empty_values()
     {
         var uri = BrowseQuery.Build("Aarhus C & V", 2_500_000m, 5_000_000m);

@@ -13,7 +13,7 @@ public sealed record ApplyListingOverride(OverrideAction Action, string? Reason)
 public sealed record UpdateLanguage(string Language);
 public sealed record AuthModeDto(bool CloudflareAccess);
 public sealed record MemberDto(Guid Id, string Email, string DisplayName, string Language, MemberRole Role, bool IsActive);
-public sealed record VoteDto(long Id, Guid ListingId, Guid MemberId, VoteChoice Choice, ReasonTag[] Tags, DateTimeOffset CreatedAt, string? Note = null);
+public sealed record VoteDto(long Id, Guid ListingId, Guid MemberId, VoteChoice Choice, ReasonTag[] Tags, DateTimeOffset CreatedAt, string? Note = null, string MemberInitials = "");
 public sealed record ListingDto(
     Guid Id, string ExternalId, string Address, string? City, decimal? Price,
     double FamilyFitScore, ListingState State, bool AiAssessed, double? AiConfidence,

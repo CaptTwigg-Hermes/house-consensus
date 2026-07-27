@@ -4,6 +4,12 @@ namespace HouseConsensus.UnitTests;
 
 public sealed class ConsensusTests
 {
+    [Theory]
+    [InlineData("Mads Frederiksen", "mads@example.test", "MF")]
+    [InlineData("", "capt.twigg@example.test", "CE")]
+    public void Avatar_initials_prefer_display_name_and_fall_back_to_email(string displayName, string email, string expected)
+        => Assert.Equal(expected, AvatarInitials.From(displayName, email));
+
     [Fact]
     public void Requires_explicit_latest_like_from_every_active_member()
     {
