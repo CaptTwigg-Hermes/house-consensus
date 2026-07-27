@@ -51,6 +51,7 @@ public static class E2EDataSeeder
             PostalCode = "2100",
             Preferred = true,
             IsNew = true,
+            FirstSeenAt = DateTimeOffset.UtcNow,
             FamilyUnits = "two_family",
             MonthlyExpense = 4_500,
             DaysOnMarket = 12,

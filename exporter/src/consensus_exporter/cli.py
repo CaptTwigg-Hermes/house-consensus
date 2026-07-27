@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import argparse
 import os
-import uuid
+from datetime import datetime, timedelta, timezone
 
 from .media import MediaCache
 from .postgres import PostgresExporter, tombstone_listing
-from .source import load_sqlite_cases
+from .source import load_sqlite_snapshot
 
 
 def main() -> int:
@@ -24,13 +24,16 @@ def main() -> int:
         "--media-dir", default=os.getenv("CONSENSUS_MEDIA_DIR", "./var/media")
     )
     parser.add_argument(
-        "--scope", default=os.getenv("CONSENSUS_SOURCE_SCOPE", "default")
+        "--scope", default=os.getenv("CONSENSUS_SOURCE_SCOPE", "tofamiliehus")
     )
     parser.add_argument("--run-id", default=None)
     parser.add_argument(
         "--ensure-schema",
         action="store_true",
         help="create exporter-owned tables before importing",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="calculate changes and roll back all DML"
     )
     parser.add_argument(
         "--skip-media",
@@ -55,15 +58,39 @@ def main() -> int:
         )
         print(f"tombstoned={args.tombstone_external_id}")
         return 0
-    cases = load_sqlite_cases(args.sqlite)
-    result = PostgresExporter(
+    cases, snapshot_run_id, snapshot_completed_at = load_sqlite_snapshot(
+        args.sqlite, source_scope=args.scope
+    )
+    now = datetime.now(timezone.utc)
+    if snapshot_completed_at > now + timedelta(minutes=5):
+        raise RuntimeError("completed snapshot timestamp is unexpectedly in the future")
+    if now - snapshot_completed_at > timedelta(hours=36):
+        raise RuntimeError(
+            "latest completed snapshot is stale; refusing reconciliation"
+        )
+    if args.run_id and args.run_id != snapshot_run_id:
+        raise RuntimeError("--run-id must equal the immutable source snapshot ID")
+    exporter = PostgresExporter(
         args.database_url,
         source_scope=args.scope,
-        media_cache=None if args.skip_media else MediaCache(args.media_dir),
+        media_cache=None
+        if args.skip_media or args.dry_run
+        else MediaCache(args.media_dir),
         ensure_schema_on_export=args.ensure_schema,
-    ).export(cases, run_id=args.run_id or str(uuid.uuid4()))
+    )
+    export_kwargs = {
+        "run_id": snapshot_run_id,
+        "fetched_at": snapshot_completed_at,
+    }
+    if args.dry_run:
+        export_kwargs["dry_run"] = True
+    result = exporter.export(cases, **export_kwargs)
     print(
-        f"exported={result.exported} archived={result.archived} media_cached={result.media_cached} media_errors={result.media_errors}"
+        f"dry_run={args.dry_run} exported={result.exported} inserted={getattr(result, 'inserted', 0)} "
+        f"updated={getattr(result, 'updated', 0)} reactivated={getattr(result, 'reactivated', 0)} "
+        f"archived={result.archived} archival_blocked={getattr(result, 'archival_blocked', 0)} "
+        f"active_total={getattr(result, 'active_total', 0)} geometry_covered={getattr(result, 'geometry_covered', 0)} "
+        f"media_cached={result.media_cached} media_errors={result.media_errors}"
     )
     return 0
 

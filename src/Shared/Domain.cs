@@ -69,6 +69,7 @@ public sealed class Listing
     public string? PostalCode { get; set; }
     public bool? Preferred { get; set; }
     public bool? IsNew { get; set; }
+    public DateTimeOffset? FirstSeenAt { get; set; }
     public string? FamilyUnits { get; set; }
     public double? FamilyPrivacyScore { get; set; }
     public double? KidsSpaceScore { get; set; }

@@ -1256,11 +1256,12 @@ body {
 .image-badges {
   position: absolute;
   z-index: 3;
-  left: 14px;
+  top: 14px;
   right: 14px;
-  bottom: 13px;
+  left: 78px;
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
 }
 
@@ -1269,6 +1270,11 @@ body {
   color: var(--forest);
   box-shadow: 0 4px 12px rgba(0, 0, 0, .12);
   backdrop-filter: blur(8px);
+}
+
+.image-badges .badge.new {
+  color: #fff;
+  background: rgba(20, 95, 130, .94);
 }
 
 .image-badges .badge.consensus {
@@ -1281,49 +1287,64 @@ body {
   background: rgba(229, 242, 224, .94);
 }
 
+.card-image-meta {
+  position: absolute;
+  z-index: 3;
+  right: 16px;
+  bottom: 14px;
+  left: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 14px;
+  color: #fff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, .72);
+}
+
+.listing-card .card-image-address h2 {
+  margin: 0 0 2px;
+  overflow: hidden;
+  color: #fff;
+  font-size: clamp(1rem, 4vw, 1.24rem);
+  line-height: 1.14;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-image-address p {
+  overflow: hidden;
+  color: rgba(255, 255, 255, .88);
+  font-size: .74rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-image-price {
+  min-width: max-content;
+  text-align: right;
+}
+
+.card-image-price strong,
+.card-image-price small {
+  display: block;
+}
+
+.card-image-price strong {
+  color: #fff;
+  font-size: .92rem;
+}
+
+.card-image-price small {
+  margin-top: 2px;
+  color: rgba(255, 255, 255, .86);
+  font-size: .66rem;
+}
+
 .card-body {
   display: flex;
   flex: 1;
   flex-direction: column;
   padding: 18px;
-}
-
-.card-heading {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 16px;
-}
-
-.listing-card .card-heading h2 {
-  margin: 0 0 3px;
-  font-size: 1.22rem;
-  line-height: 1.2;
-}
-
-.card-heading p {
-  font-size: .82rem;
-}
-
-.card-price {
-  min-width: max-content;
-  text-align: right;
-}
-
-.card-price strong,
-.card-price small {
-  display: block;
-}
-
-.card-price strong {
-  color: var(--forest);
-  font-size: .96rem;
-}
-
-.card-price small {
-  margin-top: 3px;
-  color: var(--muted);
-  font-size: .68rem;
 }
 
 .property-facts {
@@ -1393,12 +1414,6 @@ body {
   margin-top: auto;
   padding-top: 13px;
   border-top: 1px solid #ebe7dd;
-}
-
-.detail-link {
-  color: var(--coral-dark);
-  font-size: .75rem;
-  font-weight: 700;
 }
 
 .listing-card > .vote-actions {
@@ -1650,17 +1665,6 @@ textarea:focus-visible {
     display: none;
   }
 
-  .card-heading {
-    grid-template-columns: 1fr;
-    gap: 9px;
-  }
-
-  .card-price {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    text-align: left;
-  }
 }
 
 @media (min-width: 700px) {

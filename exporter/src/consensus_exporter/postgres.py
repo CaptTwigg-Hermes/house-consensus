@@ -6,10 +6,10 @@ import hashlib
 import json
 import math
 import uuid
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable
 
 import psycopg
 from psycopg import sql
@@ -90,7 +90,9 @@ def _boolean(data: dict, *keys: str) -> bool | None:
     return None
 
 
-def _score_breakdown(data: dict, expected_total: float | None) -> tuple[float | None, ...]:
+def _score_breakdown(
+    data: dict, expected_total: float | None
+) -> tuple[float | None, ...]:
     breakdown = data.get("family_score_breakdown")
     if not isinstance(breakdown, dict):
         return (None,) * 10
@@ -103,8 +105,14 @@ def _score_breakdown(data: dict, expected_total: float | None) -> tuple[float | 
         except (TypeError, ValueError, OverflowError):
             return None
 
-    scores = tuple(number(breakdown.get(key)) for key in ("privacy", "kids_space", "garden", "shared_living", "practical"))
-    if any(value is None or not math.isfinite(value) or not 0 <= value <= 100 for value in scores):
+    scores = tuple(
+        number(breakdown.get(key))
+        for key in ("privacy", "kids_space", "garden", "shared_living", "practical")
+    )
+    if any(
+        value is None or not math.isfinite(value) or not 0 <= value <= 100
+        for value in scores
+    ):
         return (None,) * 10
 
     if "weights" not in breakdown:
@@ -114,7 +122,16 @@ def _score_breakdown(data: dict, expected_total: float | None) -> tuple[float | 
         if not isinstance(weight_data, dict):
             return (None,) * 10
         try:
-            raw_weights = tuple(weight_data[key] for key in ("privacy", "kids_space", "garden", "shared_living", "practical"))
+            raw_weights = tuple(
+                weight_data[key]
+                for key in (
+                    "privacy",
+                    "kids_space",
+                    "garden",
+                    "shared_living",
+                    "practical",
+                )
+            )
         except KeyError:
             return (None,) * 10
         parsed_weights = tuple(number(value) for value in raw_weights)
@@ -123,13 +140,27 @@ def _score_breakdown(data: dict, expected_total: float | None) -> tuple[float | 
         weights = parsed_weights
     if not weights:
         vision_keys = (
-            "vision_separate_entrance", "vision_second_kitchen", "vision_internal_connection",
-            "vision_split_type", "vision_en_suite_count", "vision_privacy_score",
-            "vision_two_dwellings", "vision_two_family_fit", "vision_dwelling_evidence",
+            "vision_separate_entrance",
+            "vision_second_kitchen",
+            "vision_internal_connection",
+            "vision_split_type",
+            "vision_en_suite_count",
+            "vision_privacy_score",
+            "vision_two_dwellings",
+            "vision_two_family_fit",
+            "vision_dwelling_evidence",
             "vision_bathrooms",
         )
-        weights = (30.0, 20.0, 20.0, 15.0, 15.0) if any(data.get(key) is not None for key in vision_keys) else (
-            0.0, 20.0 / 0.7, 20.0 / 0.7, 15.0 / 0.7, 15.0 / 0.7,
+        weights = (
+            (30.0, 20.0, 20.0, 15.0, 15.0)
+            if any(data.get(key) is not None for key in vision_keys)
+            else (
+                0.0,
+                20.0 / 0.7,
+                20.0 / 0.7,
+                15.0 / 0.7,
+                15.0 / 0.7,
+            )
         )
     if any(not math.isfinite(weight) or weight < 0 for weight in weights):
         return (None,) * 10
@@ -138,19 +169,24 @@ def _score_breakdown(data: dict, expected_total: float | None) -> tuple[float | 
     expected = number(expected_total)
     if expected is None or not math.isfinite(expected) or not 0 <= expected <= 100:
         return (None,) * 10
-    calculated_total = round(sum(value * weight / 100 for value, weight in zip(scores, weights)), 1)
+    calculated_total = round(
+        sum(value * weight / 100 for value, weight in zip(scores, weights)), 1
+    )
     if abs(calculated_total - expected) > 0.11:
         return (None,) * 10
     return (*scores, *weights)
 
 
 def _table_exists(conn, table: str) -> bool:
-    return conn.execute("select to_regclass(%s) is not null", (f"public.{table}",)).fetchone()[0]
+    return conn.execute(
+        "select to_regclass(%s) is not null", (f"public.{table}",)
+    ).fetchone()[0]
 
 
 def _purge_legacy_hard_rejects(conn, external_ids: Iterable[str] = ()) -> int:
+    """Hide audited hard rejects; delete only records without human or audit history."""
     external_ids = list(external_ids)
-    ids = [
+    ids = {
         row[0]
         for row in conn.execute(
             """select distinct l."Id" from listings l
@@ -160,25 +196,47 @@ def _purge_legacy_hard_rejects(conn, external_ids: Iterable[str] = ()) -> int:
                or l."ExternalId" = any(%s)""",
             (external_ids,),
         ).fetchall()
-    ]
+    }
     if not ids:
         return 0
-    conn.execute('select 1 from listings where "Id" = any(%s) order by "Id" for update', (ids,)).fetchall()
-    for table in ("votes", "comments", "feedback", "listing_overrides"):
-        if _table_exists(conn, table) and conn.execute(
-            sql.SQL('select exists(select 1 from {} where "ListingId" = any(%s))').format(sql.Identifier(table)),
-            (ids,),
-        ).fetchone()[0]:
-            raise RuntimeError(
-                f"Cannot purge hard-filter rejects: user history exists in {table}."
-            )
-    for table in ("listing_media", "ai_evidence", "listing_imports"):
+    conn.execute(
+        'select 1 from listings where "Id" = any(%s) order by "Id" for update',
+        (list(ids),),
+    ).fetchall()
+    protected: set[uuid.UUID] = set()
+    history_tables = (
+        ("votes", '"ListingId"'),
+        ("comments", '"ListingId"'),
+        ("feedback", '"ListingId"'),
+        ("listing_overrides", '"ListingId"'),
+        ("listing_imports", "listing_id"),
+        ("ai_evidence", "listing_id"),
+        ("listing_export_state", "listing_id"),
+        ("ai_rule_applications", '"ListingId"'),
+    )
+    for table, column in history_tables:
         if _table_exists(conn, table):
-            conn.execute(sql.SQL("delete from {} where listing_id = any(%s)").format(sql.Identifier(table)), (ids,))
-    if _table_exists(conn, "listing_export_state"):
-        conn.execute("delete from listing_export_state where listing_id = any(%s)", (ids,))
-    conn.execute('delete from listings where "Id" = any(%s)', (ids,))
-    return len(ids)
+            query = sql.SQL("select distinct {} from {} where {} = any(%s)").format(
+                sql.SQL(column), sql.Identifier(table), sql.SQL(column)
+            )
+            protected.update(
+                row[0] for row in conn.execute(query, (list(ids),)).fetchall()
+            )
+    if protected:
+        conn.execute(
+            """update listings set "State"='filter_rejected'::listing_state
+            where "Id"=any(%s) and "ArchivedAt" is null""",
+            (list(protected),),
+        )
+    deletable = list(ids - protected)
+    if not deletable:
+        return 0
+    if _table_exists(conn, "listing_media"):
+        conn.execute(
+            "delete from listing_media where listing_id = any(%s)", (deletable,)
+        )
+    conn.execute('delete from listings where "Id" = any(%s)', (deletable,))
+    return len(deletable)
 
 
 def _active_learning_rule(conn) -> tuple[uuid.UUID, str, dict] | None:
@@ -193,7 +251,11 @@ def _active_learning_rule(conn) -> tuple[uuid.UUID, str, dict] | None:
         rule = json.loads(row[2])
     except (TypeError, ValueError, json.JSONDecodeError):
         return None
-    if not isinstance(rule, dict) or not isinstance(rule.get("conditions"), list) or not rule["conditions"]:
+    if (
+        not isinstance(rule, dict)
+        or not isinstance(rule.get("conditions"), list)
+        or not rule["conditions"]
+    ):
         return None
     return row[0], f"feedback-v{row[1]}", rule
 
@@ -227,24 +289,54 @@ def _learning_condition(case: ExportCase, condition: dict) -> bool:
     actual = _learning_field(case, str(condition.get("field", "")))
     expected = condition.get("value")
     operator = str(condition.get("operator", "")).lower()
-    if actual is None or isinstance(actual, bool) != isinstance(expected, bool) and (isinstance(actual, bool) or isinstance(expected, bool)):
+    if (
+        actual is None
+        or isinstance(actual, bool) != isinstance(expected, bool)
+        and (isinstance(actual, bool) or isinstance(expected, bool))
+    ):
         return False
     if isinstance(actual, str) and isinstance(expected, str):
         left, right = actual.casefold(), expected.casefold()
-        return {"eq": left == right, "neq": left != right, "contains": right in left}.get(operator, False)
-    if isinstance(actual, (int, float)) and not isinstance(actual, bool) and isinstance(expected, (int, float)) and not isinstance(expected, bool):
-        return {"eq": actual == expected, "neq": actual != expected, "lt": actual < expected, "lte": actual <= expected, "gt": actual > expected, "gte": actual >= expected}.get(operator, False)
+        return {
+            "eq": left == right,
+            "neq": left != right,
+            "contains": right in left,
+        }.get(operator, False)
+    if (
+        isinstance(actual, (int, float))
+        and not isinstance(actual, bool)
+        and isinstance(expected, (int, float))
+        and not isinstance(expected, bool)
+    ):
+        return {
+            "eq": actual == expected,
+            "neq": actual != expected,
+            "lt": actual < expected,
+            "lte": actual <= expected,
+            "gt": actual > expected,
+            "gte": actual >= expected,
+        }.get(operator, False)
     if isinstance(actual, bool) and isinstance(expected, bool):
-        return {"eq": actual == expected, "neq": actual != expected}.get(operator, False)
+        return {"eq": actual == expected, "neq": actual != expected}.get(
+            operator, False
+        )
     return False
 
 
 def _matches_learning_rule(case: ExportCase, rule: dict) -> bool:
     conditions = rule.get("conditions") or []
-    results = [_learning_condition(case, condition) for condition in conditions if isinstance(condition, dict)]
+    results = [
+        _learning_condition(case, condition)
+        for condition in conditions
+        if isinstance(condition, dict)
+    ]
     if not results:
         return False
-    return any(results) if str(rule.get("combinator", "all")).lower() == "any" else all(results)
+    return (
+        any(results)
+        if str(rule.get("combinator", "all")).lower() == "any"
+        else all(results)
+    )
 
 
 def _commute_minutes(data: dict) -> int | None:
@@ -260,8 +352,23 @@ def _commute_minutes(data: dict) -> int | None:
     return min(minutes) if minutes else None
 
 
-def _card_facts(case: ExportCase) -> tuple:
+def _source_first_seen(case: ExportCase, fetched_at: datetime) -> tuple[datetime, bool]:
+    value = case.raw.get("_source_first_seen_at")
+    first_seen = fetched_at
+    if isinstance(value, str):
+        try:
+            first_seen = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if first_seen.tzinfo is None:
+                first_seen = first_seen.replace(tzinfo=timezone.utc)
+        except ValueError:
+            first_seen = fetched_at
+    age = fetched_at - first_seen
+    return first_seen, timedelta(0) <= age < timedelta(hours=120)
+
+
+def _card_facts(case: ExportCase, fetched_at: datetime) -> tuple:
     raw = case.raw
+    first_seen, is_new = _source_first_seen(case, fetched_at)
     energy = _first(raw, "energy_label", "energyLabel")
     noise = _first(raw, "noise_status")
     return (
@@ -286,15 +393,22 @@ def _card_facts(case: ExportCase) -> tuple:
         _integer(raw, "monthly_expense", "monthlyExpense"),
         _integer(raw, "days_on_market", "daysOnMarket"),
         _commute_minutes(raw),
-        json.dumps(raw.get("commute"), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        if isinstance(raw.get("commute"), dict) else None,
+        json.dumps(
+            raw.get("commute"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if isinstance(raw.get("commute"), dict)
+        else None,
         _first(raw, "buildable_status"),
         _first(raw, "vision_condition"),
         _first(raw, "vision_garden_orientation"),
         _first(raw, "vision_multigen_layout"),
         case.postal_code,
         _boolean(raw, "preferred"),
-        _boolean(raw, "new"),
+        is_new,
+        first_seen,
         _first(raw, "family_units"),
     )
 
@@ -305,6 +419,12 @@ class ExportResult:
     archived: int
     media_cached: int
     media_errors: int
+    archival_blocked: int = 0
+    inserted: int = 0
+    updated: int = 0
+    reactivated: int = 0
+    active_total: int = 0
+    geometry_covered: int = 0
 
 
 class PostgresExporter:
@@ -329,11 +449,32 @@ class PostgresExporter:
         *,
         run_id: str,
         fetched_at: datetime | None = None,
+        dry_run: bool = False,
     ) -> ExportResult:
         fetched_at = fetched_at or datetime.now(timezone.utc)
         all_cases = list(cases)
-        hard_rejected_ids = [case.source_id for case in all_cases if case.pipeline_decision == "filter_rejected"]
-        cases = [case for case in all_cases if case.pipeline_decision != "filter_rejected"]
+        source_ids = [case.source_id for case in all_cases]
+        if any(not source_id for source_id in source_ids) or len(
+            set(source_ids)
+        ) != len(source_ids):
+            raise RuntimeError("export snapshot contains blank or duplicate source IDs")
+        manifest_payload = [
+            asdict(case) for case in sorted(all_cases, key=lambda item: item.source_id)
+        ]
+        manifest_sha256 = hashlib.sha256(
+            json.dumps(
+                manifest_payload, sort_keys=True, separators=(",", ":"), default=str
+            ).encode()
+        ).hexdigest()
+        snapshot_count = len(all_cases)
+        hard_rejected_ids = [
+            case.source_id
+            for case in all_cases
+            if case.pipeline_decision == "filter_rejected"
+        ]
+        cases = [
+            case for case in all_cases if case.pipeline_decision != "filter_rejected"
+        ]
         media_cached = media_errors = 0
         with psycopg.connect(self.database_url) as conn:
             # Production exporter credentials should only need DML. Schema DDL
@@ -346,14 +487,39 @@ class PostgresExporter:
             tombstone_table_exists = _table_exists(conn, "delisted_listings")
             if tombstone_table_exists:
                 delisted_ids = {
-                    row[0] for row in conn.execute("select external_id from delisted_listings").fetchall()
+                    row[0]
+                    for row in conn.execute(
+                        "select external_id from delisted_listings"
+                    ).fetchall()
                 }
                 cases = [case for case in cases if case.source_id not in delisted_ids]
             conn.execute(
-                "INSERT INTO export_runs(run_id,source_scope,fetched_at) VALUES (%s,%s,%s) ON CONFLICT(run_id) DO NOTHING",
-                (run_id, self.source_scope, fetched_at),
+                "select pg_advisory_xact_lock(hashtextextended(%s, 1))", (run_id,)
             )
+            existing_run = conn.execute(
+                "select source_scope,fetched_at,snapshot_count,manifest_sha256 "
+                "from export_runs where run_id=%s",
+                (run_id,),
+            ).fetchone()
+            run_identity = (
+                self.source_scope,
+                fetched_at,
+                snapshot_count,
+                manifest_sha256,
+            )
+            if existing_run is not None and tuple(existing_run) != run_identity:
+                raise RuntimeError(
+                    f"run ID {run_id!r} already belongs to a different immutable snapshot"
+                )
+            if existing_run is None:
+                conn.execute(
+                    "INSERT INTO export_runs"
+                    "(run_id,source_scope,fetched_at,snapshot_count,manifest_sha256) "
+                    "VALUES (%s,%s,%s,%s,%s)",
+                    (run_id, *run_identity),
+                )
             exported = 0
+            inserted = updated = reactivated = 0
             for case in cases:
                 if tombstone_table_exists:
                     conn.execute(
@@ -367,25 +533,56 @@ class PostgresExporter:
                         continue
                 _, payload_hash = _canonical(case.raw)
                 evidence = case.ai_evidence or {}
-                state = "ai_rejected" if case.pipeline_decision == "ai_rejected" else "active"
+                state = (
+                    "ai_rejected"
+                    if case.pipeline_decision == "ai_rejected"
+                    else "active"
+                )
                 baseline_state = state
                 learning_version = None
                 learning_applied = False
-                existing = conn.execute('select "Id","State"::text,"LearningRuleVersion" from listings where "ExternalId"=%s for update', (case.source_id,)).fetchone()
+                existing = conn.execute(
+                    'select "Id","State"::text,"LearningRuleVersion","ArchivedAt" from listings where "ExternalId"=%s for update',
+                    (case.source_id,),
+                ).fetchone()
+                if existing is None:
+                    inserted += 1
+                elif existing[3] is not None and not case.archive_reason:
+                    reactivated += 1
+                else:
+                    updated += 1
                 protected_existing = False
                 if existing and not case.archive_reason:
-                    has_vote = votes_table_exists and conn.execute(
-                        'select exists(select 1 from votes where "ListingId"=%s)',
-                        (existing[0],),
-                    ).fetchone()[0]
-                    has_override = _table_exists(conn, "listing_overrides") and conn.execute(
-                        'select exists(select 1 from listing_overrides where "ListingId"=%s)',
-                        (existing[0],),
-                    ).fetchone()[0]
+                    has_vote = (
+                        votes_table_exists
+                        and conn.execute(
+                            'select exists(select 1 from votes where "ListingId"=%s)',
+                            (existing[0],),
+                        ).fetchone()[0]
+                    )
+                    has_override = (
+                        _table_exists(conn, "listing_overrides")
+                        and conn.execute(
+                            'select exists(select 1 from listing_overrides where "ListingId"=%s)',
+                            (existing[0],),
+                        ).fetchone()[0]
+                    )
                     protected_existing = has_vote or has_override
                     if protected_existing:
-                        state, learning_version = existing[1], existing[2]
-                if not protected_existing and learning_rule and case.ai_status != "not_assessed" and case.ai_confidence == "high":
+                        learning_version = existing[2]
+                        ordinary_reappearance = (
+                            existing[3] is not None
+                            and existing[1] == "archived"
+                            and not has_override
+                        )
+                        if not ordinary_reappearance:
+                            state = existing[1]
+                if (
+                    not protected_existing
+                    and learning_rule
+                    and case.ai_status != "not_assessed"
+                    and case.ai_confidence == "high"
+                ):
                     learning_applied = True
                     learning_version = learning_rule[1]
                     learned_reject = _matches_learning_rule(case, learning_rule[2])
@@ -394,9 +591,14 @@ class PostgresExporter:
                         evidence = {
                             "decision": "reject",
                             "confidence": "high",
-                            "model_version": evidence.get("model_version", "approved-feedback-rule"),
+                            "model_version": evidence.get(
+                                "model_version", "approved-feedback-rule"
+                            ),
                             "rule_version": learning_version,
-                            "evidence": {"approved_rule": learning_rule[2], "source_evidence": evidence.get("evidence", {})},
+                            "evidence": {
+                                "approved_rule": learning_rule[2],
+                                "source_evidence": evidence.get("evidence", {}),
+                            },
                         }
                 if case.archive_reason:
                     state = "archived"
@@ -410,10 +612,10 @@ class PostgresExporter:
                      "SecondKitchen","PrivacyScore","FamilyPrivacyScore","KidsSpaceScore","GardenScore",
                      "SharedLivingScore","PracticalScore","FamilyPrivacyWeight","KidsSpaceWeight","GardenWeight",
                      "SharedLivingWeight","PracticalWeight","Latitude","Longitude","MonthlyExpense",
-                     "DaysOnMarket","CommuteMinutes","CommuteJson","BuildableStatus","Condition","GardenOrientation","MultigenFit","PostalCode","Preferred","IsNew","FamilyUnits","LearningRuleVersion")
+                     "DaysOnMarket","CommuteMinutes","CommuteJson","BuildableStatus","Condition","GardenOrientation","MultigenFit","PostalCode","Preferred","IsNew","FirstSeenAt","FamilyUnits","LearningRuleVersion")
                     VALUES (%s,%s,%s,%s,%s,%s,%s::listing_state,%s,%s,%s,%s,%s,%s,%s,%s,
                             %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT("ExternalId") DO UPDATE SET
                      "Address"=excluded."Address","City"=excluded."City","Price"=excluded."Price",
                      "FamilyFitScore"=excluded."FamilyFitScore",
@@ -446,7 +648,10 @@ class PostgresExporter:
                      "DaysOnMarket"=excluded."DaysOnMarket","CommuteMinutes"=excluded."CommuteMinutes",
                      "CommuteJson"=excluded."CommuteJson","BuildableStatus"=excluded."BuildableStatus","Condition"=excluded."Condition",
                      "GardenOrientation"=excluded."GardenOrientation","MultigenFit"=excluded."MultigenFit",
-                     "PostalCode"=excluded."PostalCode","Preferred"=excluded."Preferred","IsNew"=excluded."IsNew","FamilyUnits"=excluded."FamilyUnits",
+                     "PostalCode"=excluded."PostalCode","Preferred"=excluded."Preferred",
+                     "FirstSeenAt"=LEAST(COALESCE(current."FirstSeenAt",excluded."FirstSeenAt"),excluded."FirstSeenAt"),
+                     "IsNew"=(LEAST(COALESCE(current."FirstSeenAt",excluded."FirstSeenAt"),excluded."FirstSeenAt") > excluded."ImportedAt" - interval '120 hours'),
+                     "FamilyUnits"=excluded."FamilyUnits",
                      "LearningRuleVersion"=CASE WHEN EXISTS (SELECT 1 FROM listing_overrides o WHERE o."ListingId"=current."Id") THEN current."LearningRuleVersion" ELSE excluded."LearningRuleVersion" END
                     RETURNING "Id"
                     """,
@@ -468,17 +673,31 @@ class PostgresExporter:
                         case.source_url,
                         fetched_at,
                         fetched_at if case.archive_reason else None,
-                        *_card_facts(case),
+                        *_card_facts(case, fetched_at),
                         learning_version,
                     ),
                 ).fetchone()[0]
+                if (
+                    _table_exists(conn, "spatial_ref_sys")
+                    and conn.execute(
+                        "select exists(select 1 from information_schema.columns where table_name='listings' and column_name='Location')"
+                    ).fetchone()[0]
+                ):
+                    conn.execute(
+                        """UPDATE listings SET "Location"=CASE
+                        WHEN "Latitude" between -90 and 90 AND "Longitude" between -180 and 180
+                        THEN ST_SetSRID(ST_MakePoint("Longitude","Latitude"),4326)
+                        ELSE NULL END WHERE "Id"=%s""",
+                        (listing_id,),
+                    )
                 conn.execute(
                     """INSERT INTO listing_export_state
                     (listing_id,source_scope,first_seen_at,last_seen_at,last_seen_run_id,non_ai_passed,pipeline_decision,archive_reason,raw_payload)
                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT(listing_id) DO UPDATE SET source_scope=excluded.source_scope,last_seen_at=excluded.last_seen_at,
                     last_seen_run_id=excluded.last_seen_run_id,non_ai_passed=excluded.non_ai_passed,
-                    pipeline_decision=excluded.pipeline_decision,archive_reason=excluded.archive_reason,raw_payload=excluded.raw_payload""",
+                    pipeline_decision=excluded.pipeline_decision,archive_reason=excluded.archive_reason,
+                    raw_payload=excluded.raw_payload,missing_complete_snapshots=0,last_missing_snapshot_date=NULL""",
                     (
                         listing_id,
                         self.source_scope,
@@ -491,7 +710,11 @@ class PostgresExporter:
                         Jsonb(case.raw),
                     ),
                 )
-                if learning_applied and learning_rule and _table_exists(conn, "ai_rule_applications"):
+                if (
+                    learning_applied
+                    and learning_rule
+                    and _table_exists(conn, "ai_rule_applications")
+                ):
                     previous_state = existing[1] if existing else baseline_state
                     previous_version = existing[2] if existing else None
                     conn.execute(
@@ -499,7 +722,15 @@ class PostgresExporter:
                         ("ProposalId","ListingId","ListingExternalId","PreviousState","PreviousLearningRuleVersion","AppliedState","AppliedAt")
                         VALUES (%s,%s,%s,%s::listing_state,%s,%s::listing_state,%s)
                         ON CONFLICT ("ProposalId","ListingId") DO NOTHING""",
-                        (learning_rule[0], listing_id, case.source_id, previous_state, previous_version, state, fetched_at),
+                        (
+                            learning_rule[0],
+                            listing_id,
+                            case.source_id,
+                            previous_state,
+                            previous_version,
+                            state,
+                            fetched_at,
+                        ),
                     )
                 conn.execute(
                     """INSERT INTO listing_imports
@@ -558,19 +789,72 @@ class PostgresExporter:
                         except Exception:
                             media_errors += 1
                 exported += 1
-            archived = conn.execute(
-                """UPDATE listings l SET "State"='archived',"ArchivedAt"=%s
-                FROM listing_export_state s WHERE s.listing_id=l."Id" AND s.source_scope=%s
-                AND s.last_seen_run_id<>%s AND l."ArchivedAt" IS NULL""",
-                (fetched_at, self.source_scope, run_id),
-            ).rowcount
             conn.execute(
-                """UPDATE listing_export_state SET archive_reason='not_in_current_fetch'
-                WHERE source_scope=%s AND last_seen_run_id<>%s AND archive_reason IS NULL""",
-                (self.source_scope, run_id),
+                """UPDATE listing_export_state SET
+                missing_complete_snapshots=missing_complete_snapshots + CASE
+                    WHEN extract(isodow from %s::timestamptz) between 1 and 5
+                     AND last_missing_snapshot_date IS DISTINCT FROM (%s::timestamptz)::date THEN 1 ELSE 0 END,
+                last_missing_snapshot_date=(%s::timestamptz)::date
+                WHERE source_scope=%s AND last_seen_run_id<>%s""",
+                (fetched_at, fetched_at, fetched_at, self.source_scope, run_id),
             )
+            candidates = conn.execute(
+                """SELECT count(*) FROM listings l JOIN listing_export_state s ON s.listing_id=l."Id"
+                WHERE s.source_scope=%s AND s.last_seen_run_id<>%s
+                AND s.missing_complete_snapshots>=2 AND l."ArchivedAt" IS NULL""",
+                (self.source_scope, run_id),
+            ).fetchone()[0]
+            retained = conn.execute(
+                """SELECT count(*) FROM listings l JOIN listing_export_state s ON s.listing_id=l."Id"
+                WHERE s.source_scope=%s AND l."ArchivedAt" IS NULL""",
+                (self.source_scope,),
+            ).fetchone()[0]
+            archival_blocked = (
+                candidates if candidates and candidates / max(retained, 1) > 0.20 else 0
+            )
+            archived = 0
+            if not archival_blocked:
+                archived = conn.execute(
+                    """UPDATE listings l SET "State"='archived',"ArchivedAt"=%s
+                    FROM listing_export_state s WHERE s.listing_id=l."Id" AND s.source_scope=%s
+                    AND s.last_seen_run_id<>%s AND s.missing_complete_snapshots>=2
+                    AND l."ArchivedAt" IS NULL""",
+                    (fetched_at, self.source_scope, run_id),
+                ).rowcount
+                conn.execute(
+                    """UPDATE listing_export_state SET archive_reason='missing_from_two_complete_snapshots'
+                    WHERE source_scope=%s AND last_seen_run_id<>%s
+                    AND missing_complete_snapshots>=2 AND archive_reason IS NULL""",
+                    (self.source_scope, run_id),
+                )
             conn.execute(
                 "UPDATE export_runs SET completed_at=%s WHERE run_id=%s",
                 (datetime.now(timezone.utc), run_id),
             )
-        return ExportResult(exported, archived, media_cached, media_errors)
+            active_total = conn.execute(
+                'select count(*) from listings where "ArchivedAt" is null'
+            ).fetchone()[0]
+            geometry_covered = 0
+            if (
+                _table_exists(conn, "spatial_ref_sys")
+                and conn.execute(
+                    "select exists(select 1 from information_schema.columns where table_name='listings' and column_name='Location')"
+                ).fetchone()[0]
+            ):
+                geometry_covered = conn.execute(
+                    'select count(*) from listings where "ArchivedAt" is null and "Location" is not null'
+                ).fetchone()[0]
+            if dry_run:
+                conn.rollback()
+        return ExportResult(
+            exported,
+            archived,
+            media_cached,
+            media_errors,
+            archival_blocked,
+            inserted,
+            updated,
+            reactivated,
+            active_total,
+            geometry_covered,
+        )

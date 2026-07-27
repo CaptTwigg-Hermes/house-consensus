@@ -28,16 +28,17 @@
             <div class="image-placeholder" aria-hidden="true"><span>⌂</span></div>
             <div class="card-image-shade"></div>
             <div class="image-badges">
+                @if (IsRecentlyNew) { <span class="badge new">@L["New"]</span> }
                 @if (Listing.Consensus) { <span class="badge consensus">♥ @L["ConsensusShort"]</span> }
                 @if (Listing.Quiet is true) { <span class="badge quiet">@L["Quiet"]</span> }
                 @if (Listing.Floors == 1) { <span class="badge neutral">@L["OneFloor"]</span> }
             </div>
+            <div class="card-image-meta">
+                <div class="card-image-address"><h2>@Listing.Address</h2><p>@Listing.City</p></div>
+                <div class="card-image-price"><strong>@Price</strong>@if (PricePerArea is not null) { <small>@PricePerArea</small> }</div>
+            </div>
         </div>
         <div class="card-body">
-            <div class="card-heading">
-                <div><h2>@Listing.Address</h2><p>@Listing.City</p></div>
-                <div class="card-price"><strong>@Price</strong>@if (PricePerArea is not null) { <small>@PricePerArea</small> }</div>
-            </div>
             <PropertyFacts Listing="Listing" />
             <CommuteTable Json="@Listing.CommuteJson" Compact="true" />
             @if (HasFitSignals)
@@ -52,7 +53,6 @@
             }
             <footer class="card-footer">
                 <span class="vote-dots" aria-label="@L["Everyone"]">@foreach (var vote in Listing.Votes) { <i class="@(vote.Choice == VoteChoice.Like ? "like" : "dislike")" style="@VoteStyle(vote)" title="@L.Enum(vote.Choice)"><span class="vote-symbol">@(vote.Choice == VoteChoice.Like ? "♥" : "×")</span></i> }</span>
-                <span class="detail-link">@L["ViewDetails"] <b aria-hidden="true">→</b></span>
             </footer>
         </div>
     </NavLink>
@@ -63,6 +63,9 @@
     [Parameter, EditorRequired] public ListingDto Listing { get; set; } = default!;
     [Parameter] public bool ShowVoting { get; set; }
     [Parameter] public EventCallback OnVoted { get; set; }
+    private bool IsRecentlyNew => Listing.FirstSeenAt is { } firstSeen
+        && firstSeen <= DateTimeOffset.UtcNow
+        && firstSeen > DateTimeOffset.UtcNow.AddHours(-120);
     private string Price => Listing.Price.HasValue ? $"{Listing.Price.Value:N0} kr." : L["PriceOnRequest"];
     private string? PricePerArea => Listing.Price.HasValue && Listing.LivingArea > 0 ? $"{Listing.Price.Value / Listing.LivingArea.Value:N0} kr/m²" : null;
     private bool HasFitSignals => Listing.SeparateEntrance is true || Listing.SecondKitchen is true || Listing.GroundFloorBedroom is true || Listing.PrivacyScore.HasValue || Listing.BuildableHeadroom > 0;

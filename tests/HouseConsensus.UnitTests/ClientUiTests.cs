@@ -294,6 +294,28 @@ public sealed class ClientUiTests
     }
 
     [Fact]
+    public void House_cards_use_one_photo_overlay_layout_and_show_new_chip()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var card = File.ReadAllText(Path.Combine(root, "src/Client/Components/ListingCard.razor"));
+        var css = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/css/app.css"));
+        var i18n = File.ReadAllText(Path.Combine(root, "src/Client/Services/I18n.cs"));
+
+        Assert.Contains("IsRecentlyNew", card, StringComparison.Ordinal);
+        Assert.Contains("firstSeen > DateTimeOffset.UtcNow.AddHours(-120)", card, StringComparison.Ordinal);
+        Assert.Contains("badge new", card, StringComparison.Ordinal);
+        Assert.Contains("L[\"New\"]", card, StringComparison.Ordinal);
+        Assert.Contains("card-image-meta", card, StringComparison.Ordinal);
+        Assert.Contains("card-image-address", card, StringComparison.Ordinal);
+        Assert.Contains("card-image-price", card, StringComparison.Ordinal);
+        Assert.DoesNotContain("ViewDetails", card, StringComparison.Ordinal);
+        Assert.DoesNotContain("detail-link", card, StringComparison.Ordinal);
+        Assert.Contains(".card-image-meta", css, StringComparison.Ordinal);
+        Assert.Contains(".image-badges .badge.new", css, StringComparison.Ordinal);
+        Assert.Contains("[\"New\"] = (\"New\", \"Ny\")", i18n, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Listing_card_like_hearts_use_the_member_avatar_color()
     {
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);

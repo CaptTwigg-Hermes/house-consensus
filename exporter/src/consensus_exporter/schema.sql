@@ -1,3 +1,8 @@
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name='postgis') THEN
+    CREATE EXTENSION IF NOT EXISTS postgis;
+  END IF;
+END $$;
 DO $$ BEGIN CREATE TYPE listing_state AS ENUM ('active','filter_rejected','ai_rejected','manually_rejected','restored','archived'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN CREATE TYPE override_action AS ENUM ('restore','reject'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- Core tables match the application EF migration. CREATE IF NOT EXISTS only bootstraps isolated exporter tests;
@@ -21,7 +26,8 @@ CREATE TABLE IF NOT EXISTS listings (
     "Latitude" double precision, "Longitude" double precision,
     "MonthlyExpense" integer, "DaysOnMarket" integer, "CommuteMinutes" integer, "CommuteJson" text,
     "BuildableStatus" text, "Condition" text, "GardenOrientation" text, "MultigenFit" text,
-    "PostalCode" text, "Preferred" boolean, "IsNew" boolean, "FamilyUnits" text, "LearningRuleVersion" text
+    "PostalCode" text, "Preferred" boolean, "IsNew" boolean, "FirstSeenAt" timestamptz,
+    "FamilyUnits" text, "LearningRuleVersion" text
 );
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "PreviewImageUrl" text;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "LivingArea" integer;
@@ -62,6 +68,15 @@ ALTER TABLE listings ADD COLUMN IF NOT EXISTS "LearningRuleVersion" text;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "PostalCode" text;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "Preferred" boolean;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "IsNew" boolean;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "FirstSeenAt" timestamptz;
+UPDATE listings SET "FirstSeenAt"=COALESCE("FirstSeenAt","ImportedAt" - interval '120 hours');
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname='postgis') THEN
+    EXECUTE 'ALTER TABLE listings ADD COLUMN IF NOT EXISTS "Location" geometry(Point,4326)';
+    EXECUTE 'CREATE INDEX IF NOT EXISTS "IX_listings_Location" ON listings USING gist ("Location")';
+    EXECUTE 'UPDATE listings SET "Location"=ST_SetSRID(ST_MakePoint("Longitude","Latitude"),4326) WHERE "Latitude" BETWEEN -90 AND 90 AND "Longitude" BETWEEN -180 AND 180';
+  END IF;
+END $$;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "FamilyUnits" text;
 CREATE UNIQUE INDEX IF NOT EXISTS "IX_listings_ExternalId" ON listings ("ExternalId");
 CREATE TABLE IF NOT EXISTS listing_overrides (
@@ -79,15 +94,22 @@ CREATE TABLE IF NOT EXISTS delisted_listings (
 
 CREATE TABLE IF NOT EXISTS export_runs (
     run_id text PRIMARY KEY, source_scope text NOT NULL,
-    fetched_at timestamptz NOT NULL, completed_at timestamptz
+    fetched_at timestamptz NOT NULL, completed_at timestamptz,
+    snapshot_count integer NOT NULL, manifest_sha256 text NOT NULL
 );
+ALTER TABLE export_runs ADD COLUMN IF NOT EXISTS snapshot_count integer;
+ALTER TABLE export_runs ADD COLUMN IF NOT EXISTS manifest_sha256 text;
 CREATE TABLE IF NOT EXISTS listing_export_state (
     listing_id uuid PRIMARY KEY REFERENCES listings("Id") ON DELETE RESTRICT,
     source_scope text NOT NULL, first_seen_at timestamptz NOT NULL,
     last_seen_at timestamptz NOT NULL, last_seen_run_id text NOT NULL,
     non_ai_passed boolean NOT NULL, pipeline_decision text NOT NULL,
-    archive_reason text, raw_payload jsonb NOT NULL
+    archive_reason text, raw_payload jsonb NOT NULL,
+    missing_complete_snapshots integer NOT NULL DEFAULT 0,
+    last_missing_snapshot_date date
 );
+ALTER TABLE listing_export_state ADD COLUMN IF NOT EXISTS missing_complete_snapshots integer NOT NULL DEFAULT 0;
+ALTER TABLE listing_export_state ADD COLUMN IF NOT EXISTS last_missing_snapshot_date date;
 CREATE INDEX IF NOT EXISTS ix_listing_export_state_scope_run ON listing_export_state(source_scope,last_seen_run_id);
 CREATE TABLE IF NOT EXISTS listing_imports (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
