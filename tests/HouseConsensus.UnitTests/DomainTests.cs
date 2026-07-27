@@ -11,6 +11,17 @@ public sealed class ConsensusTests
         => Assert.Equal(expected, AvatarInitials.From(displayName, email));
 
     [Fact]
+    public void Avatar_color_is_stable_and_varies_by_member()
+    {
+        var first = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var second = Guid.Parse("00000000-0000-0000-0000-000000000002");
+
+        Assert.Equal(AvatarColor.Css(first), AvatarColor.Css(first));
+        Assert.NotEqual(AvatarColor.Css(first), AvatarColor.Css(second));
+        Assert.StartsWith("#", AvatarColor.Css(first), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Requires_explicit_latest_like_from_every_active_member()
     {
         var a = Guid.NewGuid(); var b = Guid.NewGuid(); var house = Guid.NewGuid(); var t = DateTimeOffset.UtcNow;

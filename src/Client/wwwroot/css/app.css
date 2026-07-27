@@ -722,7 +722,7 @@ textarea:focus {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: var(--forest);
+  background: var(--avatar-color, var(--forest));
   color: #fff;
   display: grid;
   place-items: center;

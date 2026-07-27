@@ -82,6 +82,19 @@ public sealed class ClientUiTests
         => Assert.Equal(expected, AiEvidenceText.SafeFallback(raw, "Evidence unavailable"));
 
     [Fact]
+    public void Member_avatar_colors_are_wired_to_both_views()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var members = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Owner/Members.razor"));
+        var detail = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Detail.razor"));
+        var css = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/css/app.css"));
+
+        Assert.Contains("--avatar-color: @AvatarColor.Css(member.Id)", members, StringComparison.Ordinal);
+        Assert.Contains("--avatar-color: @AvatarColor.Css(vote.MemberId)", detail, StringComparison.Ordinal);
+        Assert.Contains(".avatar {\n  width: 32px;\n  height: 32px;\n  border-radius: 50%;\n  background: var(--avatar-color, var(--forest));", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Listing_vote_avatars_use_member_initials_instead_of_guid_fragments()
     {
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);

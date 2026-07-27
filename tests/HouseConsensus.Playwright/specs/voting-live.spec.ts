@@ -5,8 +5,10 @@ test('two members voting Like produces a live unanimous match', async ({ browser
   const household = await createTwoMemberHousehold(browser, mailpit, testInfo, testInfo.project.use.baseURL as string);
   try {
     await household.ownerPage.goto('/owner/members');
-    const ownerInitials = (await household.ownerPage.getByTestId('member-row')
-      .filter({ hasText: household.owner.email }).locator('.avatar').textContent())?.trim();
+    const ownerAvatar = household.ownerPage.getByTestId('member-row')
+      .filter({ hasText: household.owner.email }).locator('.avatar');
+    const ownerInitials = (await ownerAvatar.textContent())?.trim();
+    const ownerColor = await ownerAvatar.evaluate((element) => getComputedStyle(element).backgroundColor);
     expect(ownerInitials).toBeTruthy();
 
     await household.ownerPage.goto('/browse');
@@ -17,7 +19,9 @@ test('two members voting Like produces a live unanimous match', async ({ browser
     await household.ownerPage.getByTestId('vote-note').fill('Private note visible to the household');
     await household.ownerPage.getByRole('button', { name: /save vote|gem stemme/i }).click();
     await expect(household.memberPage.getByText('Private note visible to the household')).toBeVisible();
-    await expect(household.memberPage.locator('.household-votes .avatar')).toHaveText(ownerInitials!);
+    const listingAvatar = household.memberPage.locator('.household-votes .avatar');
+    await expect(listingAvatar).toHaveText(ownerInitials!);
+    await expect(listingAvatar).toHaveCSS('background-color', ownerColor);
     await expect(household.ownerPage.getByTestId('unanimity-status')).toContainText(/waiting|venter/i);
     await household.memberPage.getByTestId('vote-interested').click();
     await household.memberPage.getByRole('button', { name: /save vote|gem stemme/i }).click();
