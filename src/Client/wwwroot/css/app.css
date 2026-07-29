@@ -1820,14 +1820,94 @@ textarea:focus-visible {
 .noise-level.mapped small { color: var(--forest); }
 
 
-.household-votes { display: grid; gap: 14px; }
-.household-vote-card { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--paper); box-shadow: var(--shadow-sm); }
-.household-vote-listing { display: flex; justify-content: space-between; gap: 12px; padding: 14px 16px; color: inherit; text-decoration: none; background: var(--warm); }
-.household-vote-listing span { color: var(--muted); }
+.household-hero {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  margin: 4px 0 18px;
+  padding: 24px;
+  border-radius: 24px;
+  background: linear-gradient(135deg, var(--forest) 0%, #285447 72%, #386b5b 100%);
+  color: var(--paper);
+  box-shadow: var(--shadow);
+}
+.household-hero::after { content: ''; position: absolute; right: -42px; bottom: -70px; width: 180px; height: 180px; border: 1px solid rgba(255,255,255,.17); border-radius: 50%; }
+.household-hero-copy { position: relative; z-index: 1; max-width: 620px; }
+.household-hero .eyebrow { color: #bcd3c8 !important; }
+.household-hero h1 { margin: 3px 0 7px; color: #fff; font: 650 clamp(2rem, 8vw, 3.5rem)/1.02 Fraunces, serif; }
+.household-hero h1:focus { outline: 2px solid rgba(255,255,255,.65); outline-offset: 4px; border-radius: 4px; }
+.household-hero p:last-child { margin: 0; color: rgba(255,255,255,.78); }
+.household-hero-mark { position: relative; z-index: 1; width: 68px; height: 68px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.2); border-radius: 22px; background: rgba(255,255,255,.1); }
+.household-hero-mark .app-icon { width: 34px; height: 34px; }
+.household-pulse { display: grid; grid-template-columns: minmax(220px,1.5fr) repeat(3,minmax(110px,1fr)); gap: 10px; margin-bottom: 20px; }
+.household-pulse-intro, .household-pulse-stat { min-height: 88px; display: flex; align-items: center; gap: 12px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper); box-shadow: 0 6px 22px rgba(24,57,47,.06); }
+.household-pulse-intro strong, .household-pulse-intro small { display: block; }
+.household-pulse-intro small { margin-top: 3px; color: var(--muted); }
+.household-pulse-icon { width: 42px; height: 42px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 14px; background: var(--sage); color: var(--forest); }
+.household-pulse-icon .app-icon { width: 21px; height: 21px; }
+.household-pulse-stat { flex-direction: column; justify-content: center; align-items: flex-start; gap: 0; }
+.household-pulse-stat strong { font: 650 1.75rem Fraunces,serif; color: var(--forest); line-height: 1; }
+.household-pulse-stat span { margin-top: 6px; color: var(--muted); font-size: .75rem; }
+.household-pulse-stat.positive { background: #edf4e9; }
+.household-pulse-stat.notes { background: #fbefe8; }
+.household-pulse-stat.positive span, .household-pulse-stat.notes span { color: #626b66; }
+.household-votes { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; gap: 18px; }
+.household-vote-card { overflow: hidden; border: 1px solid var(--line); border-radius: 20px; background: var(--paper); box-shadow: 0 10px 30px rgba(24,57,47,.08); transition: transform .2s ease, box-shadow .2s ease; }
+.household-vote-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+.household-vote-card.vote-tone-like { border-color: #bfd1b8; }
+.household-vote-card.vote-tone-dislike { border-color: #e3c2b7; }
+.household-vote-listing { display: block; color: inherit; text-decoration: none; }
+.household-vote-cover { position: relative; height: 168px; overflow: hidden; background: #d9e2d8; }
+.household-vote-cover img { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; object-fit: cover; }
+.household-cover-placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(24,57,47,.35); }
+.household-cover-placeholder .app-icon { width: 54px; height: 54px; }
+.household-cover-shade { position: absolute; z-index: 2; inset: 0; background: linear-gradient(to top,rgba(12,28,23,.83),transparent 65%); }
+.household-fit-score { position: absolute; z-index: 3; top: 12px; right: 12px; min-width: 54px; height: 48px; display: flex; align-items: baseline; justify-content: center; padding: 10px; border-radius: 14px; background: rgba(255,253,248,.94); color: var(--forest); box-shadow: 0 5px 18px rgba(0,0,0,.14); }
+.household-fit-score strong { font-size: 1.05rem; }
+.household-fit-score small { font-size: .65rem; }
+.household-cover-copy { position: absolute; z-index: 3; left: 16px; right: 16px; bottom: 14px; color: #fff; }
+.household-cover-copy strong, .household-cover-copy span { display: block; }
+.household-cover-copy strong { font: 650 1.18rem Fraunces,serif; }
+.household-cover-copy span { margin-top: 2px; color: rgba(255,255,255,.78); font-size: .82rem; }
+.household-listing-summary { padding: 14px 16px 13px; background: #faf8f1; border-bottom: 1px solid var(--line); }
+.household-price { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.household-price strong { color: var(--forest); }
+.household-price span { color: var(--coral-dark); font-size: .78rem; font-weight: 700; }
+.household-vote-meter { height: 6px; margin-top: 12px; overflow: hidden; border-radius: 99px; background: #ead5ce; }
+.household-vote-meter .like { display: block; height: 100%; border-radius: inherit; background: var(--forest-2); }
+.household-meter-labels { display: flex; justify-content: space-between; gap: 10px; margin-top: 7px; font-size: .7rem; font-weight: 700; }
 .household-vote-rows { display: grid; }
-.household-vote-row { display: grid; grid-template-columns: 38px 1fr; gap: 10px; padding: 14px 16px; border-top: 1px solid var(--line); }
+.household-vote-row { display: grid; grid-template-columns: 42px 1fr; gap: 11px; padding: 16px; border-top: 1px solid var(--line); }
 .household-vote-row:first-child { border-top: 0; }
+.household-vote-row .member-avatar { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; color: #fff; font-size: .78rem; font-weight: 800; line-height: 1; box-shadow: 0 0 0 3px var(--paper); }
 .household-vote-body { min-width: 0; }
-.household-vote-body .vote-note { margin: 7px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.household-vote-heading { display: flex; justify-content: space-between; align-items: center; }
+.vote-choice-pill { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 5px 9px; border-radius: 999px; font-size: .74rem; }
+.vote-choice-pill.like { color: #28552c; background: var(--sage); }
+.vote-choice-pill.dislike { color: #8b352d; background: #f4dcd8; }
+.household-vote-body .vote-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+.household-vote-body .vote-tags span { padding: 4px 8px; border-radius: 999px; background: #edf0e8; color: #506158; font-size: .68rem; font-weight: 650; }
+.household-vote-body .vote-note { position: relative; margin: 10px 0 0; padding: 11px 13px; white-space: pre-wrap; overflow-wrap: anywhere; border-left: 3px solid var(--coral); border-radius: 0 10px 10px 0; background: #f7f3ea; color: #3f4a45; font-size: .88rem; line-height: 1.45; }
 .like-text { color: var(--forest); }
 .dislike-text { color: var(--coral-dark); }
+@media (max-width: 760px) {
+  .household-pulse { grid-template-columns: repeat(3,1fr); }
+  .household-pulse-intro { grid-column: 1/-1; min-height: 72px; }
+  .household-votes { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .household-hero { min-height: 154px; align-items: flex-start; padding: 18px 20px; border-radius: 20px; }
+  .household-hero-copy { padding-right: 24px; }
+  .household-hero-mark { position: absolute; top: 16px; right: 16px; width: 48px; height: 48px; border-radius: 16px; opacity: .65; }
+  .household-hero-mark .app-icon { width: 25px; height: 25px; }
+  .household-pulse { gap: 7px; }
+  .household-pulse-intro { display: none; }
+  .household-pulse-stat { min-height: 82px; padding: 12px 10px; }
+  .household-pulse-stat strong { font-size: 1.45rem; }
+  .household-pulse-stat span { font-size: .65rem; }
+  .household-vote-cover { height: 158px; }
+}
+@media (prefers-reduced-motion: reduce) { .household-vote-card { transition: none; } }

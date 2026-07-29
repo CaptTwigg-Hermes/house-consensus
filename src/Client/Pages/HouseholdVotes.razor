@@ -4,7 +4,15 @@
 @inject AuthState Auth
 
 <PageTitle>@L["HouseholdVotes"]</PageTitle>
-<header class="page-head"><div><p class="eyebrow">@L["Everyone"]</p><h1>@L["HouseholdVotes"]</h1><p>@L["HouseholdVotesIntro"]</p></div></header>
+
+<header class="household-hero">
+    <div class="household-hero-copy">
+        <p class="eyebrow">@L["Everyone"]</p>
+        <h1>@L["HouseholdVotes"]</h1>
+        <p>@L["HouseholdVotesIntro"]</p>
+    </div>
+    <div class="household-hero-mark" aria-hidden="true"><AppIcon Name="members" /></div>
+</header>
 
 @if (loading)
 {
@@ -16,12 +24,47 @@ else if (Items.Length == 0)
 }
 else
 {
+    <section class="household-pulse" aria-label="@L["HouseholdPulse"]">
+        <div class="household-pulse-intro">
+            <span class="household-pulse-icon"><AppIcon Name="heart" /></span>
+            <div><strong>@L["HouseholdPulse"]</strong><small>@L["HouseholdPulseIntro"]</small></div>
+        </div>
+        <div class="household-pulse-stat" data-testid="household-homes-count">
+            <strong>@Items.Length</strong><span>@L["HomesDiscussed"]</span>
+        </div>
+        <div class="household-pulse-stat positive" data-testid="household-positive-count">
+            <strong>@LikeCount</strong><span>@L["PositiveVotes"]</span>
+        </div>
+        <div class="household-pulse-stat notes" data-testid="household-note-count">
+            <strong>@NoteCount</strong><span>@L["SharedNotes"]</span>
+        </div>
+    </section>
+
     <div class="household-votes" data-testid="household-votes">
         @foreach (var listing in Items)
         {
-            <article class="household-vote-card">
-                <NavLink class="household-vote-listing" href="@($"listing/{listing.Id}")">
-                    <strong>@listing.Address</strong><span>@listing.City</span>
+            <article class="household-vote-card @Tone(listing)" data-testid="household-vote-card">
+                <NavLink class="household-vote-listing" href="@($"listing/{listing.Id}")" aria-label="@($"{listing.Address}, {Price(listing)}, {L["FamilyFit"]} {Math.Round(listing.FamilyFitScore)} {L["OutOf100"]}, {VoteSummary(listing)}")">
+                    <div class="household-vote-cover">
+                        @if (!string.IsNullOrWhiteSpace(listing.PreviewImageUrl))
+                        {
+                            <img src="@($"/api/listings/{listing.Id}/image")" alt="@($"{L["PhotoOf"]} {listing.Address}")" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+                        }
+                        <div class="household-cover-placeholder" aria-hidden="true"><AppIcon Name="home" /></div>
+                        <div class="household-cover-shade"></div>
+                        <span class="household-fit-score"><strong>@Math.Round(listing.FamilyFitScore)</strong><small>/100</small></span>
+                        <div class="household-cover-copy"><strong>@listing.Address</strong><span>@listing.City</span></div>
+                    </div>
+                    <div class="household-listing-summary">
+                        <div class="household-price"><strong>@Price(listing)</strong><span>@L["ViewDetails"] →</span></div>
+                        <div class="household-vote-meter" aria-hidden="true">
+                            <span class="like" style="@($"width: {LikeShare(listing):0}%")"></span>
+                        </div>
+                        <div class="household-meter-labels">
+                            <span class="like-text">♥ @LikeCountFor(listing) @L["Positive"]</span>
+                            <span class="dislike-text">× @DislikeCountFor(listing) @L["Concerns"]</span>
+                        </div>
+                    </div>
                 </NavLink>
                 <div class="household-vote-rows">
                     @foreach (var vote in OtherVotes(listing).OrderByDescending(v => v.CreatedAt))
@@ -29,14 +72,18 @@ else
                         <section class="household-vote-row">
                             <span class="member-avatar" style="@AvatarStyle(vote)">@vote.MemberInitials</span>
                             <div class="household-vote-body">
-                                <strong class="@(vote.Choice == VoteChoice.Like ? "like-text" : "dislike-text")">@(vote.Choice == VoteChoice.Like ? "♥" : "×") @L.Enum(vote.Choice)</strong>
+                                <div class="household-vote-heading">
+                                    <strong class="vote-choice-pill @(vote.Choice == VoteChoice.Like ? "like" : "dislike")">
+                                        <span aria-hidden="true">@(vote.Choice == VoteChoice.Like ? "♥" : "×")</span> @L.Enum(vote.Choice)
+                                    </strong>
+                                </div>
                                 @if (vote.Tags.Length > 0)
                                 {
                                     <div class="vote-tags">@foreach (var tag in vote.Tags) { <span>@L.Enum(tag)</span> }</div>
                                 }
                                 @if (!string.IsNullOrWhiteSpace(vote.Note))
                                 {
-                                    <p class="vote-note">@vote.Note</p>
+                                    <blockquote class="vote-note">@vote.Note</blockquote>
                                 }
                             </div>
                         </section>
@@ -53,12 +100,25 @@ else
     private IEnumerable<VoteDto> OtherVotes(ListingDto listing) => listing.Votes.Where(v => v.MemberId != Auth.User?.Id);
     private ListingDto[] Items => listings.Where(x => OtherVotes(x).Any())
         .OrderByDescending(x => OtherVotes(x).Max(v => v.CreatedAt)).ToArray();
+    private int LikeCount => Items.Sum(LikeCountFor);
+    private int NoteCount => Items.Sum(x => OtherVotes(x).Count(v => !string.IsNullOrWhiteSpace(v.Note)));
 
     protected override async Task OnInitializedAsync()
     {
+        await Auth.InitializeAsync();
         listings = await Api.GetAsync<ListingDto[]>("api/listings/browse") ?? [];
         loading = false;
     }
 
+    private int LikeCountFor(ListingDto listing) => OtherVotes(listing).Count(v => v.Choice == VoteChoice.Like);
+    private int DislikeCountFor(ListingDto listing) => OtherVotes(listing).Count(v => v.Choice == VoteChoice.Dislike);
+    private double LikeShare(ListingDto listing)
+    {
+        var count = OtherVotes(listing).Count();
+        return count == 0 ? 0 : LikeCountFor(listing) * 100d / count;
+    }
+    private string Tone(ListingDto listing) => DislikeCountFor(listing) == 0 ? "vote-tone-like" : LikeCountFor(listing) == 0 ? "vote-tone-dislike" : "vote-tone-mixed";
+    private string VoteSummary(ListingDto listing) => $"{LikeCountFor(listing)} {L["Positive"]}, {DislikeCountFor(listing)} {L["Concerns"]}";
+    private string Price(ListingDto listing) => listing.Price.HasValue ? $"{listing.Price.Value:N0} kr." : L["PriceOnRequest"];
     private static string AvatarStyle(VoteDto vote) => $"--avatar-color: {AvatarColor.Css(vote.MemberId)}; background-color: var(--avatar-color)";
 }

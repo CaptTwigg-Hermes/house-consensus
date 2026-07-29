@@ -417,6 +417,25 @@ public sealed class ClientUiTests
     }
 
     [Fact]
+    public void Household_votes_page_has_a_visual_pulse_and_property_rich_cards()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var page = File.ReadAllText(Path.Combine(root, "src/Client/Pages/HouseholdVotes.razor"));
+        var css = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/css/app.css"));
+
+        Assert.Contains("household-pulse", page, StringComparison.Ordinal);
+        Assert.Contains("household-pulse-stat", page, StringComparison.Ordinal);
+        Assert.Contains("household-vote-cover", page, StringComparison.Ordinal);
+        Assert.Contains("listing.PreviewImageUrl", page, StringComparison.Ordinal);
+        Assert.Contains("LikeCount", page, StringComparison.Ordinal);
+        Assert.Contains("NoteCount", page, StringComparison.Ordinal);
+        Assert.Contains("household-vote-meter", page, StringComparison.Ordinal);
+        Assert.Contains("await Auth.InitializeAsync();", page, StringComparison.Ordinal);
+        Assert.Matches(@"\.household-pulse\s*\{[^}]*display:\s*grid", css);
+        Assert.Matches(@"\.household-vote-card\s*\{[^}]*border-radius:\s*20px", css);
+    }
+
+    [Fact]
     public void Existing_reason_tag_numeric_values_remain_stable()
     {
         Assert.Equal(0, (int)ReasonTag.Layout);
