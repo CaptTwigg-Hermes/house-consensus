@@ -34,7 +34,8 @@ public sealed record ListingDto(
     int? DaysOnMarket = null, int? CommuteMinutes = null, string? BuildableStatus = null,
     string? Condition = null, string? GardenOrientation = null, string? MultigenFit = null,
     DateTimeOffset? ImportedAt = null, string? PostalCode = null, bool? Preferred = null,
-    bool? IsNew = null, string? FamilyUnits = null, string? CommuteJson = null, DateTimeOffset? FirstSeenAt = null);
+    bool? IsNew = null, string? FamilyUnits = null, string? CommuteJson = null, DateTimeOffset? FirstSeenAt = null,
+    double? RoadNoiseDb = null, double? RailNoiseDb = null, double? AirNoiseDb = null);
 
 
 public sealed record AiRuleImpactDto(int Eligible, int Evaluated, int WouldReject, int WouldRestore, int Changed, Guid[] ListingIds);

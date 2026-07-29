@@ -81,6 +81,15 @@ def _integer(data: dict, *keys: str) -> int | None:
         return None
 
 
+def _number(data: dict, *keys: str) -> float | None:
+    value = _first(data, *keys)
+    try:
+        number = float(value) if value is not None else None
+        return number if number is None or math.isfinite(number) else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def _boolean(data: dict, *keys: str) -> bool | None:
     value = _first(data, *keys)
     if isinstance(value, bool):
@@ -410,6 +419,9 @@ def _card_facts(case: ExportCase, fetched_at: datetime) -> tuple:
         is_new,
         first_seen,
         _first(raw, "family_units"),
+        _number(raw, "road_noise_db") if raw.get("road_noise_db") is not None else _number(raw, "noise_road_db"),
+        _number(raw, "rail_noise_db") if raw.get("rail_noise_db") is not None else _number(raw, "noise_rail_db"),
+        _number(raw, "air_noise_db") if raw.get("air_noise_db") is not None else _number(raw, "noise_air_db"),
     )
 
 
@@ -612,10 +624,10 @@ class PostgresExporter:
                      "SecondKitchen","PrivacyScore","FamilyPrivacyScore","KidsSpaceScore","GardenScore",
                      "SharedLivingScore","PracticalScore","FamilyPrivacyWeight","KidsSpaceWeight","GardenWeight",
                      "SharedLivingWeight","PracticalWeight","Latitude","Longitude","MonthlyExpense",
-                     "DaysOnMarket","CommuteMinutes","CommuteJson","BuildableStatus","Condition","GardenOrientation","MultigenFit","PostalCode","Preferred","IsNew","FirstSeenAt","FamilyUnits","LearningRuleVersion")
+                     "DaysOnMarket","CommuteMinutes","CommuteJson","BuildableStatus","Condition","GardenOrientation","MultigenFit","PostalCode","Preferred","IsNew","FirstSeenAt","FamilyUnits","RoadNoiseDb","RailNoiseDb","AirNoiseDb","LearningRuleVersion")
                     VALUES (%s,%s,%s,%s,%s,%s,%s::listing_state,%s,%s,%s,%s,%s,%s,%s,%s,
                             %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT("ExternalId") DO UPDATE SET
                      "Address"=excluded."Address","City"=excluded."City","Price"=excluded."Price",
                      "FamilyFitScore"=excluded."FamilyFitScore",
@@ -652,6 +664,8 @@ class PostgresExporter:
                      "FirstSeenAt"=LEAST(COALESCE(current."FirstSeenAt",excluded."FirstSeenAt"),excluded."FirstSeenAt"),
                      "IsNew"=(LEAST(COALESCE(current."FirstSeenAt",excluded."FirstSeenAt"),excluded."FirstSeenAt") > excluded."ImportedAt" - interval '120 hours'),
                      "FamilyUnits"=excluded."FamilyUnits",
+                     "RoadNoiseDb"=excluded."RoadNoiseDb","RailNoiseDb"=excluded."RailNoiseDb",
+                     "AirNoiseDb"=excluded."AirNoiseDb",
                      "LearningRuleVersion"=CASE WHEN EXISTS (SELECT 1 FROM listing_overrides o WHERE o."ListingId"=current."Id") THEN current."LearningRuleVersion" ELSE excluded."LearningRuleVersion" END
                     RETURNING "Id"
                     """,

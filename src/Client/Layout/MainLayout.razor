@@ -23,6 +23,7 @@
     <NavLink href="browse"><AppIcon Name="search" />@L["Browse"]</NavLink>
     <NavLink href="everyone-likes"><AppIcon Name="heart" />@L["EveryoneLikes"]</NavLink>
     <NavLink href="my-votes"><AppIcon Name="check" />@L["MyVotes"]</NavLink>
+    <NavLink href="household-votes"><AppIcon Name="members" />@L["HouseholdVotes"]</NavLink>
     @if (Auth.IsOwner)
     {
         <div class="nav-section">@L["Owner"]</div>
@@ -37,7 +38,7 @@
     <NavLink href="" Match="NavLinkMatch.All"><AppIcon Name="home" /><small>@L["Queue"]</small></NavLink>
     <NavLink href="browse"><AppIcon Name="search" /><small>@L["Browse"]</small></NavLink>
     <NavLink href="everyone-likes"><AppIcon Name="heart" /><small>@L["EveryoneLikes"]</small></NavLink>
-    <NavLink href="my-votes"><AppIcon Name="check" /><small>@L["MyVotes"]</small></NavLink>
+    <NavLink href="household-votes"><AppIcon Name="members" /><small>@L["HouseholdVotesShort"]</small></NavLink>
     @if (Auth.IsOwner) { <NavLink href="owner/review"><AppIcon Name="review" /><small>@L["Review"]</small></NavLink> }
 </nav>
 <FeedbackButton />

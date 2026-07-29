@@ -1,5 +1,6 @@
 using System.Net;
 using HouseConsensus.Client.Services;
+using HouseConsensus.Shared;
 using Xunit;
 using Microsoft.JSInterop;
 using HouseConsensus.Client.Components;
@@ -368,6 +369,72 @@ public sealed class ClientUiTests
         Assert.Contains(".score-chip:focus-within .score-tooltip", css, StringComparison.Ordinal);
     }
 
+
+    [Fact]
+    public void Mobile_browse_keeps_the_map_toggle_and_detail_allows_own_note_editing()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var browse = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Browse.razor"));
+        var detail = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Detail.razor"));
+        var css = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/css/app.css"));
+
+        Assert.Contains("data-testid=\"mobile-map-toggle\"", browse, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"@media\s*\(max-width:\s*520px\)[^{]*\{(?:(?!@media).)*\.view-toggle\.compact\s*\{[^}]*display:\s*none", css);
+        Assert.Contains("data-testid=\"detail-edit-note-open\"", detail, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"detail-edit-note\"", detail, StringComparison.Ordinal);
+        Assert.Contains("Api.EditVoteNote", detail, StringComparison.Ordinal);
+        Assert.Contains("vote.MemberId == Auth.User?.Id", detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Listing_cards_and_details_show_road_rail_and_air_noise_levels()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var card = File.ReadAllText(Path.Combine(root, "src/Client/Components/ListingCard.razor"));
+        var detail = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Detail.razor"));
+        var levels = File.ReadAllText(Path.Combine(root, "src/Client/Components/NoiseLevels.razor"));
+
+        Assert.Contains("<NoiseLevels Listing=", card);
+        Assert.Contains("<NoiseLevels Listing=", detail);
+        Assert.Contains("Listing.RoadNoiseDb", levels);
+        Assert.Contains("Listing.RailNoiseDb", levels);
+        Assert.Contains("Listing.AirNoiseDb", levels);
+        Assert.Contains("NoMappedData", levels);
+    }
+
+    [Fact]
+    public void Household_votes_page_surfaces_every_members_latest_vote_and_note()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var page = File.ReadAllText(Path.Combine(root, "src/Client/Pages/HouseholdVotes.razor"));
+        var nav = File.ReadAllText(Path.Combine(root, "src/Client/Layout/MainLayout.razor"));
+
+        Assert.Contains("@page \"/household-votes\"", page);
+        Assert.Contains("vote.MemberInitials", page);
+        Assert.Contains("vote.Note", page);
+        Assert.Contains("vote.Tags", page);
+        Assert.Contains("href=\"household-votes\"", nav);
+    }
+
+    [Fact]
+    public void Existing_reason_tag_numeric_values_remain_stable()
+    {
+        Assert.Equal(0, (int)ReasonTag.Layout);
+        Assert.Equal(1, (int)ReasonTag.Privacy);
+        Assert.Equal(2, (int)ReasonTag.Garden);
+        Assert.Equal(3, (int)ReasonTag.Condition);
+        Assert.Equal(4, (int)ReasonTag.Location);
+        Assert.Equal(5, (int)ReasonTag.Noise);
+        Assert.Equal(6, (int)ReasonTag.Price);
+        Assert.Equal(7, (int)ReasonTag.Other);
+        Assert.Equal(8, (int)ReasonTag.PrivacyFromNeighbors);
+    }
+
+    [Fact]
+    public void Voting_offers_privacy_from_neighbors_as_a_distinct_reason()
+    {
+        Assert.Contains(ReasonTag.PrivacyFromNeighbors, Enum.GetValues<ReasonTag>());
+    }
 
     [Fact]
     public void Detail_and_vote_cards_surface_commute_readable_evidence_and_unclipped_notes()

@@ -1,0 +1,64 @@
+@page "/household-votes"
+@inject ApiClient Api
+@inject I18n L
+@inject AuthState Auth
+
+<PageTitle>@L["HouseholdVotes"]</PageTitle>
+<header class="page-head"><div><p class="eyebrow">@L["Everyone"]</p><h1>@L["HouseholdVotes"]</h1><p>@L["HouseholdVotesIntro"]</p></div></header>
+
+@if (loading)
+{
+    <p class="loading">@L["Loading"]</p>
+}
+else if (Items.Length == 0)
+{
+    <div class="empty-state"><h2>@L["NoVotes"]</h2></div>
+}
+else
+{
+    <div class="household-votes" data-testid="household-votes">
+        @foreach (var listing in Items)
+        {
+            <article class="household-vote-card">
+                <NavLink class="household-vote-listing" href="@($"listing/{listing.Id}")">
+                    <strong>@listing.Address</strong><span>@listing.City</span>
+                </NavLink>
+                <div class="household-vote-rows">
+                    @foreach (var vote in OtherVotes(listing).OrderByDescending(v => v.CreatedAt))
+                    {
+                        <section class="household-vote-row">
+                            <span class="member-avatar" style="@AvatarStyle(vote)">@vote.MemberInitials</span>
+                            <div class="household-vote-body">
+                                <strong class="@(vote.Choice == VoteChoice.Like ? "like-text" : "dislike-text")">@(vote.Choice == VoteChoice.Like ? "♥" : "×") @L.Enum(vote.Choice)</strong>
+                                @if (vote.Tags.Length > 0)
+                                {
+                                    <div class="vote-tags">@foreach (var tag in vote.Tags) { <span>@L.Enum(tag)</span> }</div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(vote.Note))
+                                {
+                                    <p class="vote-note">@vote.Note</p>
+                                }
+                            </div>
+                        </section>
+                    }
+                </div>
+            </article>
+        }
+    </div>
+}
+
+@code {
+    private bool loading = true;
+    private ListingDto[] listings = [];
+    private IEnumerable<VoteDto> OtherVotes(ListingDto listing) => listing.Votes.Where(v => v.MemberId != Auth.User?.Id);
+    private ListingDto[] Items => listings.Where(x => OtherVotes(x).Any())
+        .OrderByDescending(x => OtherVotes(x).Max(v => v.CreatedAt)).ToArray();
+
+    protected override async Task OnInitializedAsync()
+    {
+        listings = await Api.GetAsync<ListingDto[]>("api/listings/browse") ?? [];
+        loading = false;
+    }
+
+    private static string AvatarStyle(VoteDto vote) => $"--avatar-color: {AvatarColor.Css(vote.MemberId)}; background-color: var(--avatar-color)";
+}

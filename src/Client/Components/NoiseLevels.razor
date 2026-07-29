@@ -1,0 +1,21 @@
+@inject I18n L
+
+<div class="noise-levels" data-testid="noise-levels" aria-label="@L["NoiseLevels"]">
+    @Level("road", L["RoadNoise"], Listing.RoadNoiseDb)
+    @Level("rail", L["RailNoise"], Listing.RailNoiseDb)
+    @Level("air", L["AirNoise"], Listing.AirNoiseDb)
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ListingDto Listing { get; set; } = default!;
+
+    private RenderFragment Level(string kind, string label, double? db) => builder =>
+    {
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"noise-level {kind} {(db.HasValue ? "mapped" : "unmapped")}");
+        builder.AddAttribute(2, "title", db.HasValue ? $"{label}: {db.Value:0.#} dB(A)" : $"{label}: {L["NoMappedData"]}");
+        builder.OpenElement(3, "strong"); builder.AddContent(4, label); builder.CloseElement();
+        builder.OpenElement(5, "small"); builder.AddContent(6, db.HasValue ? $"{db.Value:0.#} dB" : L["NoMappedData"]); builder.CloseElement();
+        builder.CloseElement();
+    };
+}

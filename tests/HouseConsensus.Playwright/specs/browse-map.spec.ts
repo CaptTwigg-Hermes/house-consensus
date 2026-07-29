@@ -89,6 +89,14 @@ test('Mobile browse keeps controls compact and opens filters in a bottom drawer'
   await expect(tooltip).toContainText(/Children's space|Børnerum/);
   await expect(tooltip).toContainText(/Total/);
 
+  const mapToggle = page.getByTestId('mobile-map-toggle');
+  await expect(mapToggle).toBeVisible();
+  expect((await mapToggle.boundingBox())!.height).toBeGreaterThanOrEqual(38);
+  await mapToggle.click();
+  await expect(page.getByTestId('browse-map')).toBeVisible();
+  await expect(page.getByTestId('browse-map')).toHaveClass(/leaflet-container/);
+  await page.getByTestId('mobile-list-toggle').click();
+
   await page.getByTestId('filter-open').click();
   await expect(page.getByTestId('filter-price-max')).toBeVisible();
   await expect(page.locator('.filter-drawer')).toBeVisible();
@@ -117,6 +125,9 @@ test('Listing detail shows commute and readable AI evidence without a conversati
   await expect(card.getByTestId('commute-table')).toContainText(/Høje Taastrup St\./);
   await expect(card.getByTestId('commute-table')).toContainText(/20 min/);
   await expect(card.getByTestId('commute-table')).toContainText(/31 min/);
+  await expect(card.getByTestId('noise-levels')).toContainText(/road|vej/i);
+  await expect(card.getByTestId('noise-levels')).toContainText(/rail|jernbane/i);
+  await expect(card.getByTestId('noise-levels')).toContainText(/air|fly/i);
   await expect(card.getByRole('link', { name: /open original listing|åbn original annonce/i })).toHaveAttribute('target', '_blank');
   await card.locator('.card-main').click();
   const evidence = page.getByTestId('ai-evidence');

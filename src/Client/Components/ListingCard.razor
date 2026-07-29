@@ -40,6 +40,7 @@
         </div>
         <div class="card-body">
             <PropertyFacts Listing="Listing" />
+            <NoiseLevels Listing="Listing" />
             <CommuteTable Json="@Listing.CommuteJson" Compact="true" />
             @if (HasFitSignals)
             {

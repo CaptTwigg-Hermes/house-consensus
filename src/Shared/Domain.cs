@@ -4,7 +4,7 @@ namespace HouseConsensus.Shared;
 public enum MemberRole { Member, Owner }
 public enum VoteChoice { Like, Dislike, NotVoted }
 public enum ListingState { Active, FilterRejected, AiRejected, ManuallyRejected, Restored, Archived }
-public enum ReasonTag { Layout, Privacy, Garden, Condition, Location, Noise, Price, Other }
+public enum ReasonTag { Layout, Privacy, Garden, Condition, Location, Noise, Price, Other, PrivacyFromNeighbors }
 public enum OverrideAction { Restore, Reject }
 
 public sealed class Member
@@ -51,6 +51,9 @@ public sealed class Listing
     public int? Floors { get; set; }
     public string? EnergyLabel { get; set; }
     public bool? Quiet { get; set; }
+    public double? RoadNoiseDb { get; set; }
+    public double? RailNoiseDb { get; set; }
+    public double? AirNoiseDb { get; set; }
     public int? BuildableHeadroom { get; set; }
     public bool? GroundFloorBedroom { get; set; }
     public bool? SeparateEntrance { get; set; }

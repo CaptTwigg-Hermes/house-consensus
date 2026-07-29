@@ -209,6 +209,9 @@ def test_export_populates_house_card_facts(database_url):
         number_of_floors=1,
         energy_label="a2020",
         noise_status="quiet",
+        road_noise_db=62.5,
+        rail_noise_db=57.5,
+        air_noise_db=67.5,
         buildable_headroom_m2=220,
         vision_ground_floor_bedroom=True,
         vision_separate_entrance=True,
@@ -249,7 +252,8 @@ def test_export_populates_house_card_facts(database_url):
                       "BuildableHeadroom","GroundFloorBedroom","SeparateEntrance",
                       "SecondKitchen","PrivacyScore","Latitude","Longitude",
                       "MonthlyExpense","DaysOnMarket","CommuteMinutes","CommuteJson","BuildableStatus",
-                      "Condition","GardenOrientation","MultigenFit","PostalCode","Preferred","IsNew","FirstSeenAt","FamilyUnits"
+                      "Condition","GardenOrientation","MultigenFit","PostalCode","Preferred","IsNew","FirstSeenAt","FamilyUnits",
+                      "RoadNoiseDb","RailNoiseDb","AirNoiseDb"
                FROM listings WHERE "ExternalId"='card' """
         ).fetchone()
     assert actual[:20] == (
@@ -276,7 +280,7 @@ def test_export_populates_house_card_facts(database_url):
     )
     commute = __import__("json").loads(actual[20])
     assert commute["destinations"]["work"]["public"] == {"min": 52, "transfers": 1}
-    assert actual[21:] == (
+    assert actual[21:30] == (
         "extra_house",
         "good",
         "southwest",
@@ -287,6 +291,7 @@ def test_export_populates_house_card_facts(database_url):
         datetime(2026, 7, 25, 8, tzinfo=timezone.utc),
         "two_family",
     )
+    assert actual[30:] == (62.5, 57.5, 67.5)
 
 
 def test_tombstone_operation_archives_listing_and_records_identity(database_url):

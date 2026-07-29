@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS listings (
     "ArchivedAt" timestamptz, "PreviewImageUrl" text, "LivingArea" integer,
     "LotArea" integer, "Rooms" integer, "YearBuilt" integer, "Bathrooms" integer,
     "Bedrooms" integer, "Floors" integer, "EnergyLabel" text, "Quiet" boolean,
+    "RoadNoiseDb" double precision, "RailNoiseDb" double precision, "AirNoiseDb" double precision,
     "BuildableHeadroom" integer, "GroundFloorBedroom" boolean,
     "SeparateEntrance" boolean, "SecondKitchen" boolean, "PrivacyScore" integer,
     "FamilyPrivacyScore" double precision, "KidsSpaceScore" double precision,
@@ -39,6 +40,9 @@ ALTER TABLE listings ADD COLUMN IF NOT EXISTS "Bedrooms" integer;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "Floors" integer;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "EnergyLabel" text;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "Quiet" boolean;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "RoadNoiseDb" double precision;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "RailNoiseDb" double precision;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "AirNoiseDb" double precision;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "BuildableHeadroom" integer;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "GroundFloorBedroom" boolean;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "SeparateEntrance" boolean;

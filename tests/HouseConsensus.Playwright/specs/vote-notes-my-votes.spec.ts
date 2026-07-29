@@ -2,6 +2,7 @@ import { test, expect } from '../fixtures/test.js';
 import { identity, requestMagicLink } from '../helpers/household.js';
 
 test('vote notes appear on compact My Votes cards and remain editable', async ({ page, mailpit }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await requestMagicLink(page, mailpit, identity(testInfo, 'owner'));
   await page.goto('/browse');
   const card = page.getByTestId('listing-card').first();
@@ -14,6 +15,10 @@ test('vote notes appear on compact My Votes cards and remain editable', async ({
   await page.getByTestId('vote-note').fill('Kitchen needs too much work');
   await page.getByRole('button', { name: /save vote|gem stemme/i }).click();
   await expect(page.getByTestId('vote-note-sheet')).toBeHidden();
+  await page.getByTestId('detail-edit-note-open').click();
+  await page.getByTestId('detail-edit-note').fill('Kitchen and bath need work');
+  await page.getByRole('button', { name: /^save$|^gem$/i }).click();
+  await expect(page.locator('.household-votes')).toContainText('Kitchen and bath need work');
 
   await page.goto('/my-votes');
   const voted = page.getByTestId('my-vote-card').first();
@@ -24,7 +29,7 @@ test('vote notes appear on compact My Votes cards and remain editable', async ({
   const imageBox = (await voted.locator('.my-vote-image').boundingBox())!;
   const copyBox = (await voted.locator('.my-vote-copy').boundingBox())!;
   expect(copyBox.x).toBeGreaterThanOrEqual(imageBox.x + imageBox.width - 1);
-  await expect(voted).toContainText('Kitchen needs too much work');
+  await expect(voted).toContainText('Kitchen and bath need work');
   await voted.getByTestId('my-vote-edit-note-open').click();
   await voted.getByTestId('my-vote-edit-note').fill('Kitchen and bathroom need too much work');
   await voted.getByTestId('my-vote-save-note').click();
