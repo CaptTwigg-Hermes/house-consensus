@@ -41,6 +41,8 @@ public sealed class I18n
         ["EmptyQueue"] = ("You’re all caught up", "Du er helt ajour"),
         ["EmptyQueueBody"] = ("There are no unvoted homes in your queue.", "Der er ingen boliger uden din stemme i køen."),
         ["QueueIntro"] = ("Homes waiting for your vote, best family fit first.", "Boliger der venter på din stemme, bedste familiematch først."),
+        ["HideDisliked"] = ("Hide disliked", "Skjul boliger med kan ikke lide"),
+        ["ShowDisliked"] = ("Turn off Hide disliked to show them again.", "Slå Skjul boliger med kan ikke lide fra for at vise dem igen."),
         ["Like"] = ("Like", "Kan lide"),
         ["Dislike"] = ("Dislike", "Kan ikke lide"),
         ["ChangeVote"] = ("Change vote", "Skift stemme"),

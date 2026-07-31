@@ -555,6 +555,19 @@ public sealed class ClientUiTests
         Assert.Contains("ALTER TABLE listings DROP COLUMN \"MultigenFit\"", migration, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Queue_exposes_a_localized_hide_disliked_filter()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var queue = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Queue.razor"));
+        var i18n = File.ReadAllText(Path.Combine(root, "src/Client/Services/I18n.cs"));
+
+        Assert.Contains("data-testid=\"queue-hide-disliked\"", queue, StringComparison.Ordinal);
+        Assert.Contains("aria-pressed=\"@(hideDisliked ? \"true\" : \"false\")\"", queue, StringComparison.Ordinal);
+        Assert.Contains("QueueFilter.Apply", queue, StringComparison.Ordinal);
+        Assert.Contains("HideDisliked", i18n, StringComparison.Ordinal);
+    }
+
     private sealed class CloudflareUnauthenticatedHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

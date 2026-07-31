@@ -4,13 +4,24 @@
 @inject LiveUpdates Live
 @implements IDisposable
 <PageTitle>@L["Queue"] · @L["AppName"]</PageTitle>
-<header class="page-head"><div><p class="eyebrow">@L["AppName"]</p><h1>@L["Queue"]</h1><p>@L["QueueIntro"]</p></div>@if (items is not null) { <span class="count">@items.Count</span> }</header>
-@if (items is null) { <Loading /> } else if (items.Count == 0) { <EmptyState Title="@L["EmptyQueue"]" Body="@L["EmptyQueueBody"]" /> }
-else { <section class="card-grid">@foreach (var item in items) { <ListingCard @key="item.Id" Listing="item" ShowVoting OnVoted="Load" /> }</section> }
+<header class="page-head"><div><p class="eyebrow">@L["AppName"]</p><h1>@L["Queue"]</h1><p>@L["QueueIntro"]</p></div>@if (items is not null) { <span class="count">@VisibleItems.Count</span> }</header>
+@if (items is null) { <Loading /> }
+else
+{
+    <section class="filter-chips" aria-label="@L["Filters"]">
+        <button type="button" data-testid="queue-hide-disliked" aria-pressed="@(hideDisliked ? "true" : "false")" class="tag @(hideDisliked ? "selected" : "")" @onclick="ToggleHideDisliked">× @L["HideDisliked"]</button>
+    </section>
+    @if (items.Count == 0) { <EmptyState Title="@L["EmptyQueue"]" Body="@L["EmptyQueueBody"]" /> }
+    else if (VisibleItems.Count == 0) { <EmptyState Title="@L["NoResults"]" Body="@L["ShowDisliked"]" /> }
+    else { <section class="card-grid">@foreach (var item in VisibleItems) { <ListingCard @key="item.Id" Listing="item" ShowVoting OnVoted="Load" /> }</section> }
+}
 @code {
     private List<ListingDto>? items;
+    private bool hideDisliked;
+    private IReadOnlyList<ListingDto> VisibleItems => QueueFilter.Apply(items ?? [], hideDisliked);
     protected override async Task OnInitializedAsync() { Live.Changed += LiveChanged; await Load(); }
     private async Task Load() => items = await Api.GetAsync<List<ListingDto>>("api/listings/queue") ?? [];
+    private void ToggleHideDisliked() => hideDisliked = !hideDisliked;
     private void LiveChanged() => InvokeAsync(async () => { await Load(); StateHasChanged(); });
     public void Dispose() => Live.Changed -= LiveChanged;
 }
