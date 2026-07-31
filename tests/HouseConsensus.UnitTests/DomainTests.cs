@@ -106,5 +106,52 @@ public sealed class CommentTests
     [Fact] public void Other_member_cannot_moderate() => Assert.Throws<DomainException>(() => new Comment(Guid.NewGuid(), Guid.NewGuid(), "text", DateTimeOffset.UtcNow).Delete(Guid.NewGuid(), false, DateTimeOffset.UtcNow));
 }
 public sealed class MemberTests
-{ [Theory][InlineData("en")][InlineData("da")] public void Supported_language_is_saved(string language) { var m = new Member { Email = "a@b.test" }; m.SetLanguage(language); Assert.Equal(language, m.Language); } [Fact] public void Unsupported_language_is_rejected() => Assert.Throws<DomainException>(() => new Member { Email = "a@b.test" }.SetLanguage("de")); }
+{
+    [Theory]
+    [InlineData("en")]
+    [InlineData("da")]
+    public void Supported_language_is_saved(string language)
+    {
+        var member = new Member { Email = "a@b.test" };
+        member.SetLanguage(language);
+        Assert.Equal(language, member.Language);
+    }
+
+    [Fact]
+    public void Unsupported_language_is_rejected()
+        => Assert.Throws<DomainException>(() => new Member { Email = "a@b.test" }.SetLanguage("de"));
+
+    [Fact]
+    public void Profile_trims_nickname_and_saves_palette_color()
+    {
+        var member = new Member { Email = "a@b.test" };
+
+        member.SetProfile("  Captain  ", AvatarColor.Options[3]);
+
+        Assert.Equal("Captain", member.DisplayName);
+        Assert.Equal(AvatarColor.Options[3], member.AvatarColor);
+    }
+
+    [Fact]
+    public void Profile_rejects_missing_nickname_and_color()
+    {
+        var member = new Member { Email = "a@b.test" };
+        Assert.Throws<DomainException>(() => member.SetProfile(null!, AvatarColor.Options[0]));
+        Assert.Throws<DomainException>(() => member.SetProfile("Captain", null!));
+    }
+
+    [Fact]
+    public void Profile_rejects_nickname_over_40_characters()
+        => Assert.Throws<DomainException>(() => new Member { Email = "a@b.test" }.SetProfile(new string('x', 41), AvatarColor.Options[0]));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Profile_rejects_blank_nickname(string nickname)
+        => Assert.Throws<DomainException>(() => new Member { Email = "a@b.test" }.SetProfile(nickname, AvatarColor.Options[0]));
+
+    [Fact]
+    public void Profile_rejects_unknown_color()
+        => Assert.Throws<DomainException>(() => new Member { Email = "a@b.test" }.SetProfile("Captain", "#ffffff"));
+}
 

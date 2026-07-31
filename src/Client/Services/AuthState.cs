@@ -32,6 +32,11 @@ public sealed class AuthState(ApiClient api, IJSRuntime js)
         await js.InvokeVoidAsync("hc.setCulture", normalized);
         Changed?.Invoke();
     }
+    public async Task SetProfileAsync(string displayName, string avatarColor)
+    {
+        User = await api.UpdateProfile(displayName, avatarColor) ?? User;
+        Changed?.Invoke();
+    }
     public async Task LogoutAsync()
     {
         using var response = await api.Logout();

@@ -16,6 +16,7 @@ public sealed class ApiClient(HttpClient http)
     public Task<HttpResponseMessage> RequestMagicLink(string email, CancellationToken ct = default) => http.PostAsJsonAsync("api/auth/request", new RequestMagicLink(email), ct);
     public Task<HttpResponseMessage> Logout(CancellationToken ct = default) => http.PostAsync("api/auth/logout", null, ct);
     public async Task<MemberDto?> SetLanguage(string language, CancellationToken ct = default) => await SendAsync<MemberDto>(HttpMethod.Put, "api/auth/language", new UpdateLanguage(language), ct);
+    public async Task<MemberDto?> UpdateProfile(string displayName, string avatarColor, CancellationToken ct = default) => await SendAsync<MemberDto>(HttpMethod.Put, "api/auth/profile", new UpdateProfile(displayName, avatarColor), ct);
     public async Task<VoteResult?> Vote(Guid id, VoteChoice choice, ReasonTag[] tags, string? note = null, CancellationToken ct = default) => await SendAsync<VoteResult>(HttpMethod.Post, $"api/listings/{id}/votes", new CastVote(choice, tags, note), ct);
     public async Task<HttpResponseMessage> EditVoteNote(Guid id, string? note, CancellationToken ct = default) => await RawAsync(HttpMethod.Put, $"api/listings/{id}/votes/note", new EditVoteNote(note), ct);
     public Task<HttpResponseMessage> AddComment(Guid id, string body, CancellationToken ct = default) => http.PostAsJsonAsync($"api/listings/{id}/comments", new AddComment(body), ct);

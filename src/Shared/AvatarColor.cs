@@ -9,6 +9,13 @@ public static class AvatarColor
         "#166534", "#3f6212", "#854d0e", "#9a3412"
     ];
 
+    public static IReadOnlyList<string> Options { get; } = Array.AsReadOnly(Palette);
+
+    public static bool IsValid(string? color) => Palette.Contains(color, StringComparer.OrdinalIgnoreCase);
+
+    public static string Resolve(string? color, Guid memberId)
+        => !string.IsNullOrWhiteSpace(color) && IsValid(color) ? color.ToLowerInvariant() : Css(memberId);
+
     public static string Css(Guid memberId)
     {
         var hash = 2166136261u;

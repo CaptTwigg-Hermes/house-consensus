@@ -120,5 +120,5 @@ else
     private string Tone(ListingDto listing) => DislikeCountFor(listing) == 0 ? "vote-tone-like" : LikeCountFor(listing) == 0 ? "vote-tone-dislike" : "vote-tone-mixed";
     private string VoteSummary(ListingDto listing) => $"{LikeCountFor(listing)} {L["Positive"]}, {DislikeCountFor(listing)} {L["Concerns"]}";
     private string Price(ListingDto listing) => listing.Price.HasValue ? $"{listing.Price.Value:N0} kr." : L["PriceOnRequest"];
-    private static string AvatarStyle(VoteDto vote) => $"--avatar-color: {AvatarColor.Css(vote.MemberId)}; background-color: var(--avatar-color)";
+    private static string AvatarStyle(VoteDto vote) => $"--avatar-color: {AvatarColor.Resolve(vote.MemberColor, vote.MemberId)}; background-color: var(--avatar-color)";
 }

@@ -1,0 +1,57 @@
+@page "/profile"
+@inject AuthState Auth
+@inject I18n L
+
+<PageTitle>@L["Profile"] · @L["AppName"]</PageTitle>
+<header class="page-head">
+    <div><p class="eyebrow">@L["Account"]</p><h1>@L["Profile"]</h1><p>@L["ProfileIntro"]</p></div>
+</header>
+
+<section class="profile-card">
+    <div class="profile-preview">
+        <span class="avatar profile-avatar" style="--avatar-color: @selectedColor; background-color: var(--avatar-color)" data-testid="profile-preview">@Initials</span>
+        <div><strong>@nickname</strong><span>@Auth.User?.Email</span></div>
+    </div>
+    <form @onsubmit="Save" @onsubmit:preventDefault>
+        <label for="profile-nickname">@L["Nickname"]</label>
+        <input id="profile-nickname" data-testid="profile-nickname" maxlength="40" required autocomplete="nickname" @bind="nickname" />
+        <fieldset class="profile-colors">
+            <legend>@L["AvatarColor"]</legend>
+            @for (var index = 0; index < AvatarColor.Options.Count; index++)
+            {
+                var color = AvatarColor.Options[index];
+                <button type="button" class="color-swatch @(selectedColor == color ? "selected" : "")"
+                        style="--swatch-color: @color" data-testid="profile-color-@index"
+                        aria-label="@($"{L["AvatarColor"]} {index + 1}")"
+                        aria-pressed="@(selectedColor == color ? "true" : "false")"
+                        @onclick="() => SelectColor(color)"><span aria-hidden="true"></span></button>
+            }
+        </fieldset>
+        <button type="submit" class="btn primary" data-testid="profile-save" disabled="@busy">@(busy ? "…" : L["Save"])</button>
+        @if (saved) { <div class="notice success" role="status" data-testid="profile-saved">@L["ProfileSaved"]</div> }
+        @if (error) { <div class="notice error" role="alert">@L["Error"]</div> }
+    </form>
+</section>
+
+@code {
+    private string nickname = "";
+    private string selectedColor = AvatarColor.Options[0];
+    private bool busy, saved, error;
+    private string Initials => AvatarInitials.From(nickname, Auth.User?.Email ?? "");
+
+    protected override void OnInitialized()
+    {
+        if (Auth.User is null) return;
+        nickname = string.IsNullOrWhiteSpace(Auth.User.DisplayName) ? Auth.User.Email.Split('@')[0] : Auth.User.DisplayName;
+        selectedColor = AvatarColor.Resolve(Auth.User.AvatarColor, Auth.User.Id);
+    }
+
+    private void SelectColor(string color) { selectedColor = color; saved = false; }
+    private async Task Save()
+    {
+        busy = true; saved = false; error = false;
+        try { await Auth.SetProfileAsync(nickname, selectedColor); nickname = Auth.User?.DisplayName ?? nickname; saved = true; }
+        catch (HttpRequestException) { error = true; }
+        finally { busy = false; }
+    }
+}

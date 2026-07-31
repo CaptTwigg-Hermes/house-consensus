@@ -12,6 +12,7 @@ public sealed class Member
     public Guid Id { get; init; } = Guid.NewGuid();
     public required string Email { get; set; }
     public string DisplayName { get; set; } = "";
+    public string AvatarColor { get; private set; } = "";
     public string Language { get; set; } = "en";
     public MemberRole Role { get; set; }
     public bool IsActive { get; private set; } = true;
@@ -22,6 +23,14 @@ public sealed class Member
     {
         if (language is not ("en" or "da")) throw new DomainException("Language must be en or da.");
         Language = language;
+    }
+    public void SetProfile(string? displayName, string? avatarColor)
+    {
+        var nickname = displayName?.Trim() ?? "";
+        if (nickname.Length is < 1 or > 40) throw new DomainException("Nickname must be between 1 and 40 characters.");
+        if (!Shared.AvatarColor.IsValid(avatarColor)) throw new DomainException("Choose a supported avatar color.");
+        DisplayName = nickname;
+        AvatarColor = avatarColor!.ToLowerInvariant();
     }
 }
 

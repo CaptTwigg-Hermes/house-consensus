@@ -13,6 +13,100 @@ namespace HouseConsensus.UnitTests;
 public sealed class ClientUiTests
 {
     [Fact]
+    public void Authenticated_member_can_update_only_their_own_profile()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var contracts = File.ReadAllText(Path.Combine(root, "src/Shared/Contracts.cs"));
+        var program = File.ReadAllText(Path.Combine(root, "src/Server/Program.cs"));
+        var api = File.ReadAllText(Path.Combine(root, "src/Client/Services/ApiClient.cs"));
+        var auth = File.ReadAllText(Path.Combine(root, "src/Client/Services/AuthState.cs"));
+
+        Assert.Contains("record UpdateProfile", contracts, StringComparison.Ordinal);
+        Assert.Contains("string AvatarColor", contracts, StringComparison.Ordinal);
+        Assert.Contains("auth.MapPut(\"/profile\"", program, StringComparison.Ordinal);
+        Assert.Contains("user.MemberId()", program, StringComparison.Ordinal);
+        Assert.Contains("m.SetProfile(request.DisplayName, request.AvatarColor)", program, StringComparison.Ordinal);
+        Assert.Contains("UpdateProfile", api, StringComparison.Ordinal);
+        Assert.Contains("SetProfileAsync", auth, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Member_profile_color_has_a_bounded_database_migration()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var migrationPath = Path.Combine(root, "src/Server/Data/Migrations/202607310001_AddMemberProfiles.cs");
+
+        Assert.True(File.Exists(migrationPath));
+        var migration = File.ReadAllText(migrationPath);
+        Assert.Contains("AvatarColor", migration, StringComparison.Ordinal);
+        Assert.Contains("character varying(7)", migration, StringComparison.Ordinal);
+        Assert.Contains("CK_members_AvatarColor", migration, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Profile_page_exposes_localized_nickname_and_color_controls()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var profilePath = Path.Combine(root, "src/Client/Pages/Profile.razor");
+        var layout = File.ReadAllText(Path.Combine(root, "src/Client/Layout/MainLayout.razor"));
+        var i18n = File.ReadAllText(Path.Combine(root, "src/Client/Services/I18n.cs"));
+
+        Assert.True(File.Exists(profilePath));
+        var profile = File.ReadAllText(profilePath);
+        Assert.Contains("@page \"/profile\"", profile, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"profile-nickname\"", profile, StringComparison.Ordinal);
+        Assert.Contains("maxlength=\"40\"", profile, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"profile-color", profile, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"profile-save\"", profile, StringComparison.Ordinal);
+        Assert.Contains("Auth.SetProfileAsync", profile, StringComparison.Ordinal);
+        Assert.Contains("href=\"profile\"", layout, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"@L[\"Profile\"]\"", layout, StringComparison.Ordinal);
+        foreach (var key in new[] { "Profile", "Nickname", "AvatarColor", "ProfileSaved" })
+            Assert.Contains($"[\"{key}\"]", i18n, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Saved_profile_color_is_projected_to_every_household_avatar()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var contracts = File.ReadAllText(Path.Combine(root, "src/Shared/Contracts.cs"));
+        var program = File.ReadAllText(Path.Combine(root, "src/Server/Program.cs"));
+        var members = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Owner/Members.razor"));
+        var detail = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Detail.razor"));
+        var card = File.ReadAllText(Path.Combine(root, "src/Client/Components/ListingCard.razor"));
+        var household = File.ReadAllText(Path.Combine(root, "src/Client/Pages/HouseholdVotes.razor"));
+
+        Assert.Contains("string MemberColor", contracts, StringComparison.Ordinal);
+        Assert.Contains("x.AvatarColor", program, StringComparison.Ordinal);
+        Assert.Contains("AvatarColor.Resolve(member.AvatarColor, member.Id)", members, StringComparison.Ordinal);
+        foreach (var source in new[] { detail, card, household })
+            Assert.Contains("AvatarColor.Resolve(vote.MemberColor, vote.MemberId)", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Every_vote_api_projects_saved_member_color()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var program = File.ReadAllText(Path.Combine(root, "src/Server/Program.cs"));
+
+        Assert.Contains("static async Task<List<VoteDto>> VoteDtos", program, StringComparison.Ordinal);
+        Assert.Contains("return await VoteDtos(latest", program, StringComparison.Ordinal);
+        Assert.Contains("return Results.Ok(await VoteDtos(history", program, StringComparison.Ordinal);
+        Assert.Contains("var dto = (await VoteDtos([vote]", program, StringComparison.Ordinal);
+        Assert.DoesNotContain("SendAsync(\"VoteChanged\", ToVoteDto(vote)", program, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Profile_preview_keeps_avatar_text_contrast()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var css = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/css/app.css"));
+
+        Assert.DoesNotContain(".profile-preview span { color:var(--muted); }", css, StringComparison.Ordinal);
+        Assert.Contains(".profile-preview div span { color:var(--muted); }", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Cloudflare_access_users_never_receive_the_magic_link_form()
     {
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
@@ -90,8 +184,8 @@ public sealed class ClientUiTests
         var detail = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Detail.razor"));
         var css = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/css/app.css"));
 
-        Assert.Contains("--avatar-color: @AvatarColor.Css(member.Id); background-color: var(--avatar-color)", members, StringComparison.Ordinal);
-        Assert.Contains("--avatar-color: @AvatarColor.Css(vote.MemberId); background-color: var(--avatar-color)", detail, StringComparison.Ordinal);
+        Assert.Contains("--avatar-color: @AvatarColor.Resolve(member.AvatarColor, member.Id); background-color: var(--avatar-color)", members, StringComparison.Ordinal);
+        Assert.Contains("--avatar-color: @AvatarColor.Resolve(vote.MemberColor, vote.MemberId); background-color: var(--avatar-color)", detail, StringComparison.Ordinal);
         Assert.Contains(".avatar {\n  width: 32px;\n  height: 32px;\n  border-radius: 50%;\n  background: var(--avatar-color, var(--forest));", css, StringComparison.Ordinal);
     }
 
@@ -324,7 +418,7 @@ public sealed class ClientUiTests
 
         Assert.Contains("style=\"@VoteStyle(vote)\"", card, StringComparison.Ordinal);
         Assert.Contains("vote.Choice == VoteChoice.Like", card, StringComparison.Ordinal);
-        Assert.Contains("AvatarColor.Css(vote.MemberId)", card, StringComparison.Ordinal);
+        Assert.Contains("AvatarColor.Resolve(vote.MemberColor, vote.MemberId)", card, StringComparison.Ordinal);
         Assert.Contains("background-color: var(--avatar-color)", card, StringComparison.Ordinal);
     }
 

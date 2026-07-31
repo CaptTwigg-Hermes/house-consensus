@@ -736,6 +736,71 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Member_profile_migration_preserves_existing_defaults_and_enforces_palette()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var member = new Member { Email = "profile-migration@example.test" };
+        await using (var db = Db())
+        {
+            db.Members.Add(member);
+            await db.SaveChangesAsync(ct);
+            Assert.Equal("", member.AvatarColor);
+            await db.Database.MigrateAsync(ct);
+        }
+
+        await using var invalid = Db();
+        var error = await Assert.ThrowsAsync<PostgresException>(() => invalid.Database.ExecuteSqlRawAsync("UPDATE members SET \"AvatarColor\" = '#ffffff' WHERE \"Id\" = {0}", [member.Id], ct));
+        Assert.Equal(PostgresErrorCodes.CheckViolation, error.SqlState);
+        await using var verify = Db();
+        Assert.Equal("", (await verify.Members.FindAsync([member.Id], ct))?.AvatarColor);
+    }
+
+    [Fact]
+    public async Task Profile_endpoint_updates_only_the_authenticated_member_and_rejects_invalid_payloads()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var current = new Member { Email = "profile-current@example.test", DisplayName = "Before" };
+        var other = new Member { Email = "profile-other@example.test", DisplayName = "Other" };
+        await using (var setup = Db())
+        {
+            setup.Members.AddRange(current, other);
+            await setup.SaveChangesAsync(ct);
+        }
+
+        await using var factory = new WebApplicationFactory<CloudflareAccessOptions>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Development");
+            builder.UseSetting("Debug:AutoLogin", "true");
+            builder.UseSetting("E2E:TestAuth", "true");
+            builder.UseSetting("E2E:SeedData", "true");
+            builder.UseSetting("ConnectionStrings:Database", _connectionString);
+            builder.UseSetting("Database:AutoMigrate", "false");
+            builder.UseSetting("INITIAL_OWNER_EMAIL", "");
+        });
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-House-Consensus-CSRF", "1");
+        client.DefaultRequestHeaders.Add(DebugAutoLoginMiddleware.E2EEmailHeader, current.Email);
+
+        var saved = await client.PutAsJsonAsync("/api/auth/profile", new UpdateProfile("  Captain  ", "#6D28D9"), ct);
+        var dto = await saved.Content.ReadFromJsonAsync<MemberDto>(ct);
+        var missing = await client.PutAsync("/api/auth/profile", new StringContent("{\"displayName\":null,\"avatarColor\":null}", System.Text.Encoding.UTF8, "application/json"), ct);
+        var longName = await client.PutAsJsonAsync("/api/auth/profile", new UpdateProfile(new string('x', 41), "#6d28d9"), ct);
+        var unknownColor = await client.PutAsJsonAsync("/api/auth/profile", new UpdateProfile("Captain", "#ffffff"), ct);
+
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        Assert.Equal("Captain", dto?.DisplayName);
+        Assert.Equal("#6d28d9", dto?.AvatarColor);
+        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, longName.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, unknownColor.StatusCode);
+        await using var verify = Db();
+        Assert.Equal("Captain", (await verify.Members.FindAsync([current.Id], ct))?.DisplayName);
+        Assert.Equal("#6d28d9", (await verify.Members.FindAsync([current.Id], ct))?.AvatarColor);
+        Assert.Equal("Other", (await verify.Members.FindAsync([other.Id], ct))?.DisplayName);
+        Assert.Equal("", (await verify.Members.FindAsync([other.Id], ct))?.AvatarColor);
+    }
+
+    [Fact]
     public async Task Actual_production_application_disables_magic_link_routes_and_does_not_redirect_tunnel_HTTP()
     {
         await using var factory = new WebApplicationFactory<CloudflareAccessOptions>().WithWebHostBuilder(builder =>
