@@ -20,7 +20,10 @@ using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 var debugAutoLogin = builder.Configuration.GetValue("Debug:AutoLogin", false);
+var e2eTestAuth = builder.Configuration.GetValue("E2E:TestAuth", false);
+var e2eSeedData = builder.Configuration.GetValue("E2E:SeedData", false);
 DebugAutoLoginMiddleware.EnsureSafe(debugAutoLogin, builder.Environment.EnvironmentName);
+DebugAutoLoginMiddleware.EnsureE2ETestAuthSafe(e2eTestAuth, debugAutoLogin, e2eSeedData, builder.Environment.EnvironmentName);
 builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(builder.Configuration.GetConnectionString("Database") ?? "Host=postgres;Database=house_consensus;Username=house_consensus;Password=house_consensus", n => n.MapEnum<MemberRole>("member_role").MapEnum<VoteChoice>("vote_choice").MapEnum<ListingState>("listing_state").MapEnum<ReasonTag>("reason_tag").MapEnum<OverrideAction>("override_action")));
 var cloudflareAccess = AuthenticationSetup.Add(builder.Services, builder.Configuration, builder.Environment.IsProduction());
 builder.Services.AddAuthorization(o => o.AddPolicy("owner", p => p.RequireClaim(ClaimTypes.Role, MemberRole.Owner.ToString())));
@@ -31,7 +34,10 @@ builder.Services.AddRateLimiter(o => { o.RejectionStatusCode = StatusCodes.Statu
 builder.Services.AddSignalR(); builder.Services.AddHealthChecks().AddDbContextCheck<AppDbContext>();
 builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddScoped<MagicLinkService>(); builder.Services.AddScoped<InviteService>(); builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddMemoryCache(options => options.SizeLimit = 128 * 1024 * 1024); builder.Services.AddHttpClient<ListingImageService>(client => { client.Timeout = TimeSpan.FromSeconds(15); client.DefaultRequestHeaders.UserAgent.ParseAdd("HouseConsensus/1.0"); });
-builder.Services.AddHttpClient<IAiRuleGenerator, OllamaAiRuleGenerator>(client => client.Timeout = TimeSpan.FromSeconds(120));
+if (builder.Environment.IsDevelopment() && e2eSeedData)
+    builder.Services.AddScoped<IAiRuleGenerator, E2EAiRuleGenerator>();
+else
+    builder.Services.AddHttpClient<IAiRuleGenerator, OllamaAiRuleGenerator>(client => client.Timeout = TimeSpan.FromSeconds(120));
 builder.Services.AddScoped<AiLearningService>();
 var app = builder.Build();
 app.UseForwardedHeaders();
@@ -65,11 +71,11 @@ members.MapPost("/{id:guid}/reactivate", async (Guid id, AppDbContext db, IHubCo
 
 var listings = app.MapGroup("/api/listings").RequireAuthorization();
 listings.MapGet("/queue", async (ClaimsPrincipal user, AppDbContext db, CancellationToken ct) => (await ListingDtos(db.Listings.Where(x => x.State == ListingState.Active || x.State == ListingState.Restored).OrderByDescending(x => x.FamilyFitScore), db, ct)).Where(x => !x.Votes.Any(v => v.MemberId == user.MemberId() && v.Choice != VoteChoice.NotVoted)));
-listings.MapGet("/browse", async (string? city, decimal? minPrice, decimal? maxPrice, AppDbContext db, CancellationToken ct) => { var q = db.Listings.Where(x => x.State == ListingState.Active || x.State == ListingState.Restored); if (!string.IsNullOrWhiteSpace(city)) q = q.Where(x => x.City != null && EF.Functions.ILike(x.City, $"%{city}%")); if (minPrice.HasValue) q = q.Where(x => x.Price >= minPrice); if (maxPrice.HasValue) q = q.Where(x => x.Price <= maxPrice); return await ListingDtos(q.OrderByDescending(x => x.FamilyFitScore), db, ct); });
+listings.MapGet("/browse", async (string? city, decimal? minPrice, decimal? maxPrice, AppDbContext db, CancellationToken ct) => { var q = db.Listings.Where(x => x.State != ListingState.Archived); if (!string.IsNullOrWhiteSpace(city)) q = q.Where(x => x.City != null && EF.Functions.ILike(x.City, $"%{city}%")); if (minPrice.HasValue) q = q.Where(x => x.Price >= minPrice); if (maxPrice.HasValue) q = q.Where(x => x.Price <= maxPrice); return await ListingDtos(q.OrderByDescending(x => x.FamilyFitScore), db, ct); });
 listings.MapGet("/consensus", async (AppDbContext db, CancellationToken ct) => { var all = await ListingDtos(db.Listings.Where(x => x.State == ListingState.Active || x.State == ListingState.Restored), db, ct); return all.Where(x => x.Consensus); });
 listings.MapGet("/my-votes", async (ClaimsPrincipal user, AppDbContext db, CancellationToken ct) => { var id = user.MemberId(); var latest = await db.Votes.Where(x => x.MemberId == id).OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id).ToListAsync(ct); return latest.GroupBy(x => x.ListingId).Select(g => g.First()).Where(x => x.Choice != VoteChoice.NotVoted).Select(v => ToVoteDto(v)); });
-listings.MapGet("/{id:guid}/image", async (Guid id, ClaimsPrincipal user, AppDbContext db, ListingImageService images, CancellationToken ct) => { var listing = await db.Listings.AsNoTracking().Where(x => x.Id == id).Select(x => new { x.State, x.PreviewImageUrl }).SingleOrDefaultAsync(ct); if (listing is null || ((listing.State is ListingState.FilterRejected or ListingState.AiRejected or ListingState.ManuallyRejected or ListingState.Archived) && !user.IsInRole(MemberRole.Owner.ToString()))) return Results.NotFound(); var image = await images.GetAsync(id, listing.PreviewImageUrl, ct); return image is null ? Results.NotFound() : Results.Bytes(image.Bytes, image.ContentType); });
-listings.MapGet("/{id:guid}", async (Guid id, ClaimsPrincipal user, AppDbContext db, CancellationToken ct) => { var listing = await db.Listings.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (listing is null) return Results.NotFound(); if ((listing.State is ListingState.FilterRejected or ListingState.AiRejected or ListingState.ManuallyRejected or ListingState.Archived) && !user.IsInRole(MemberRole.Owner.ToString())) return Results.NotFound(); var all = await ListingDtos(db.Listings.Where(x => x.Id == id), db, ct); return Results.Ok(all[0]); });
+listings.MapGet("/{id:guid}/image", async (Guid id, ClaimsPrincipal user, AppDbContext db, ListingImageService images, CancellationToken ct) => { var listing = await db.Listings.AsNoTracking().Where(x => x.Id == id).Select(x => new { x.State, x.PreviewImageUrl }).SingleOrDefaultAsync(ct); if (listing is null || (listing.State == ListingState.Archived && !user.IsInRole(MemberRole.Owner.ToString()))) return Results.NotFound(); var image = await images.GetAsync(id, listing.PreviewImageUrl, ct); return image is null ? Results.NotFound() : Results.Bytes(image.Bytes, image.ContentType); });
+listings.MapGet("/{id:guid}", async (Guid id, ClaimsPrincipal user, AppDbContext db, CancellationToken ct) => { var listing = await db.Listings.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (listing is null) return Results.NotFound(); if (listing.State == ListingState.Archived && !user.IsInRole(MemberRole.Owner.ToString())) return Results.NotFound(); var all = await ListingDtos(db.Listings.Where(x => x.Id == id), db, ct); return Results.Ok(all[0]); });
 listings.MapPost("/{id:guid}/votes", async (Guid id, CastVote request, ClaimsPrincipal user, AppDbContext db, IHubContext<ConsensusHub> hub, TimeProvider clock, CancellationToken ct) => { if (request.Choice == VoteChoice.NotVoted) return Results.BadRequest(new { error = "Clearing votes is not supported." }); if (!await db.Listings.AnyAsync(x => x.Id == id && (x.State == ListingState.Active || x.State == ListingState.Restored), ct)) return Results.NotFound(); var vote = new Vote(id, user.MemberId(), request.Choice, request.Tags ?? [], request.Note, clock.GetUtcNow()); db.Votes.Add(vote); await db.SaveChangesAsync(ct); var consensus = await HasConsensus(id, db, ct); await hub.Clients.Group($"listing:{id}").SendAsync("VoteChanged", ToVoteDto(vote), consensus, ct); await hub.Clients.All.SendAsync("ConsensusChanged", id, consensus, ct); return Results.Ok(new { vote = ToVoteDto(vote), consensus }); });
 listings.MapGet("/{id:guid}/votes/history", async (Guid id, ClaimsPrincipal user, AppDbContext db, CancellationToken ct) => !await CanAccessListing(id, user, db, ct) ? Results.NotFound() : Results.Ok((await db.Votes.Where(x => x.ListingId == id).OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id).ToListAsync(ct)).Select(v => ToVoteDto(v))));
 listings.MapPut("/{id:guid}/votes/note", async (Guid id, EditVoteNote request, ClaimsPrincipal user, AppDbContext db, IHubContext<ConsensusHub> hub, TimeProvider clock, CancellationToken ct) => { var memberId = user.MemberId(); var vote = await db.Votes.Include(x => x.NoteRevisions).Where(x => x.ListingId == id && x.MemberId == memberId && x.Choice != VoteChoice.NotVoted).OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id).FirstOrDefaultAsync(ct); if (vote is null) return Results.NotFound(); try { vote.EditNote(memberId, request.Note, clock.GetUtcNow()); await db.SaveChangesAsync(ct); var consensus = await HasConsensus(id, db, ct); await hub.Clients.Group($"listing:{id}").SendAsync("VoteChanged", ToVoteDto(vote), consensus, ct); return Results.Ok(ToVoteDto(vote)); } catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); } });
@@ -107,6 +113,11 @@ if (!app.Environment.IsProduction() && app.Configuration.GetValue("E2E:SeedData"
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
     }).RequireAuthorization("owner");
+    app.MapPost("/api/e2e/reset-household-votes", async (AppDbContext db, CancellationToken ct) =>
+    {
+        await E2EDataSeeder.ResetHouseholdVotesAsync(db, ct);
+        return Results.NoContent();
+    }).RequireAuthorization("owner");
 }
 
 app.Map("/api/{**path}", () => Results.NotFound());
@@ -140,6 +151,6 @@ static string Csv(string value)
     return $"\"{value.Replace("\"", "\"\"")}\"";
 }
 static async Task NotifyMembershipConsensus(Guid memberId, bool active, AppDbContext db, IHubContext<ConsensusHub> hub, CancellationToken ct) { await hub.Clients.All.SendAsync("MembershipChanged", memberId, active, ct); var listingIds = await db.Listings.Where(x => x.State == ListingState.Active || x.State == ListingState.Restored).Select(x => x.Id).ToListAsync(ct); foreach (var listingId in listingIds) await hub.Clients.All.SendAsync("ConsensusChanged", listingId, await HasConsensus(listingId, db, ct), ct); }
-static async Task<bool> CanAccessListing(Guid id, ClaimsPrincipal user, AppDbContext db, CancellationToken ct) { var state = await db.Listings.Where(x => x.Id == id).Select(x => (ListingState?)x.State).SingleOrDefaultAsync(ct); return state.HasValue && (state is ListingState.Active or ListingState.Restored || (state == ListingState.Archived && user.IsInRole(MemberRole.Owner.ToString()))); }
+static async Task<bool> CanAccessListing(Guid id, ClaimsPrincipal user, AppDbContext db, CancellationToken ct) { var state = await db.Listings.Where(x => x.Id == id).Select(x => (ListingState?)x.State).SingleOrDefaultAsync(ct); return state.HasValue && (state != ListingState.Archived || user.IsInRole(MemberRole.Owner.ToString())); }
 public static partial class Program { }
 public static class ClaimsExtensions { public static Guid MemberId(this ClaimsPrincipal user) => Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier) ?? throw new UnauthorizedAccessException()); }

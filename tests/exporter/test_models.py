@@ -84,3 +84,15 @@ def test_realtor_url_is_preferred_over_boligsiden_aggregator_url():
     )
 
     assert case.source_url == "https://estate.example/bolig/original-link"
+
+
+def test_family_score_preserves_zero_and_missing_without_numeric_coercion():
+    zero = ExportCase.from_records({"caseID": "zero"}, {"id": "zero", "family_score": 0})
+    missing = ExportCase.from_records({"caseID": "missing"}, {"id": "missing"})
+    malformed = ExportCase.from_records({"caseID": "bad"}, {"id": "bad", "family_score": "0"})
+    out_of_range = ExportCase.from_records({"caseID": "range"}, {"id": "range", "family_score": 101})
+
+    assert zero.family_score == 0.0
+    assert missing.family_score is None
+    assert malformed.family_score is None
+    assert out_of_range.family_score is None

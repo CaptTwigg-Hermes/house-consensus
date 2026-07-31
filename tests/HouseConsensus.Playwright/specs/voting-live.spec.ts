@@ -1,8 +1,8 @@
 import { test, expect } from '../fixtures/test.js';
-import { closeHousehold, createTwoMemberHousehold } from '../helpers/household.js';
+import { closeHousehold, createSeededE2EHousehold } from '../helpers/household.js';
 
-test('two members voting Like produces a live unanimous match', async ({ browser, mailpit }, testInfo) => {
-  const household = await createTwoMemberHousehold(browser, mailpit, testInfo, testInfo.project.use.baseURL as string);
+test('two members voting Like produces a live unanimous match', async ({ browser }, testInfo) => {
+  const household = await createSeededE2EHousehold(browser, testInfo.project.use.baseURL as string);
   try {
     await household.ownerPage.goto('/owner/members');
     const ownerAvatar = household.ownerPage.getByTestId('member-row')

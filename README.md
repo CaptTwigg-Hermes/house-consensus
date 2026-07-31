@@ -68,7 +68,7 @@ uv run --project exporter house-consensus-export \
 Every push to `main` publishes `ghcr.io/capttwigg-hermes/house-consensus:latest` plus an immutable commit-SHA tag. `docker-compose.production.yml` uses `pull_policy: always`, so a Dockge **Update/Recreate** pulls the newest published image without cloning or building the repository.
 
 1. Copy `docker-compose.production.yml` into a Dockge stack. This stack uses the existing TrueNAS Cloudflare Tunnel; it does not create another connector or require a tunnel token.
-2. Set `POSTGRES_PASSWORD`, `INITIAL_OWNER_EMAIL`, and `PUBLIC_ORIGIN` in Dockge. `PUBLIC_ORIGIN` is the HTTPS hostname already published by Cloudflare.
+2. Set `DATABASE_CONNECTION_STRING`, `INITIAL_OWNER_EMAIL`, and `PUBLIC_ORIGIN` in Dockge. `DATABASE_CONNECTION_STRING` must contain the full PostgreSQL Npgsql connection string; `PUBLIC_ORIGIN` is the HTTPS hostname already published by Cloudflare.
 3. In Cloudflare Zero Trust, open the existing Access application. Copy its application audience (`AUD`) into `CLOUDFLARE_ACCESS_AUDIENCE`. Set `CLOUDFLARE_ACCESS_TEAM_DOMAIN` to the team hostname only, such as `team-name.cloudflareaccess.com`.
 4. Point the existing tunnel route at this app's host and port. Set `APP_BIND_IP` to the TrueNAS LAN IP only when the connector cannot reach the loopback default. The origin rejects requests without a valid signed Access assertion even on the LAN.
 5. Ensure the Access policy allows the household identities. Cloudflare authenticates identity; House Consensus still requires an active member or pending owner-created invitation and retains owner/member authorization.

@@ -1,5 +1,4 @@
 import { test, expect } from '../fixtures/test.js';
-import { identity, requestMagicLink } from '../helpers/household.js';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
@@ -33,8 +32,7 @@ test('Browse cards stay equal height without space below the original listing li
 });
 
 
-test('Browse applies price filters and renders the filtered homes on the map', async ({ page, mailpit }, testInfo) => {
-  await requestMagicLink(page, mailpit, identity(testInfo, 'owner'));
+test('Browse applies price filters and renders the filtered homes on the map', async ({ page }) => {
   await page.goto('/browse');
   await expect(page.getByRole('heading', { name: /browse|gennemse/i })).toBeVisible();
   await expect(page.getByTestId('listing-card').first()).toBeVisible();
@@ -62,9 +60,8 @@ test('Browse applies price filters and renders the filtered homes on the map', a
 });
 
 
-test('Mobile browse keeps controls compact and opens filters in a bottom drawer', async ({ page, mailpit }, testInfo) => {
+test('Mobile browse keeps controls compact and opens filters in a bottom drawer', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await requestMagicLink(page, mailpit, identity(testInfo, 'owner'));
   await page.goto('/browse');
 
   const toolbar = page.locator('.browse-toolbar');
@@ -103,8 +100,7 @@ test('Mobile browse keeps controls compact and opens filters in a bottom drawer'
 });
 
 
-test('Browse persists applied parity filters independently', async ({ page, mailpit }, testInfo) => {
-  await requestMagicLink(page, mailpit, identity(testInfo, 'owner'));
+test('Browse persists applied parity filters independently', async ({ page }) => {
   await page.goto('/browse');
   await page.getByTestId('filter-open').click();
   await page.getByTestId('filter-preferred').click();
@@ -118,8 +114,7 @@ test('Browse persists applied parity filters independently', async ({ page, mail
 });
 
 
-test('Listing detail shows commute and readable AI evidence without a conversation editor', async ({ page, mailpit }, testInfo) => {
-  await requestMagicLink(page, mailpit, identity(testInfo, 'owner'));
+test('Listing detail shows commute and readable AI evidence without a conversation editor', async ({ page }) => {
   await page.goto('/browse');
   const card = page.getByTestId('listing-card').first();
   await expect(card.getByTestId('commute-table')).toContainText(/Høje Taastrup St\./);

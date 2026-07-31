@@ -81,6 +81,13 @@ def _integer(data: dict, *keys: str) -> int | None:
         return None
 
 
+def _privacy_rating(data: dict) -> int | None:
+    value = _first(data, "vision_privacy_score")
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if 1 <= value <= 5 else None
+
+
 def _number(data: dict, *keys: str) -> float | None:
     value = _first(data, *keys)
     try:
@@ -101,89 +108,89 @@ def _boolean(data: dict, *keys: str) -> bool | None:
 
 def _score_breakdown(
     data: dict, expected_total: float | None
-) -> tuple[float | None, ...]:
+) -> tuple[float | str | bool | None, ...]:
+    """Validate and preserve the producer-owned score contract."""
+    invalid = (None,) * 14
     breakdown = data.get("family_score_breakdown")
     if not isinstance(breakdown, dict):
-        return (None,) * 10
+        return invalid
+
+    keys = ("privacy", "kids_space", "garden", "shared_living", "practical")
 
     def number(value) -> float | None:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return None
         try:
-            return float(value)
+            parsed = float(value)
         except (TypeError, ValueError, OverflowError):
             return None
+        return parsed if math.isfinite(parsed) else None
 
-    scores = tuple(
-        number(breakdown.get(key))
-        for key in ("privacy", "kids_space", "garden", "shared_living", "practical")
-    )
-    if any(
-        value is None or not math.isfinite(value) or not 0 <= value <= 100
-        for value in scores
-    ):
-        return (None,) * 10
+    privacy_available = breakdown.get("privacy_available")
+    if not isinstance(privacy_available, bool):
+        return invalid
 
-    if "weights" not in breakdown:
-        weights = ()
-    else:
-        weight_data = breakdown["weights"]
-        if not isinstance(weight_data, dict):
-            return (None,) * 10
-        try:
-            raw_weights = tuple(
-                weight_data[key]
-                for key in (
-                    "privacy",
-                    "kids_space",
-                    "garden",
-                    "shared_living",
-                    "practical",
-                )
-            )
-        except KeyError:
-            return (None,) * 10
-        parsed_weights = tuple(number(value) for value in raw_weights)
-        if any(value is None for value in parsed_weights):
-            return (None,) * 10
-        weights = parsed_weights
-    if not weights:
-        vision_keys = (
-            "vision_separate_entrance",
-            "vision_second_kitchen",
-            "vision_internal_connection",
-            "vision_split_type",
-            "vision_en_suite_count",
-            "vision_privacy_score",
-            "vision_two_dwellings",
-            "vision_two_family_fit",
-            "vision_dwelling_evidence",
-            "vision_bathrooms",
-        )
-        weights = (
-            (30.0, 20.0, 20.0, 15.0, 15.0)
-            if any(data.get(key) is not None for key in vision_keys)
-            else (
-                0.0,
-                20.0 / 0.7,
-                20.0 / 0.7,
-                15.0 / 0.7,
-                15.0 / 0.7,
-            )
-        )
-    if any(not math.isfinite(weight) or weight < 0 for weight in weights):
-        return (None,) * 10
+    scores = tuple(number(breakdown.get(key)) for key in keys)
+    privacy, *required_scores = scores
+    if privacy_available:
+        if privacy is None or not 0 <= privacy <= 100:
+            return invalid
+    elif breakdown.get("privacy") is not None:
+        return invalid
+    if any(value is None or not 0 <= value <= 100 for value in required_scores):
+        return invalid
+
+    weight_data = breakdown.get("weights")
+    if not isinstance(weight_data, dict):
+        return invalid
+    try:
+        weights = tuple(number(weight_data[key]) for key in keys)
+    except KeyError:
+        return invalid
+    if any(weight is None or weight < 0 for weight in weights):
+        return invalid
     if not math.isclose(sum(weights), 100.0, abs_tol=0.01):
-        return (None,) * 10
+        return invalid
+
+    version = breakdown.get("score_version")
+    if not isinstance(version, str) or not version.strip() or len(version) > 100:
+        return invalid
+    version = version.strip()
+
+    coverage = number(breakdown.get("score_coverage_pct"))
+    if coverage is None or not 0 <= coverage <= 100:
+        return invalid
+    expected_coverage = sum(
+        weight for score, weight in zip(scores, weights) if score is not None
+    )
+    if not math.isclose(coverage, expected_coverage, abs_tol=0.01):
+        return invalid
+
+    notes = breakdown.get("notes")
+    if not isinstance(notes, dict):
+        return invalid
+    normalized_notes: dict[str, list[str]] = {}
+    for key in keys:
+        values = notes.get(key)
+        if not isinstance(values, list) or len(values) > 50:
+            return invalid
+        if any(not isinstance(value, str) or len(value) > 500 for value in values):
+            return invalid
+        normalized_notes[key] = values
+    notes_json = json.dumps(
+        normalized_notes, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+
     expected = number(expected_total)
-    if expected is None or not math.isfinite(expected) or not 0 <= expected <= 100:
-        return (None,) * 10
+    if expected is None or not 0 <= expected <= 100:
+        return invalid
     calculated_total = round(
-        sum(value * weight / 100 for value, weight in zip(scores, weights)), 1
+        sum((value or 0.0) * weight / 100 for value, weight in zip(scores, weights)),
+        1,
     )
     if abs(calculated_total - expected) > 0.11:
-        return (None,) * 10
-    return (*scores, *weights)
+        return invalid
+    return (*scores, *weights, version, coverage, privacy_available, notes_json)
 
 
 def _table_exists(conn, table: str) -> bool:
@@ -395,7 +402,7 @@ def _card_facts(case: ExportCase, fetched_at: datetime) -> tuple:
         _boolean(raw, "vision_ground_floor_bedroom"),
         _boolean(raw, "vision_separate_entrance"),
         _boolean(raw, "vision_second_kitchen"),
-        _integer(raw, "vision_privacy_score"),
+        _privacy_rating(raw),
         *_score_breakdown(raw, case.family_score),
         case.latitude,
         case.longitude,
@@ -623,11 +630,12 @@ class PostgresExporter:
                      "EnergyLabel","Quiet","BuildableHeadroom","GroundFloorBedroom","SeparateEntrance",
                      "SecondKitchen","PrivacyScore","FamilyPrivacyScore","KidsSpaceScore","GardenScore",
                      "SharedLivingScore","PracticalScore","FamilyPrivacyWeight","KidsSpaceWeight","GardenWeight",
-                     "SharedLivingWeight","PracticalWeight","Latitude","Longitude","MonthlyExpense",
+                     "SharedLivingWeight","PracticalWeight","ScoreRuleVersion","ScoreCoveragePct",
+                     "FamilyPrivacyAvailable","ScoreNotesJson","Latitude","Longitude","MonthlyExpense",
                      "DaysOnMarket","CommuteMinutes","CommuteJson","BuildableStatus","Condition","GardenOrientation","MultigenFit","PostalCode","Preferred","IsNew","FirstSeenAt","FamilyUnits","RoadNoiseDb","RailNoiseDb","AirNoiseDb","LearningRuleVersion")
                     VALUES (%s,%s,%s,%s,%s,%s,%s::listing_state,%s,%s,%s,%s,%s,%s,%s,%s,
                             %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT("ExternalId") DO UPDATE SET
                      "Address"=excluded."Address","City"=excluded."City","Price"=excluded."Price",
                      "FamilyFitScore"=excluded."FamilyFitScore",
@@ -655,7 +663,10 @@ class PostgresExporter:
                      "PracticalScore"=excluded."PracticalScore",
                      "FamilyPrivacyWeight"=excluded."FamilyPrivacyWeight","KidsSpaceWeight"=excluded."KidsSpaceWeight",
                      "GardenWeight"=excluded."GardenWeight","SharedLivingWeight"=excluded."SharedLivingWeight",
-                     "PracticalWeight"=excluded."PracticalWeight","Latitude"=excluded."Latitude",
+                     "PracticalWeight"=excluded."PracticalWeight",
+                     "ScoreRuleVersion"=excluded."ScoreRuleVersion","ScoreCoveragePct"=excluded."ScoreCoveragePct",
+                     "FamilyPrivacyAvailable"=excluded."FamilyPrivacyAvailable","ScoreNotesJson"=excluded."ScoreNotesJson",
+                     "Latitude"=excluded."Latitude",
                      "Longitude"=excluded."Longitude","MonthlyExpense"=excluded."MonthlyExpense",
                      "DaysOnMarket"=excluded."DaysOnMarket","CommuteMinutes"=excluded."CommuteMinutes",
                      "CommuteJson"=excluded."CommuteJson","BuildableStatus"=excluded."BuildableStatus","Condition"=excluded."Condition",
@@ -675,7 +686,7 @@ class PostgresExporter:
                         case.address or case.source_id,
                         case.municipality,
                         case.price_dkk,
-                        case.family_score or 0,
+                        case.family_score,
                         state,
                         case.ai_status != "not_assessed",
                         _confidence(case.ai_confidence),

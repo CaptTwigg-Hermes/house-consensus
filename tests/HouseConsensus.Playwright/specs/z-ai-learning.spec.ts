@@ -1,9 +1,7 @@
 import { test, expect } from '../fixtures/test.js';
-import { identity, requestMagicLink } from '../helpers/household.js';
 
-test('owner generates an AI learning proposal with the configured LAN model', async ({ page, mailpit }, testInfo) => {
+test('owner generates an AI learning proposal with the configured LAN model', async ({ page }) => {
   test.setTimeout(180_000);
-  await requestMagicLink(page, mailpit, identity(testInfo, 'owner'));
   await page.goto('/browse');
   await page.getByTestId('listing-card').first().locator('.card-main').click();
   await page.getByTestId('vote-reject').click();

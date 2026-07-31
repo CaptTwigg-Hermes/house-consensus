@@ -1,8 +1,7 @@
 import { test, expect } from '../fixtures/test.js';
-import { identity, requestMagicLink } from '../helpers/household.js';
 
-test('English and Danish preferences persist across navigation, reload, and a new tab', async ({ page, context, mailpit }, testInfo) => {
-  await requestMagicLink(page, mailpit, identity(testInfo, 'owner'));
+test('English and Danish preferences persist across navigation, reload, and a new tab', async ({ page, context }) => {
+  await page.goto('/');
   await page.getByTestId('language-select').selectOption('da');
   await expect(page.locator('html')).toHaveAttribute('lang', /^da/);
   await expect(page.getByRole('link', { name: /gennemse/i }).first()).toBeVisible();

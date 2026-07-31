@@ -1,81 +1,63 @@
 import { expect, type Browser, type BrowserContext, type Page, type TestInfo } from '@playwright/test';
-import type { MailpitClient } from './mailpit.js';
 
-export interface Identity { name: string; email: string }
-export interface Household {
+export interface Identity { email: string; name: string }
+export interface HouseholdSession {
   owner: Identity;
   member: Identity;
   ownerContext: BrowserContext;
-  ownerPage: Page;
   memberContext: BrowserContext;
+  ownerPage: Page;
   memberPage: Page;
 }
 
-export function sameOriginPath(link: string): string {
-  const url = new URL(link);
-  return `${url.pathname}${url.search}${url.hash}`;
-}
+export const E2E_AUTH_HEADER = 'X-House-Consensus-E2E-Email';
+export const E2E_OWNER: Identity = { email: 'owner@example.test', name: 'E2E Owner' };
+export const E2E_MEMBER: Identity = { email: 'e2e-member@example.test', name: 'E2E Member' };
 
 export function identity(testInfo: TestInfo, role: string): Identity {
-  if (role === 'owner') return { name: 'Owner', email: 'owner@example.test' };
-  const slug = `${testInfo.workerIndex}-${testInfo.testId}-${role}-${Date.now()}`
-    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(-48);
-  return { name: `${role} ${slug.slice(-12)}`, email: `e2e+${slug}@example.test` };
+  const stem = `${testInfo.project.name}-${testInfo.workerIndex}-${testInfo.repeatEachIndex}-${Date.now()}-${role}`
+    .toLowerCase().replace(/[^a-z0-9-]/g, '-');
+  return { email: `${stem}@example.test`, name: role === 'owner' ? 'E2E Owner' : 'E2E Member' };
 }
 
-export async function requestMagicLink(page: Page, mailpit: MailpitClient, person: Identity): Promise<void> {
-  await page.goto('/sign-in');
-  await page.getByTestId('auth-email').fill(person.email);
-  await page.getByRole('button', { name: /send (magic|sign-in) link|continue/i }).click();
-  await expect(page.getByTestId('auth-link-sent')).toBeVisible();
-  const link = await mailpit.waitForLink(person.email, { subject: /sign|login|magic/i });
-  await page.goto(sameOriginPath(link));
-  const name = page.getByTestId('profile-name');
-  if (await name.isVisible().catch(() => false)) {
-    await name.fill(person.name);
-    await page.getByRole('button', { name: /save|continue/i }).click();
-  }
-  await expect(page.getByTestId('app-shell')).toBeVisible();
-}
-
-export async function inviteMember(ownerPage: Page, mailpit: MailpitClient, member: Identity): Promise<string> {
+export async function inviteMember(ownerPage: Page, member: Identity): Promise<void> {
   await ownerPage.goto('/owner/members');
   await ownerPage.getByTestId('member-invite-email').fill(member.email);
-  await ownerPage.getByRole('button', { name: /invite/i }).click();
+  await ownerPage.getByRole('button', { name: /invite member/i }).click();
   await expect(ownerPage.getByTestId('member-notice')).toBeVisible();
-  return mailpit.waitForLink(member.email, { subject: /sign|login|magic/i });
 }
 
-export async function createTwoMemberHousehold(
-  browser: Browser,
-  mailpit: MailpitClient,
-  testInfo: TestInfo,
-  baseURL: string
-): Promise<Household> {
-  const owner = identity(testInfo, 'owner');
-  const member = identity(testInfo, 'member');
-  const ownerContext = await browser.newContext({ baseURL });
+export async function createSeededE2EHousehold(browser: Browser, baseURL: string): Promise<HouseholdSession> {
+  const ownerContext = await browser.newContext({
+    baseURL,
+    extraHTTPHeaders: { [E2E_AUTH_HEADER]: E2E_OWNER.email }
+  });
   const ownerPage = await ownerContext.newPage();
-  await requestMagicLink(ownerPage, mailpit, owner);
-  const members = await ownerPage.request.get('/api/members');
-  for (const member of await members.json() as Array<{ id: string; role: string | number; isActive: boolean }>) {
-    if ((member.role === 'Member' || member.role === 'member' || member.role === 0) && member.isActive)
-      expect((await ownerPage.request.post(`/api/members/${member.id}/deactivate`, { headers: { 'X-House-Consensus-CSRF': '1' } })).ok()).toBeTruthy();
-  }
-  const inviteLink = await inviteMember(ownerPage, mailpit, member);
+  const reset = await ownerPage.request.post('/api/e2e/reset-household-votes', {
+    headers: { 'X-House-Consensus-CSRF': '1' }
+  });
+  expect(reset.ok()).toBeTruthy();
+  await ownerPage.goto('/');
+  await expect(ownerPage.getByTestId('app-shell')).toBeVisible();
 
-  const memberContext = await browser.newContext({ baseURL });
+  const memberContext = await browser.newContext({
+    baseURL,
+    extraHTTPHeaders: { [E2E_AUTH_HEADER]: E2E_MEMBER.email }
+  });
   const memberPage = await memberContext.newPage();
-  await memberPage.goto(sameOriginPath(inviteLink));
-  const name = memberPage.getByTestId('profile-name');
-  if (await name.isVisible().catch(() => false)) {
-    await name.fill(member.name);
-    await memberPage.getByRole('button', { name: /join|continue|save/i }).click();
-  }
+  await memberPage.goto('/');
   await expect(memberPage.getByTestId('app-shell')).toBeVisible();
-  return { owner, member, ownerContext, ownerPage, memberContext, memberPage };
+
+  return {
+    owner: E2E_OWNER,
+    member: E2E_MEMBER,
+    ownerContext,
+    memberContext,
+    ownerPage,
+    memberPage
+  };
 }
 
-export async function closeHousehold(household: Household): Promise<void> {
+export async function closeHousehold(household: HouseholdSession): Promise<void> {
   await Promise.all([household.ownerContext.close(), household.memberContext.close()]);
 }

@@ -5,6 +5,7 @@ using HouseConsensus.Server.Learning;
 using HouseConsensus.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
@@ -113,6 +114,114 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
     {
         Assert.Throws<InvalidOperationException>(() => DebugAutoLoginMiddleware.EnsureSafe(true, "Production"));
         DebugAutoLoginMiddleware.EnsureSafe(true, "Development");
+    }
+
+    [Fact]
+    public async Task E2E_test_auth_accepts_a_cloudflare_invite_before_authenticating()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+        var owner = new Member { Email = E2EDataSeeder.OwnerEmail, Role = MemberRole.Owner };
+        db.Members.Add(owner);
+        db.Invites.Add(new Invite { Email = "invited@example.test", InvitedById = owner.Id, ExpiresAt = DateTimeOffset.UtcNow.AddHours(1) });
+        await db.SaveChangesAsync(ct);
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["E2E:TestAuth"] = "true"
+        }).Build();
+        var context = new DefaultHttpContext();
+        context.Request.Headers[DebugAutoLoginMiddleware.E2EEmailHeader] = "invited@example.test";
+        context.RequestServices = new ServiceCollection()
+            .AddSingleton<ICloudflareMemberService>(new CloudflareMemberService(db, TimeProvider.System))
+            .BuildServiceProvider();
+        var middleware = new DebugAutoLoginMiddleware(_ => Task.CompletedTask, config);
+
+        await middleware.InvokeAsync(context, db);
+
+        Assert.True(context.User.Identity?.IsAuthenticated);
+        Assert.NotNull(await db.Members.SingleOrDefaultAsync(x => x.Email == "invited@example.test" && x.IsActive, ct));
+    }
+
+    [Fact]
+    public async Task E2E_test_auth_header_authenticates_an_active_member()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+        var member = new Member { Email = "e2e-member@example.test", DisplayName = "E2E Member" };
+        db.Members.Add(member);
+        await db.SaveChangesAsync(ct);
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["E2E:TestAuth"] = "true",
+        }).Build();
+        var context = new DefaultHttpContext { RequestAborted = ct };
+        context.Request.Headers["X-House-Consensus-E2E-Email"] = member.Email;
+        var middleware = new DebugAutoLoginMiddleware(_ => Task.CompletedTask, config);
+
+        await middleware.InvokeAsync(context, db);
+
+        Assert.True(context.User.Identity?.IsAuthenticated);
+        Assert.Equal(member.Id.ToString(), context.User.FindFirstValue(ClaimTypes.NameIdentifier));
+        Assert.True(context.User.IsInRole(MemberRole.Member.ToString()));
+    }
+
+    [Fact]
+    public void E2E_test_auth_requires_development_and_debug_auto_login()
+    {
+        Assert.Throws<InvalidOperationException>(() => DebugAutoLoginMiddleware.EnsureE2ETestAuthSafe(true, true, true, "Production"));
+        Assert.Throws<InvalidOperationException>(() => DebugAutoLoginMiddleware.EnsureE2ETestAuthSafe(true, false, true, "Development"));
+        Assert.Throws<InvalidOperationException>(() => DebugAutoLoginMiddleware.EnsureE2ETestAuthSafe(true, true, false, "Development"));
+        DebugAutoLoginMiddleware.EnsureE2ETestAuthSafe(true, true, true, "Development");
+        DebugAutoLoginMiddleware.EnsureE2ETestAuthSafe(false, false, false, "Production");
+    }
+
+    [Fact]
+    public async Task E2E_household_reset_removes_listing_votes_and_restores_member_defaults()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+        await E2EDataSeeder.SeedAsync(db, ct);
+        var member = await db.Members.SingleAsync(x => x.Email == E2EDataSeeder.MemberEmail, ct);
+        var listing = await db.Listings.SingleAsync(x => x.ExternalId == "e2e-active", ct);
+        member.SetLanguage("da");
+        member.Deactivate();
+        db.Votes.Add(new Vote(listing.Id, member.Id, VoteChoice.Like, [], "residue", DateTimeOffset.UtcNow));
+        await db.SaveChangesAsync(ct);
+
+        await E2EDataSeeder.ResetHouseholdVotesAsync(db, ct);
+
+        await db.Entry(member).ReloadAsync(ct);
+        Assert.True(member.IsActive);
+        Assert.Equal("en", member.Language);
+        Assert.Equal("E2E Member", member.DisplayName);
+        Assert.False(await db.Votes.AnyAsync(x => x.ListingId == listing.Id, ct));
+    }
+
+    [Fact]
+    public async Task E2E_ai_generator_is_deterministic_and_network_free()
+    {
+        var generated = await new E2EAiRuleGenerator().GenerateAsync([], CancellationToken.None);
+        Assert.Equal("E2E deterministic proposal", generated.Summary);
+        Assert.Equal("all", System.Text.Json.JsonDocument.Parse(generated.RuleJson).RootElement.GetProperty("combinator").GetString());
+    }
+
+    [Fact]
+    public async Task E2E_seed_creates_one_active_test_member_idempotently()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+
+        await E2EDataSeeder.SeedAsync(db, ct);
+        await E2EDataSeeder.SeedAsync(db, ct);
+
+        var members = await db.Members.Where(x => x.Email == E2EDataSeeder.MemberEmail).ToListAsync(ct);
+        Assert.Single(members);
+        Assert.True(members[0].IsActive);
+        Assert.Equal("E2E Member", members[0].DisplayName);
+        var owners = await db.Members.Where(x => x.Email == E2EDataSeeder.OwnerEmail).ToListAsync(ct);
+        Assert.Single(owners);
+        Assert.True(owners[0].IsActive);
+        Assert.Equal(MemberRole.Owner, owners[0].Role);
     }
 
     [Fact]

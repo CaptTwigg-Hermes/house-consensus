@@ -22,6 +22,9 @@ export default defineConfig({
     testIdAttribute: 'data-testid',
     locale: 'en-GB',
     timezoneId: 'Europe/Copenhagen',
+    extraHTTPHeaders: process.env.E2E_TEST_AUTH === '1'
+      ? { 'X-House-Consensus-E2E-Email': 'owner@example.test' }
+      : undefined,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure'

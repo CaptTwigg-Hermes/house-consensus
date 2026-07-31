@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any
 
 _AI_FAILURES = {
@@ -29,6 +30,16 @@ def _bool(value: Any) -> bool | None:
         if normalized in {"false", "0", "no", "n"}:
             return False
     return None
+
+
+def _score(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        score = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return score if math.isfinite(score) and 0 <= score <= 100 else None
 
 
 def _first(data: dict[str, Any], *keys: str, default=None):
@@ -183,7 +194,7 @@ class ExportCase:
                 default=coordinates.get("lon") or coordinates.get("lng"),
             ),
             source_url=_first(merged, "maegler_url", "caseUrl", "link", "url"),
-            family_score=_first(merged, "family_score"),
+            family_score=_score(_first(merged, "family_score")),
             non_ai_passed=non_ai_passed,
             ai_status=ai_status,
             ai_confidence=confidence,

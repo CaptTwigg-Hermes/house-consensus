@@ -12,6 +12,14 @@ public sealed record VoteNoteInput(long VoteId, Guid ListingId, Guid MemberId, V
 public sealed record GeneratedAiRule(string Summary, string RuleJson);
 public interface IAiRuleGenerator { Task<GeneratedAiRule> GenerateAsync(IReadOnlyList<VoteNoteInput> notes, CancellationToken ct); }
 
+public sealed class E2EAiRuleGenerator : IAiRuleGenerator
+{
+    public Task<GeneratedAiRule> GenerateAsync(IReadOnlyList<VoteNoteInput> notes, CancellationToken ct) =>
+        Task.FromResult(new GeneratedAiRule(
+            "E2E deterministic proposal",
+            "{\"combinator\":\"all\",\"conditions\":[{\"field\":\"condition\",\"operator\":\"contains\",\"value\":\"renovation\"}]}"));
+}
+
 public sealed class OllamaAiRuleGenerator(HttpClient http, IConfiguration config) : IAiRuleGenerator
 {
     public async Task<GeneratedAiRule> GenerateAsync(IReadOnlyList<VoteNoteInput> notes, CancellationToken ct)

@@ -1,8 +1,6 @@
 import { test, expect } from '../fixtures/test.js';
-import { identity, requestMagicLink } from '../helpers/household.js';
 
-test('owner restores an unresolved AI rejection to Browse', async ({ page, mailpit }, testInfo) => {
-  await requestMagicLink(page, mailpit, identity(testInfo, 'owner'));
+test('owner restores an unresolved AI rejection to Browse', async ({ page }) => {
   const reset = await page.request.post('/api/e2e/reset-review-listing', { headers: { 'X-House-Consensus-CSRF': '1' } });
   expect(reset.ok()).toBeTruthy();
   const response = await page.request.get('/api/review');

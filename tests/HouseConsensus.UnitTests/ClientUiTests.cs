@@ -514,6 +514,37 @@ public sealed class ClientUiTests
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
         var program = File.ReadAllText(Path.Combine(root, "src/Server/Program.cs"));
         Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(program, "!app.Environment.IsProduction\\(\\) && app.Configuration.GetValue\\(\"E2E:SeedData\", false\\)").Count);
+        Assert.Contains("/api/e2e/reset-household-votes", program, StringComparison.Ordinal);
+        Assert.Contains("E2EDataSeeder.ResetHouseholdVotesAsync", program, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Playwright_authentication_matches_cloudflare_mode_without_email_delivery()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var playwright = Path.Combine(root, "tests/HouseConsensus.Playwright");
+        var source = string.Join("\n", Directory.GetFiles(playwright, "*.ts", SearchOption.AllDirectories).Select(File.ReadAllText));
+        Assert.DoesNotContain("mailpit", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("requestMagicLink", source, StringComparison.Ordinal);
+        Assert.Contains("X-House-Consensus-E2E-Email", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Household_ui_verifier_uses_seeded_test_auth_and_owns_server_cleanup()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var script = File.ReadAllText(Path.Combine(root, "scripts/verify-household-ui.sh"));
+        Assert.Contains("E2E__TestAuth=true", script, StringComparison.Ordinal);
+        Assert.Contains("CloudflareAccess__Enabled=true", script, StringComparison.Ordinal);
+        Assert.Contains("E2E_TEST_AUTH=1", script, StringComparison.Ordinal);
+        Assert.Contains("Debug__AutoLogin=true", script, StringComparison.Ordinal);
+        Assert.Contains("household-votes.spec.ts", script, StringComparison.Ordinal);
+        Assert.Contains("cd tests/HouseConsensus.Playwright", script, StringComparison.Ordinal);
+        Assert.Contains("trap cleanup EXIT", script, StringComparison.Ordinal);
+        Assert.Contains("HOUSE_CONSENSUS_TEST_ADMIN_URL", script, StringComparison.Ordinal);
+        Assert.Contains("$DB_TOOL\" drop", script, StringComparison.Ordinal);
+        Assert.Contains("dotnet build", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("mailpit", script, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

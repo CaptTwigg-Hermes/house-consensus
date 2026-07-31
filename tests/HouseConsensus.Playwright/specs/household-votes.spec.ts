@@ -1,8 +1,8 @@
 import { test, expect } from '../fixtures/test.js';
-import { closeHousehold, createTwoMemberHousehold } from '../helpers/household.js';
+import { closeHousehold, createSeededE2EHousehold } from '../helpers/household.js';
 
-test('household votes presents shared feedback as a responsive visual dashboard', async ({ browser, mailpit }, testInfo) => {
-  const household = await createTwoMemberHousehold(browser, mailpit, testInfo, testInfo.project.use.baseURL as string);
+test('household votes presents shared feedback as a responsive visual dashboard', async ({ browser }, testInfo) => {
+  const household = await createSeededE2EHousehold(browser, testInfo.project.use.baseURL as string);
   const privateNote = `Current member private note ${Date.now()}.`;
   try {
     await household.ownerPage.goto('/browse');

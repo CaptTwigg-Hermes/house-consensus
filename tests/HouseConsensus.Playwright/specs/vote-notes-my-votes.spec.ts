@@ -1,9 +1,7 @@
 import { test, expect } from '../fixtures/test.js';
-import { identity, requestMagicLink } from '../helpers/household.js';
 
-test('vote notes appear on compact My Votes cards and remain editable', async ({ page, mailpit }, testInfo) => {
+test('vote notes appear on compact My Votes cards and remain editable', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await requestMagicLink(page, mailpit, identity(testInfo, 'owner'));
   await page.goto('/browse');
   const card = page.getByTestId('listing-card').first();
   await expect(card).toBeVisible();

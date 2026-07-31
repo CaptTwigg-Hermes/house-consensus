@@ -6,7 +6,7 @@ services:
     pull_policy: always
     restart: unless-stopped
     environment:
-      ConnectionStrings__Database: "Host=${POSTGRES_HOST:-192.168.50.2};Port=${POSTGRES_PORT:-5433};Database=${POSTGRES_DB:-house_consensus};Username=${POSTGRES_USER:-house_consensus};Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}"
+      ConnectionStrings__Database: ${DATABASE_CONNECTION_STRING:?DATABASE_CONNECTION_STRING must be set}
       INITIAL_OWNER_EMAIL: ${INITIAL_OWNER_EMAIL:?INITIAL_OWNER_EMAIL must be set}
       PublicOrigin: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN must be set}
       CloudflareAccess__Enabled: "true"
@@ -20,7 +20,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
     ports:
-      - "${APP_BIND_IP:-127.0.0.1}:${APP_PORT:-8080}:8080"
+      - "${APP_BIND_IP:-127.0.0.1}:${APP_PORT:-9000}:8080"
     networks: [internal]
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/health"]

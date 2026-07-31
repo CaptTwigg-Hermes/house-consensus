@@ -5,8 +5,34 @@ namespace HouseConsensus.Server.Data;
 
 public static class E2EDataSeeder
 {
+    public const string OwnerEmail = "owner@example.test";
+    public const string MemberEmail = "e2e-member@example.test";
+
     public static async Task SeedAsync(AppDbContext db, CancellationToken ct = default)
     {
+        var owner = await db.Members.SingleOrDefaultAsync(x => x.Email == OwnerEmail, ct);
+        if (owner is null)
+            db.Members.Add(new Member { Email = OwnerEmail, DisplayName = "Owner", Role = MemberRole.Owner });
+        else
+        {
+            owner.DisplayName = "Owner";
+            owner.Role = MemberRole.Owner;
+            owner.SetLanguage("en");
+            owner.Reactivate();
+        }
+
+        var member = await db.Members.SingleOrDefaultAsync(x => x.Email == MemberEmail, ct);
+        if (member is null)
+            db.Members.Add(new Member { Email = MemberEmail, DisplayName = "E2E Member" });
+        else
+        {
+            member.DisplayName = "E2E Member";
+            member.Role = MemberRole.Member;
+            member.SetLanguage("en");
+            member.Reactivate();
+        }
+        await db.SaveChangesAsync(ct);
+
         if (await db.Listings.AnyAsync(x => x.ExternalId.StartsWith("e2e-"), ct)) return;
 
         var active = new Listing
@@ -99,6 +125,19 @@ public static class E2EDataSeeder
         };
         rejected.ApplyImportDecision(true);
         db.Listings.AddRange(active, rejected);
+        await db.SaveChangesAsync(ct);
+    }
+
+    public static async Task ResetHouseholdVotesAsync(AppDbContext db, CancellationToken ct = default)
+    {
+        var member = await db.Members.SingleAsync(x => x.Email == MemberEmail, ct);
+        member.DisplayName = "E2E Member";
+        member.SetLanguage("en");
+        member.Reactivate();
+        var listingId = await db.Listings.Where(x => x.ExternalId == "e2e-active").Select(x => x.Id).SingleAsync(ct);
+        var voteIds = db.Votes.Where(x => x.ListingId == listingId).Select(x => x.Id);
+        await db.VoteNoteRevisions.Where(x => voteIds.Contains(x.VoteId)).ExecuteDeleteAsync(ct);
+        await db.Votes.Where(x => x.ListingId == listingId).ExecuteDeleteAsync(ct);
         await db.SaveChangesAsync(ct);
     }
 }

@@ -1,9 +1,8 @@
 import { test, expect } from '../fixtures/test.js';
-import { identity, requestMagicLink } from '../helpers/household.js';
 
-test('owner can export feedback as valid CSV and JSON containing the submitted record', async ({ page, mailpit }, testInfo) => {
+test('owner can export feedback as valid CSV and JSON containing the submitted record', async ({ page }) => {
   const marker = `=e2e-feedback-${Date.now()}`;
-  await requestMagicLink(page, mailpit, identity(testInfo, 'owner'));
+  await page.goto('/');
   await page.getByTestId('feedback-open').click();
   await page.getByTestId('feedback-message').fill(marker);
   await page.getByRole('button', { name: /send feedback/i }).click();
