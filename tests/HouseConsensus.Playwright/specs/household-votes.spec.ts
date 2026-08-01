@@ -1,5 +1,5 @@
 import { test, expect } from '../fixtures/test.js';
-import { closeHousehold, createSeededE2EHousehold } from '../helpers/household.js';
+import { castGuidedVote, closeHousehold, createSeededE2EHousehold } from '../helpers/household.js';
 
 test('household votes presents shared feedback as a responsive visual dashboard', async ({ browser }, testInfo) => {
   const household = await createSeededE2EHousehold(browser, testInfo.project.use.baseURL as string);
@@ -10,9 +10,7 @@ test('household votes presents shared feedback as a responsive visual dashboard'
     expect(href).toBeTruthy();
 
     await household.ownerPage.goto(href!);
-    await household.ownerPage.getByTestId('vote-interested').click();
-    await household.ownerPage.getByTestId('vote-note').fill('The private garden and separate wing both feel promising.');
-    await household.ownerPage.getByRole('button', { name: /save vote|gem stemme/i }).click();
+    await castGuidedVote(household.ownerPage, 'Like', 'The private garden and separate wing both feel promising.');
 
     await household.memberPage.setViewportSize({ width: 390, height: 844 });
     await household.memberPage.goto('/household-votes');
@@ -26,9 +24,7 @@ test('household votes presents shared feedback as a responsive visual dashboard'
     expect(Number(pulse.notes)).toBeGreaterThanOrEqual(1);
 
     await household.memberPage.goto(href!);
-    await household.memberPage.getByTestId('vote-interested').click();
-    await household.memberPage.getByTestId('vote-note').fill(privateNote);
-    await household.memberPage.getByRole('button', { name: /save vote|gem stemme/i }).click();
+    await castGuidedVote(household.memberPage, 'Like', privateNote);
     await household.memberPage.goto('/household-votes');
 
     const votes = household.memberPage.getByTestId('household-votes');
@@ -71,6 +67,7 @@ test('household votes presents shared feedback as a responsive visual dashboard'
     expect(mobileGeometry.columns.split(' ')).toHaveLength(1);
     expect(mobileGeometry.cardWidth).toBeGreaterThan(340);
 
+    await household.memberPage.getByTestId('menu-trigger').click();
     await household.memberPage.getByTestId('language-select').selectOption('da');
     await expect(household.memberPage.getByRole('heading', { name: 'Husstandens stemmer' })).toBeVisible();
     const danishHeroHeight = await household.memberPage.locator('.household-hero').evaluate((element) => element.getBoundingClientRect().height);

@@ -273,8 +273,10 @@ public sealed class ClientUiTests
         Assert.Contains("data-testid=\"app-shell\"", layout, StringComparison.Ordinal);
         Assert.Contains("data-testid=\"current-user-email\"", layout, StringComparison.Ordinal);
         Assert.Contains("data-testid=\"language-select\"", layout, StringComparison.Ordinal);
-        Assert.Contains("data-testid=\"member-invite-email\"", members, StringComparison.Ordinal);
-        Assert.Contains("data-testid=\"member-notice\"", members, StringComparison.Ordinal);
+        Assert.DoesNotContain("member-invite-email", members, StringComparison.Ordinal);
+        Assert.DoesNotContain("member-notice", members, StringComparison.Ordinal);
+        Assert.DoesNotContain("Api.Invite", members, StringComparison.Ordinal);
+        Assert.DoesNotContain("Api.ChangeMember", members, StringComparison.Ordinal);
         Assert.Contains("data-testid=\"member-row\"", members, StringComparison.Ordinal);
     }
 
@@ -301,12 +303,12 @@ public sealed class ClientUiTests
         var vote = File.ReadAllText(Path.Combine(root, "src/Client/Components/VoteButtons.razor"));
         var api = File.ReadAllText(Path.Combine(root, "src/Client/Services/ApiClient.cs"));
         var program = File.ReadAllText(Path.Combine(root, "src/Server/Program.cs"));
-        Assert.Contains("vote-note-sheet", vote, StringComparison.Ordinal);
+        Assert.Contains("guided-vote-sheet", vote, StringComparison.Ordinal);
         Assert.Contains("vote-note", vote, StringComparison.Ordinal);
-        Assert.Contains("vote-skip-comment", vote, StringComparison.Ordinal);
+        Assert.Contains("ReviewVote", vote, StringComparison.Ordinal);
         Assert.DoesNotContain("ClearVote", vote, StringComparison.Ordinal);
         Assert.DoesNotContain("ClearVote", api, StringComparison.Ordinal);
-        Assert.DoesNotContain("listings.MapDelete", program, StringComparison.Ordinal);
+        Assert.DoesNotContain("MapDelete(\"/{id:guid}/votes\"", program, StringComparison.Ordinal);
     }
 
     [Fact]

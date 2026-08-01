@@ -65,6 +65,24 @@ ALTER TABLE listings ADD COLUMN IF NOT EXISTS "ScoreCoveragePct" double precisio
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "FamilyPrivacyAvailable" boolean;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "ScoreNotesJson" text;
 ALTER TABLE listings ALTER COLUMN "FamilyFitScore" DROP NOT NULL;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "CanonicalUrl" character varying(2048);
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "NormalizedAddress" character varying(500);
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "IsManuallyAdded" boolean NOT NULL DEFAULT false;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "ManuallyAddedById" uuid;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "ManuallyAddedAt" timestamptz;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "ManualLifecycleProtected" boolean NOT NULL DEFAULT false;
+-- The isolated exporter-test bootstrap has no members table. Production FK/index ownership
+-- remains in the application migration 202607310002_AddManualListingsAndGuidedVoting.
+WITH normalized AS (
+  SELECT "Id", replace(lower(regexp_replace(btrim("Address"), '\s+', ' ', 'g')), ' ,', ',') AS value,
+         row_number() OVER (PARTITION BY replace(lower(regexp_replace(btrim("Address"), '\s+', ' ', 'g')), ' ,', ',') ORDER BY "ImportedAt", "Id") AS rank
+  FROM listings WHERE "NormalizedAddress" IS NULL
+)
+UPDATE listings l SET "NormalizedAddress"=n.value FROM normalized n
+WHERE l."Id"=n."Id" AND n.rank=1 AND length(n.value) <= 500
+  AND NOT EXISTS (SELECT 1 FROM listings occupied WHERE occupied."NormalizedAddress"=n.value);
+CREATE UNIQUE INDEX IF NOT EXISTS "IX_listings_CanonicalUrl" ON listings ("CanonicalUrl") WHERE "CanonicalUrl" IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS "IX_listings_NormalizedAddress" ON listings ("NormalizedAddress") WHERE "NormalizedAddress" IS NOT NULL;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "Latitude" double precision;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "Longitude" double precision;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "MonthlyExpense" integer;

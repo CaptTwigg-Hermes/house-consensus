@@ -5,11 +5,15 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
+import socket
 import uuid
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
+import ipaddress
 
 import psycopg
 from psycopg import sql
@@ -19,6 +23,79 @@ from .media import MediaCache, discover_media
 from .models import ExportCase
 
 _SCHEMA = Path(__file__).with_name("schema.sql")
+
+
+_PERCENT_ESCAPE = re.compile(r"%([0-9A-Fa-f]{2})")
+_UNRESERVED = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
+
+
+def _canonical_url_path(path: str) -> str:
+    def normalize_escape(match: re.Match[str]) -> str:
+        value = int(match.group(1), 16)
+        character = chr(value)
+        if character in _UNRESERVED:
+            return character
+        return f"%{value:02X}" if value >= 128 else match.group(0)
+
+    escaped = _PERCENT_ESCAPE.sub(normalize_escape, path)
+    escaped = re.sub(r"%(?![0-9A-Fa-f]{2})", "%25", escaped)
+    escaped = quote(escaped, safe="/%:@-._~!$&'()*+,;=")
+    segments: list[str] = []
+    for segment in escaped.split("/"):
+        if segment == ".":
+            continue
+        if segment == "..":
+            if len(segments) > 1:
+                segments.pop()
+            continue
+        segments.append(segment)
+    return "/".join(segments)
+
+
+def _canonical_listing_url(value: str | None) -> str | None:
+    if not value:
+        return None
+    parsed = urlsplit(value.strip())
+    if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.username is not None or parsed.password is not None:
+        return None
+    try:
+        address = ipaddress.ip_address(parsed.hostname)
+        host = f"[{address.compressed}]" if address.version == 6 else address.compressed
+        port = parsed.port
+    except ValueError:
+        try:
+            numeric_host = parsed.hostname.lower()
+            if re.fullmatch(r"(?:0x[0-9a-f]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|[0-9]+)){0,3}", numeric_host):
+                try:
+                    host = socket.inet_ntoa(socket.inet_aton(numeric_host))
+                except OSError:
+                    host = parsed.hostname.encode("idna").decode("ascii").lower()
+            else:
+                host = parsed.hostname.encode("idna").decode("ascii").lower()
+            port = parsed.port
+        except (UnicodeError, ValueError):
+            return None
+    netloc = host if port in (None, 443) else f"{host}:{port}"
+    path = _canonical_url_path(parsed.path or "/")
+    if path != "/":
+        path = path.rstrip("/")
+    tracking = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "gclid", "fbclid"}
+    query_pairs: list[tuple[str, str]] = []
+    query_key_casing: dict[str, str] = {}
+    for key, query_value in parse_qsl(parsed.query, keep_blank_values=True):
+        lowered_key = key.lower()
+        if lowered_key in tracking:
+            continue
+        query_pairs.append((query_key_casing.setdefault(lowered_key, key), query_value))
+    query = urlencode(query_pairs)
+    query = _PERCENT_ESCAPE.sub(lambda match: match.group(0).lower() if int(match.group(1), 16) < 128 else match.group(0), query)
+    canonical = urlunsplit(("https", netloc, path, query, ""))
+    return canonical if len(canonical) <= 2048 else None
+
+
+def _normalize_listing_address(value: str) -> str | None:
+    normalized = " ".join(value.strip().lower().split()).replace(" ,", ",")
+    return normalized if len(normalized) <= 500 else None
 
 
 def ensure_schema(conn) -> None:
@@ -500,6 +577,9 @@ class PostgresExporter:
             # is an explicit deployment/test operation, not a per-run side effect.
             if self.ensure_schema_on_export:
                 ensure_schema(conn)
+            # Serialize every listings mutation before any DML, avoiding lock upgrades
+            # and keeping importer/manual deduplication checks atomic.
+            conn.execute("LOCK TABLE listings IN SHARE ROW EXCLUSIVE MODE")
             _purge_legacy_hard_rejects(conn, hard_rejected_ids)
             learning_rule = _active_learning_rule(conn)
             votes_table_exists = _table_exists(conn, "votes")
@@ -560,10 +640,25 @@ class PostgresExporter:
                 baseline_state = state
                 learning_version = None
                 learning_applied = False
-                existing = conn.execute(
-                    'select "Id","State"::text,"LearningRuleVersion","ArchivedAt" from listings where "ExternalId"=%s for update',
-                    (case.source_id,),
-                ).fetchone()
+                canonical_source_url = _canonical_listing_url(case.source_url)
+                normalized_address = _normalize_listing_address(case.address or case.source_id)
+                identity_matches = conn.execute(
+                    'select "Id","State"::text,"LearningRuleVersion","ArchivedAt","ManualLifecycleProtected","ExternalId","SourceUrl" from listings where "ExternalId"=%s or "CanonicalUrl"=%s or "NormalizedAddress"=%s for update',
+                    (case.source_id, canonical_source_url, normalized_address),
+                ).fetchall()
+                legacy_matches = conn.execute(
+                    'select "Id","State"::text,"LearningRuleVersion","ArchivedAt","ManualLifecycleProtected","ExternalId","SourceUrl" from listings where "CanonicalUrl" is null and "SourceUrl" is not null for update'
+                ).fetchall()
+                matched_ids = {row[0] for row in identity_matches}
+                for legacy in legacy_matches:
+                    if canonical_source_url is not None and legacy[0] not in matched_ids and _canonical_listing_url(legacy[6]) == canonical_source_url:
+                        identity_matches.append(legacy)
+                        matched_ids.add(legacy[0])
+                if len(identity_matches) > 1:
+                    raise ValueError("Listing URL and address resolve to different existing listings.")
+                existing = identity_matches[0] if identity_matches else None
+                external_id = existing[5] if existing else case.source_id
+                effective_archive_reason = None if existing and existing[4] else case.archive_reason
                 if existing is None:
                     inserted += 1
                 elif existing[3] is not None and not case.archive_reason:
@@ -571,7 +666,7 @@ class PostgresExporter:
                 else:
                     updated += 1
                 protected_existing = False
-                if existing and not case.archive_reason:
+                if existing and not effective_archive_reason:
                     has_vote = (
                         votes_table_exists
                         and conn.execute(
@@ -586,7 +681,7 @@ class PostgresExporter:
                             (existing[0],),
                         ).fetchone()[0]
                     )
-                    protected_existing = has_vote or has_override
+                    protected_existing = bool(existing[4]) or has_vote or has_override
                     if protected_existing:
                         learning_version = existing[2]
                         ordinary_reappearance = (
@@ -594,7 +689,7 @@ class PostgresExporter:
                             and existing[1] == "archived"
                             and not has_override
                         )
-                        if not ordinary_reappearance:
+                        if existing[4] or not ordinary_reappearance:
                             state = existing[1]
                 if (
                     not protected_existing
@@ -619,13 +714,13 @@ class PostgresExporter:
                                 "source_evidence": evidence.get("evidence", {}),
                             },
                         }
-                if case.archive_reason:
+                if effective_archive_reason:
                     state = "archived"
                     learning_version = None
                 listing_id = conn.execute(
                     """INSERT INTO listings AS current
                     ("Id","ExternalId","Address","City","Price","FamilyFitScore","State","AiAssessed",
-                     "AiConfidence","AiEvidence","ModelVersion","RuleVersion","SourceUrl","ImportedAt","ArchivedAt",
+                     "AiConfidence","AiEvidence","ModelVersion","RuleVersion","SourceUrl","CanonicalUrl","NormalizedAddress","ImportedAt","ArchivedAt",
                      "PreviewImageUrl","LivingArea","LotArea","Rooms","YearBuilt","Bathrooms","Bedrooms","Floors",
                      "EnergyLabel","Quiet","BuildableHeadroom","GroundFloorBedroom","SeparateEntrance",
                      "SecondKitchen","PrivacyScore","FamilyPrivacyScore","KidsSpaceScore","GardenScore",
@@ -633,7 +728,7 @@ class PostgresExporter:
                      "SharedLivingWeight","PracticalWeight","ScoreRuleVersion","ScoreCoveragePct",
                      "FamilyPrivacyAvailable","ScoreNotesJson","Latitude","Longitude","MonthlyExpense",
                      "DaysOnMarket","CommuteMinutes","CommuteJson","BuildableStatus","Condition","GardenOrientation","MultigenFit","PostalCode","Preferred","IsNew","FirstSeenAt","FamilyUnits","RoadNoiseDb","RailNoiseDb","AirNoiseDb","LearningRuleVersion")
-                    VALUES (%s,%s,%s,%s,%s,%s,%s::listing_state,%s,%s,%s,%s,%s,%s,%s,%s,
+                    VALUES (%s,%s,%s,%s,%s,%s,%s::listing_state,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                             %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                             %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT("ExternalId") DO UPDATE SET
@@ -649,6 +744,7 @@ class PostgresExporter:
                      "AiAssessed"=excluded."AiAssessed","AiConfidence"=excluded."AiConfidence",
                      "AiEvidence"=excluded."AiEvidence","ModelVersion"=excluded."ModelVersion",
                      "RuleVersion"=excluded."RuleVersion","SourceUrl"=excluded."SourceUrl",
+                     "CanonicalUrl"=excluded."CanonicalUrl","NormalizedAddress"=excluded."NormalizedAddress",
                      "ImportedAt"=excluded."ImportedAt","ArchivedAt"=excluded."ArchivedAt",
                      "PreviewImageUrl"=excluded."PreviewImageUrl","LivingArea"=excluded."LivingArea",
                      "LotArea"=excluded."LotArea","Rooms"=excluded."Rooms","YearBuilt"=excluded."YearBuilt",
@@ -682,7 +778,7 @@ class PostgresExporter:
                     """,
                     (
                         uuid.uuid4(),
-                        case.source_id,
+                        external_id,
                         case.address or case.source_id,
                         case.municipality,
                         case.price_dkk,
@@ -696,8 +792,10 @@ class PostgresExporter:
                         evidence.get("model_version"),
                         evidence.get("rule_version"),
                         case.source_url,
+                        canonical_source_url,
+                        normalized_address,
                         fetched_at,
-                        fetched_at if case.archive_reason else None,
+                        existing[3] if existing and existing[4] and existing[1] == "archived" else (fetched_at if effective_archive_reason else None),
                         *_card_facts(case, fetched_at),
                         learning_version,
                     ),
@@ -731,7 +829,7 @@ class PostgresExporter:
                         run_id,
                         case.non_ai_passed,
                         case.pipeline_decision,
-                        case.archive_reason,
+                        effective_archive_reason,
                         Jsonb(case.raw),
                     ),
                 )
@@ -826,7 +924,7 @@ class PostgresExporter:
             candidates = conn.execute(
                 """SELECT count(*) FROM listings l JOIN listing_export_state s ON s.listing_id=l."Id"
                 WHERE s.source_scope=%s AND s.last_seen_run_id<>%s
-                AND s.missing_complete_snapshots>=2 AND l."ArchivedAt" IS NULL""",
+                AND s.missing_complete_snapshots>=2 AND l."ArchivedAt" IS NULL AND l."ManualLifecycleProtected"=false""",
                 (self.source_scope, run_id),
             ).fetchone()[0]
             retained = conn.execute(
@@ -843,13 +941,14 @@ class PostgresExporter:
                     """UPDATE listings l SET "State"='archived',"ArchivedAt"=%s
                     FROM listing_export_state s WHERE s.listing_id=l."Id" AND s.source_scope=%s
                     AND s.last_seen_run_id<>%s AND s.missing_complete_snapshots>=2
-                    AND l."ArchivedAt" IS NULL""",
+                    AND l."ArchivedAt" IS NULL AND l."ManualLifecycleProtected"=false""",
                     (fetched_at, self.source_scope, run_id),
                 ).rowcount
                 conn.execute(
-                    """UPDATE listing_export_state SET archive_reason='missing_from_two_complete_snapshots'
+                    """UPDATE listing_export_state s SET archive_reason='missing_from_two_complete_snapshots'
                     WHERE source_scope=%s AND last_seen_run_id<>%s
-                    AND missing_complete_snapshots>=2 AND archive_reason IS NULL""",
+                    AND missing_complete_snapshots>=2 AND archive_reason IS NULL
+                    AND EXISTS (SELECT 1 FROM listings l WHERE l."Id"=s.listing_id AND l."ManualLifecycleProtected"=false)""",
                     (self.source_scope, run_id),
                 )
             conn.execute(

@@ -21,7 +21,7 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
 {
     private PostgreSqlContainer? _postgres;
     private string _connectionString = "";
-    private AppDbContext Db() => new(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(_connectionString, n => n.MapEnum<MemberRole>("member_role").MapEnum<VoteChoice>("vote_choice").MapEnum<ListingState>("listing_state").MapEnum<ReasonTag>("reason_tag").MapEnum<OverrideAction>("override_action")).Options);
+    private AppDbContext Db() => new(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(_connectionString, n => n.MapEnum<MemberRole>("member_role").MapEnum<VoteChoice>("vote_choice").MapEnum<ListingState>("listing_state").MapEnum<ReasonTag>("reason_tag").MapEnum<OverrideAction>("override_action").MapEnum<CategoryRating>("category_rating").MapEnum<VoteCategory>("vote_category")).Options);
     public async ValueTask InitializeAsync()
     {
         _connectionString = Environment.GetEnvironmentVariable("HOUSE_CONSENSUS_TEST_DATABASE_URL") ?? "";
@@ -117,29 +117,44 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task E2E_test_auth_accepts_a_cloudflare_invite_before_authenticating()
+    public async Task E2E_test_auth_provisions_an_uninvited_cloudflare_identity()
     {
         var ct = TestContext.Current.CancellationToken;
         await using var db = Db();
-        var owner = new Member { Email = E2EDataSeeder.OwnerEmail, Role = MemberRole.Owner };
-        db.Members.Add(owner);
-        db.Invites.Add(new Invite { Email = "invited@example.test", InvitedById = owner.Id, ExpiresAt = DateTimeOffset.UtcNow.AddHours(1) });
-        await db.SaveChangesAsync(ct);
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["E2E:TestAuth"] = "true"
         }).Build();
-        var context = new DefaultHttpContext();
-        context.Request.Headers[DebugAutoLoginMiddleware.E2EEmailHeader] = "invited@example.test";
+        var context = new DefaultHttpContext { RequestAborted = ct };
+        context.Request.Headers[DebugAutoLoginMiddleware.E2EEmailHeader] = "allowed@example.test";
         context.RequestServices = new ServiceCollection()
-            .AddSingleton<ICloudflareMemberService>(new CloudflareMemberService(db, TimeProvider.System))
+            .AddSingleton<ICloudflareMemberService>(new CloudflareMemberService(db))
             .BuildServiceProvider();
         var middleware = new DebugAutoLoginMiddleware(_ => Task.CompletedTask, config);
 
         await middleware.InvokeAsync(context, db);
 
         Assert.True(context.User.Identity?.IsAuthenticated);
-        Assert.NotNull(await db.Members.SingleOrDefaultAsync(x => x.Email == "invited@example.test" && x.IsActive, ct));
+        var member = await db.Members.SingleAsync(x => x.Email == "allowed@example.test", ct);
+        Assert.True(member.IsActive);
+        Assert.Equal(MemberRole.Member, member.Role);
+    }
+
+    [Fact]
+    public async Task Cloudflare_login_reactivates_a_returning_allowed_identity()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+        var member = new Member { Email = "returning@example.test", Role = MemberRole.Member };
+        member.Deactivate();
+        db.Members.Add(member);
+        await db.SaveChangesAsync(ct);
+
+        var resolved = await new CloudflareMemberService(db).ResolveAsync(member.Email, ct);
+
+        Assert.NotNull(resolved);
+        Assert.True(resolved.IsActive);
+        Assert.True((await db.Members.SingleAsync(x => x.Id == member.Id, ct)).IsActive);
     }
 
     [Fact]
@@ -182,6 +197,8 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
         await using var db = Db();
         await E2EDataSeeder.SeedAsync(db, ct);
         var member = await db.Members.SingleAsync(x => x.Email == E2EDataSeeder.MemberEmail, ct);
+        var transient = new Member { Email = "playwright-worker@example.test" };
+        db.Members.Add(transient);
         var listing = await db.Listings.SingleAsync(x => x.ExternalId == "e2e-active", ct);
         member.SetLanguage("da");
         member.Deactivate();
@@ -194,6 +211,7 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
         Assert.True(member.IsActive);
         Assert.Equal("en", member.Language);
         Assert.Equal("E2E Member", member.DisplayName);
+        Assert.False(await db.Members.AnyAsync(x => x.Id == transient.Id, ct));
         Assert.False(await db.Votes.AnyAsync(x => x.ListingId == listing.Id, ct));
     }
 
@@ -664,66 +682,33 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Cloudflare_owner_invite_creates_pending_invite_without_sending_magic_link()
+    public async Task Cloudflare_member_resolution_preserves_owner_role_and_provisions_unknown_identity()
     {
         var ct = TestContext.Current.CancellationToken;
-        var now = new ManualTimeProvider(DateTimeOffset.UtcNow);
-        var mail = new CaptureEmail();
         await using var db = Db();
-        var owner = new Member { Email = "cf-owner-invite@example.test", Role = MemberRole.Owner };
+        var owner = new Member { Email = "cf-active@example.test", Role = MemberRole.Owner };
         db.Members.Add(owner);
         await db.SaveChangesAsync(ct);
-        var config = Config(("PublicOrigin", "https://example.test"));
-        var links = new MagicLinkService(db, mail, config, now);
-        var service = new InviteService(db, links, new CloudflareAccessOptions(true, "team.cloudflareaccess.com", "audience"), now);
+        var service = new CloudflareMemberService(db);
 
-        var invite = await service.CreateAsync("CF-NEW@example.test", owner.Id, ct);
-
-        Assert.Null(invite.AcceptedAt);
-        Assert.Equal(0, mail.SendCount);
-        Assert.Equal(invite.Id, (await db.Invites.SingleAsync(x => x.Email == "cf-new@example.test", ct)).Id);
+        Assert.Equal(owner.Id, (await service.ResolveAsync("CF-ACTIVE@example.test", ct))?.Id);
+        var added = await service.ResolveAsync("cf-unknown@example.test", ct);
+        Assert.NotNull(added);
+        Assert.Equal(MemberRole.Member, added.Role);
+        Assert.True(added.IsActive);
     }
 
     [Fact]
-    public async Task Cloudflare_member_resolution_preserves_active_member_identity_and_rejects_unknown_or_inactive()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        await using var db = Db();
-        var active = new Member { Email = "cf-active@example.test", Role = MemberRole.Owner };
-        var inactive = new Member { Email = "cf-inactive@example.test" };
-        inactive.Deactivate();
-        db.Members.AddRange(active, inactive);
-        await db.SaveChangesAsync(ct);
-        var service = new CloudflareMemberService(db, TimeProvider.System);
-
-        Assert.Equal(active.Id, (await service.ResolveAsync("CF-ACTIVE@example.test", ct))?.Id);
-        Assert.Null(await service.ResolveAsync(inactive.Email, ct));
-        Assert.Null(await service.ResolveAsync("cf-unknown@example.test", ct));
-    }
-
-    [Fact]
-    public async Task Cloudflare_member_resolution_atomically_accepts_a_pending_unexpired_invite_under_concurrency()
+    public async Task Cloudflare_member_resolution_atomically_provisions_an_allowed_identity_under_concurrency()
     {
         var ct = TestContext.Current.CancellationToken;
         var now = new ManualTimeProvider(DateTimeOffset.UtcNow);
-        Guid inviteId;
-        await using (var setup = Db())
-        {
-            var owner = new Member { Email = "cf-inviter@example.test", Role = MemberRole.Owner };
-            setup.Members.Add(owner);
-            await setup.SaveChangesAsync(ct);
-            var invite = new Invite { Email = "cf-invitee@example.test", InvitedById = owner.Id, ExpiresAt = now.GetUtcNow().AddHours(1) };
-            setup.Invites.Add(invite);
-            await setup.SaveChangesAsync(ct);
-            inviteId = invite.Id;
-        }
-
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var attempts = Enumerable.Range(0, 4).Select(async _ =>
         {
             await start.Task;
             await using var db = Db();
-            return await new CloudflareMemberService(db, now).ResolveAsync("CF-INVITEE@example.test", ct);
+            return await new CloudflareMemberService(db).ResolveAsync("CF-ALLOWED@example.test", ct);
         }).ToArray();
         start.SetResult();
         var members = await Task.WhenAll(attempts);
@@ -731,8 +716,7 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
         Assert.All(members, member => Assert.Equal(MemberRole.Member, member?.Role));
         Assert.Single(members.Select(x => x!.Id).Distinct());
         await using var verify = Db();
-        Assert.NotNull((await verify.Invites.FindAsync([inviteId], ct))!.AcceptedAt);
-        Assert.Equal(1, await verify.Members.CountAsync(x => x.Email == "cf-invitee@example.test", ct));
+        Assert.Equal(1, await verify.Members.CountAsync(x => x.Email == "cf-allowed@example.test", ct));
     }
 
     [Fact]
@@ -798,6 +782,213 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
         Assert.Equal("#6d28d9", (await verify.Members.FindAsync([current.Id], ct))?.AvatarColor);
         Assert.Equal("Other", (await verify.Members.FindAsync([other.Id], ct))?.DisplayName);
         Assert.Equal("", (await verify.Members.FindAsync([other.Id], ct))?.AvatarColor);
+    }
+
+    [Fact]
+    public async Task Manual_listing_and_guided_vote_endpoints_are_durable_deduplicated_and_audited()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var current = new Member { Email = "manual-listing@example.test", DisplayName = "Manual member" };
+        var legacyImported = new Listing { ExternalId = "legacy-imported", Address = "Legacyvej 9", SourceUrl = "https://Example.dk/legacy/?utm_source=old#photo" };
+        await using (var setup = Db()) { setup.Members.Add(current); setup.Listings.Add(legacyImported); await setup.SaveChangesAsync(ct); }
+        await using var factory = new WebApplicationFactory<CloudflareAccessOptions>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Development"); builder.UseSetting("Debug:AutoLogin", "true"); builder.UseSetting("E2E:TestAuth", "true"); builder.UseSetting("E2E:SeedData", "true");
+            builder.UseSetting("ConnectionStrings:Database", _connectionString); builder.UseSetting("Database:AutoMigrate", "false"); builder.UseSetting("INITIAL_OWNER_EMAIL", "");
+        });
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-House-Consensus-CSRF", "1");
+        client.DefaultRequestHeaders.Add(DebugAutoLoginMiddleware.E2EEmailHeader, current.Email);
+
+        var legacyDuplicateResponse = await client.PostAsJsonAsync("/api/listings", new CreateManualListing("https://example.dk/legacy", "Different address"), ct);
+        var legacyDuplicate = await legacyDuplicateResponse.Content.ReadFromJsonAsync<ManualListingResult>(ct);
+        Assert.Equal(HttpStatusCode.OK, legacyDuplicateResponse.StatusCode); Assert.True(legacyDuplicate?.Existing); Assert.Equal(legacyImported.Id, legacyDuplicate?.ListingId);
+
+        var oversizedAddress = await client.PostAsJsonAsync("/api/listings", new CreateManualListing("https://example.dk/oversized-address", new string('a', 501)), ct);
+        var whitespaceExpandedAddress = await client.PostAsJsonAsync("/api/listings", new CreateManualListing("https://example.dk/whitespace-address", "a" + new string(' ', 600) + "b"), ct);
+        var oversizedUrl = await client.PostAsJsonAsync("/api/listings", new CreateManualListing("https://example.dk/" + new string('a', 2049), "Boundaryvej 1"), ct);
+        var oversizedPrice = await client.PostAsJsonAsync("/api/listings", new CreateManualListing("https://example.dk/oversized-price", "Boundaryvej 2", AskingPrice: 1_000_000_000_000m), ct);
+        Assert.Equal(HttpStatusCode.BadRequest, oversizedAddress.StatusCode); Assert.Equal(HttpStatusCode.BadRequest, whitespaceExpandedAddress.StatusCode); Assert.Equal(HttpStatusCode.BadRequest, oversizedUrl.StatusCode); Assert.Equal(HttpStatusCode.BadRequest, oversizedPrice.StatusCode);
+        await using (var boundaryVerify = Db()) Assert.False(await boundaryVerify.Listings.AnyAsync(x => x.IsManuallyAdded, ct));
+
+        var createdResponse = await client.PostAsJsonAsync("/api/listings", new CreateManualListing("https://Example.dk/home/?utm_source=test#photos", "  Testvej  1 ", "Roskilde", 7_500_000m), ct);
+        var created = await createdResponse.Content.ReadFromJsonAsync<ManualListingResult>(ct);
+        var duplicateResponse = await client.PostAsJsonAsync("/api/listings", new CreateManualListing("https://example.dk/home", "testvej 1"), ct);
+        var duplicate = await duplicateResponse.Content.ReadFromJsonAsync<ManualListingResult>(ct);
+        Assert.Equal(HttpStatusCode.Created, createdResponse.StatusCode); Assert.NotNull(created); Assert.False(created.Existing);
+        Assert.Equal(HttpStatusCode.OK, duplicateResponse.StatusCode); Assert.Equal(created.ListingId, duplicate?.ListingId); Assert.True(duplicate?.Existing);
+        var beforeActivity = await client.GetFromJsonAsync<ListingDto>($"/api/listings/{created.ListingId}", ct);
+        Assert.True(beforeActivity?.CanWithdraw); Assert.False(beforeActivity?.CanArchive);
+
+        var ratings = VoteCategories.All.Select(category => new VoteRatingInput(category, category == VoteCategory.Layout ? CategoryRating.Like : CategoryRating.Neutral)).ToArray();
+        var invalidRatings = ratings.ToArray(); invalidRatings[1] = new VoteRatingInput(VoteCategory.Privacy, (CategoryRating)99);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/listings/{created.ListingId}/votes", new CastVote(invalidRatings, "invalid"), ct)).StatusCode);
+        var firstVote = await client.PostAsJsonAsync($"/api/listings/{created.ListingId}/votes", new CastVote(ratings, "first"), ct);
+        var afterActivity = await client.GetFromJsonAsync<ListingDto>($"/api/listings/{created.ListingId}", ct);
+        Assert.False(afterActivity?.CanWithdraw); Assert.False(afterActivity?.CanArchive);
+        ratings[0] = new VoteRatingInput(VoteCategory.Layout, CategoryRating.Dislike);
+        var secondVote = await client.PostAsJsonAsync($"/api/listings/{created.ListingId}/votes", new CastVote(ratings, "second"), ct);
+        Assert.Equal(HttpStatusCode.OK, firstVote.StatusCode); Assert.Equal(HttpStatusCode.OK, secondVote.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.DeleteAsync($"/api/listings/{created.ListingId}", ct)).StatusCode);
+
+        await using var verify = Db();
+        var listing = await verify.Listings.SingleAsync(x => x.Id == created.ListingId, ct);
+        Assert.True(listing.IsManuallyAdded); Assert.True(listing.ManualLifecycleProtected); Assert.Equal("Roskilde", listing.City); Assert.Equal(7_500_000m, listing.Price); Assert.Null(listing.FamilyFitScore);
+        var votes = await verify.Votes.Include(x => x.Ratings).Where(x => x.ListingId == created.ListingId).OrderBy(x => x.Id).ToArrayAsync(ct);
+        Assert.Equal(2, votes.Length); Assert.Equal(VoteChoice.Like, votes[0].Choice); Assert.Equal(VoteChoice.Dislike, votes[1].Choice); Assert.All(votes, x => Assert.Equal(10, x.Ratings.Count));
+    }
+
+    [Fact]
+    public async Task Manual_create_rejects_split_url_and_address_identity_without_mutation()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var member = new Member { Email = "split-identity@example.test" };
+        var urlMatch = new Listing { ExternalId = "split-url", Address = "Urlvej 1", SourceUrl = "https://example.dk/split-url", CanonicalUrl = "https://example.dk/split-url", NormalizedAddress = "urlvej 1" };
+        var addressMatch = new Listing { ExternalId = "split-address", Address = "Adressevej 2", SourceUrl = "https://example.dk/split-address", CanonicalUrl = "https://example.dk/split-address", NormalizedAddress = "adressevej 2" };
+        await using (var setup = Db()) { setup.AddRange(member, urlMatch, addressMatch); await setup.SaveChangesAsync(ct); }
+        await using var factory = new WebApplicationFactory<CloudflareAccessOptions>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Development"); builder.UseSetting("Debug:AutoLogin", "true"); builder.UseSetting("E2E:TestAuth", "true"); builder.UseSetting("E2E:SeedData", "true");
+            builder.UseSetting("ConnectionStrings:Database", _connectionString); builder.UseSetting("Database:AutoMigrate", "false"); builder.UseSetting("INITIAL_OWNER_EMAIL", "");
+        });
+        using var client = factory.CreateClient(); client.DefaultRequestHeaders.Add("X-House-Consensus-CSRF", "1"); client.DefaultRequestHeaders.Add(DebugAutoLoginMiddleware.E2EEmailHeader, member.Email);
+        var response = await client.PostAsJsonAsync("/api/listings", new CreateManualListing("https://example.dk/split-url", "Adressevej 2"), ct);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await using var verify = Db(); Assert.Equal(2, await verify.Listings.CountAsync(x => x.ExternalId.StartsWith("split-"), ct));
+    }
+
+    [Fact]
+    public async Task Manual_create_serializes_against_concurrent_import()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var member = new Member { Email = "manual-import-race@example.test" };
+        await using (var setup = Db()) { setup.Members.Add(member); await setup.SaveChangesAsync(ct); }
+        await using var factory = new WebApplicationFactory<CloudflareAccessOptions>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Development"); builder.UseSetting("Debug:AutoLogin", "true"); builder.UseSetting("E2E:TestAuth", "true"); builder.UseSetting("E2E:SeedData", "true");
+            builder.UseSetting("ConnectionStrings:Database", _connectionString); builder.UseSetting("Database:AutoMigrate", "false"); builder.UseSetting("INITIAL_OWNER_EMAIL", "");
+        });
+        using var client = factory.CreateClient(); client.DefaultRequestHeaders.Add("X-House-Consensus-CSRF", "1"); client.DefaultRequestHeaders.Add(DebugAutoLoginMiddleware.E2EEmailHeader, member.Email);
+        var imported = new Listing { ExternalId = "concurrent-import", Address = "Importvej 1", SourceUrl = "https://example.dk/import-race", CanonicalUrl = "https://example.dk/import-race", NormalizedAddress = "importvej 1" };
+        await using var import = Db(); await using var tx = await import.Database.BeginTransactionAsync(ct); import.Listings.Add(imported); await import.SaveChangesAsync(ct);
+        var creating = client.PostAsJsonAsync("/api/listings", new CreateManualListing("https://example.dk/import-race", "Different address"), ct);
+        await Task.Delay(150, ct); Assert.False(creating.IsCompleted);
+        await tx.CommitAsync(ct);
+        var response = await creating; var result = await response.Content.ReadFromJsonAsync<ManualListingResult>(ct);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode); Assert.True(result?.Existing); Assert.Equal(imported.Id, result?.ListingId);
+    }
+
+    [Fact]
+    public async Task Manual_withdraw_serializes_against_new_household_activity()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var member = new Member { Email = "withdraw-race@example.test" };
+        var listing = Listing.CreateManual("https://example.dk/race", "Racevej 1", member.Id, DateTimeOffset.UtcNow);
+        await using (var setup = Db()) { setup.Members.Add(member); setup.Listings.Add(listing); await setup.SaveChangesAsync(ct); }
+        await using var factory = new WebApplicationFactory<CloudflareAccessOptions>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Development"); builder.UseSetting("Debug:AutoLogin", "true"); builder.UseSetting("E2E:TestAuth", "true"); builder.UseSetting("E2E:SeedData", "true");
+            builder.UseSetting("ConnectionStrings:Database", _connectionString); builder.UseSetting("Database:AutoMigrate", "false"); builder.UseSetting("INITIAL_OWNER_EMAIL", "");
+        });
+        using var client = factory.CreateClient(); client.DefaultRequestHeaders.Add("X-House-Consensus-CSRF", "1"); client.DefaultRequestHeaders.Add(DebugAutoLoginMiddleware.E2EEmailHeader, member.Email);
+        await using var activity = Db(); await using var tx = await activity.Database.BeginTransactionAsync(ct);
+        activity.Comments.Add(new Comment(listing.Id, member.Id, "Concurrent activity", DateTimeOffset.UtcNow)); await activity.SaveChangesAsync(ct);
+        var withdrawing = client.DeleteAsync($"/api/listings/{listing.Id}", ct);
+        await Task.Delay(150, ct); Assert.False(withdrawing.IsCompleted);
+        await tx.CommitAsync(ct);
+        Assert.Equal(HttpStatusCode.Forbidden, (await withdrawing).StatusCode);
+    }
+
+    [Fact]
+    public async Task Manual_withdraw_waits_for_concurrent_owner_override_without_deadlock()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var submitter = new Member { Email = "withdraw-override-member@example.test" };
+        var owner = new Member { Email = "withdraw-override-owner@example.test", Role = MemberRole.Owner };
+        var listing = Listing.CreateManual("https://example.dk/override-race", "Overridevej 1", submitter.Id, DateTimeOffset.UtcNow);
+        await using (var setup = Db()) { setup.Members.AddRange(submitter, owner); setup.Listings.Add(listing); await setup.SaveChangesAsync(ct); }
+        await using var factory = new WebApplicationFactory<CloudflareAccessOptions>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Development"); builder.UseSetting("Debug:AutoLogin", "true"); builder.UseSetting("E2E:TestAuth", "true"); builder.UseSetting("E2E:SeedData", "true");
+            builder.UseSetting("ConnectionStrings:Database", _connectionString); builder.UseSetting("Database:AutoMigrate", "false"); builder.UseSetting("INITIAL_OWNER_EMAIL", "");
+        });
+        using var client = factory.CreateClient(); client.DefaultRequestHeaders.Add("X-House-Consensus-CSRF", "1"); client.DefaultRequestHeaders.Add(DebugAutoLoginMiddleware.E2EEmailHeader, submitter.Email);
+        await using var activity = Db(); await using var tx = await activity.Database.BeginTransactionAsync(ct);
+        var changing = await activity.Listings.Include(x => x.Overrides).SingleAsync(x => x.Id == listing.Id, ct);
+        changing.ApplyOverride(OverrideAction.Restore, owner.Id, "Concurrent owner decision", DateTimeOffset.UtcNow); await activity.SaveChangesAsync(ct);
+        var withdrawing = client.DeleteAsync($"/api/listings/{listing.Id}", ct);
+        await Task.Delay(150, ct); Assert.False(withdrawing.IsCompleted);
+        await tx.CommitAsync(ct);
+        Assert.Equal(HttpStatusCode.Forbidden, (await withdrawing).StatusCode);
+    }
+
+    [Fact]
+    public async Task Existing_activity_mutations_share_archive_gate_and_recheck_archived_state()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var member = new Member { Email = "mutation-member@example.dk" };
+        var owner = new Member { Email = "mutation-owner@example.dk", Role = MemberRole.Owner };
+        var listing = Listing.CreateManual("https://example.dk/mutation-race", "Mutationvej 1", member.Id, DateTimeOffset.UtcNow);
+        var vote = new Vote(listing.Id, member.Id, VoteChoice.Like, [], "before", DateTimeOffset.UtcNow);
+        var comment = new Comment(listing.Id, member.Id, "before", DateTimeOffset.UtcNow);
+        await using (var arrange = Db()) { arrange.Members.AddRange(member, owner); arrange.Listings.Add(listing); arrange.Votes.Add(vote); arrange.Comments.Add(comment); await arrange.SaveChangesAsync(ct); }
+
+        await using var factory = new WebApplicationFactory<CloudflareAccessOptions>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Development"); builder.UseSetting("Debug:AutoLogin", "true"); builder.UseSetting("E2E:TestAuth", "true"); builder.UseSetting("E2E:SeedData", "true");
+            builder.UseSetting("ConnectionStrings:Database", _connectionString); builder.UseSetting("Database:AutoMigrate", "false"); builder.UseSetting("INITIAL_OWNER_EMAIL", "");
+        });
+        using var memberClient = factory.CreateClient(); memberClient.DefaultRequestHeaders.Add("X-House-Consensus-CSRF", "1"); memberClient.DefaultRequestHeaders.Add(DebugAutoLoginMiddleware.E2EEmailHeader, member.Email);
+        using var ownerClient = factory.CreateClient(); ownerClient.DefaultRequestHeaders.Add("X-House-Consensus-CSRF", "1"); ownerClient.DefaultRequestHeaders.Add(DebugAutoLoginMiddleware.E2EEmailHeader, owner.Email);
+
+        await using var gate = Db(); await using var gateTransaction = await gate.Database.BeginTransactionAsync(ct);
+        await gate.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({listing.Id.ToString()}, 0))", ct);
+        var editing = memberClient.PutAsJsonAsync($"/api/listings/{listing.Id}/votes/note", new EditVoteNote("mutation first"), ct);
+        await Task.Delay(150, ct); Assert.False(editing.IsCompleted);
+        var archiving = ownerClient.DeleteAsync($"/api/listings/{listing.Id}", ct);
+        await Task.Delay(150, ct); Assert.False(archiving.IsCompleted);
+        await gateTransaction.CommitAsync(ct);
+
+        Assert.Equal(HttpStatusCode.OK, (await editing).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await archiving).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await memberClient.PutAsJsonAsync($"/api/listings/{listing.Id}/votes/note", new EditVoteNote("too late"), ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await memberClient.PutAsJsonAsync($"/api/comments/{comment.Id}", new EditComment("too late"), ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await memberClient.DeleteAsync($"/api/comments/{comment.Id}", ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Manual_archive_waiting_for_listing_gate_does_not_block_child_fk_insert()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var submitter = new Member { Email = "gate-submitter@example.dk", DisplayName = "Gate Submitter" };
+        var owner = new Member { Email = "gate-owner@example.dk", DisplayName = "Gate Owner", Role = MemberRole.Owner };
+        var listing = Listing.CreateManual("https://example.dk/gate-race", "Gatevej 1", submitter.Id, DateTimeOffset.UtcNow);
+        await using (var arrange = Db()) { arrange.Members.AddRange(submitter, owner); arrange.Listings.Add(listing); await arrange.SaveChangesAsync(ct); }
+
+        await using var factory = new WebApplicationFactory<CloudflareAccessOptions>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Development"); builder.UseSetting("Debug:AutoLogin", "true"); builder.UseSetting("E2E:TestAuth", "true"); builder.UseSetting("E2E:SeedData", "true");
+            builder.UseSetting("ConnectionStrings:Database", _connectionString); builder.UseSetting("Database:AutoMigrate", "false"); builder.UseSetting("INITIAL_OWNER_EMAIL", "");
+        });
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-House-Consensus-CSRF", "1"); client.DefaultRequestHeaders.Add(DebugAutoLoginMiddleware.E2EEmailHeader, submitter.Email);
+
+        await using var gate = Db();
+        await using var gateTransaction = await gate.Database.BeginTransactionAsync(ct);
+        await gate.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({listing.Id.ToString()}, 0))", ct);
+        var deleteTask = client.DeleteAsync($"/api/listings/{listing.Id}", ct);
+        await Task.Delay(200, ct); Assert.False(deleteTask.IsCompleted);
+
+        await using (var activity = Db())
+        {
+            activity.Comments.Add(new Comment(listing.Id, owner.Id, "Concurrent activity", DateTimeOffset.UtcNow));
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(2));
+            await activity.SaveChangesAsync(timeout.Token);
+        }
+
+        await gateTransaction.CommitAsync(ct);
+        var response = await deleteTask.WaitAsync(TimeSpan.FromSeconds(5), ct);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Fact]

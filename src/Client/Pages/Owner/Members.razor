@@ -1,20 +1,16 @@
 @page "/owner/members"
 @inject ApiClient Api
-@inject AuthState Auth
 @inject I18n L
 <PageTitle>@L["Members"] · @L["AppName"]</PageTitle>
 <OwnerOnly>
 <header class="page-head"><div><p class="eyebrow">@L["Owner"]</p><h1>@L["Members"]</h1><p>@L["MembersIntro"]</p></div></header>
-<section class="invite-card"><form @onsubmit="Invite" @onsubmit:preventDefault><label>@L["Email"]<input data-testid="member-invite-email" type="email" required @bind="email" /></label><button class="btn primary" disabled="@busy">+ @L["Invite"]</button></form>@if (invited) { <div class="notice success" data-testid="member-notice">@L[Auth.CloudflareAccess ? "InviteCreated" : "LinkSent"]</div> }</section>
 @if (items is null) { <Loading /> } else
 {
-    <section class="member-list">@foreach (var member in items) { <article data-testid="member-row"><span class="avatar large" style="--avatar-color: @AvatarColor.Resolve(member.AvatarColor, member.Id); background-color: var(--avatar-color)">@Initials(member)</span><div><h2>@(string.IsNullOrWhiteSpace(member.DisplayName) ? member.Email.Split('@')[0] : member.DisplayName)</h2><p>@member.Email</p><span data-testid="member-status" class="badge @(member.IsActive ? "active" : "neutral")">@(member.IsActive ? L["Active"] : L["Inactive"])</span> <span data-testid="member-role" class="badge neutral">@L.Enum(member.Role)</span> <small>@member.Language.ToUpperInvariant()</small></div>@if (member.Id != Auth.User?.Id) { <button class="btn ghost" @onclick="() => Change(member)">@(member.IsActive ? L["Deactivate"] : L["Reactivate"])</button> }</article> }</section>
+    <section class="member-list">@foreach (var member in items) { <article data-testid="member-row"><span class="avatar large" style="--avatar-color: @AvatarColor.Resolve(member.AvatarColor, member.Id); background-color: var(--avatar-color)">@Initials(member)</span><div><h2>@(string.IsNullOrWhiteSpace(member.DisplayName) ? member.Email.Split('@')[0] : member.DisplayName)</h2><p>@member.Email</p><span data-testid="member-status" class="badge @(member.IsActive ? "active" : "neutral")">@L[member.IsActive ? "Active" : "Inactive"]</span> <span data-testid="member-role" class="badge neutral">@L.Enum(member.Role)</span> <small>@member.Language.ToUpperInvariant()</small></div></article> }</section>
 }
 </OwnerOnly>
 @code {
-    private List<MemberDto>? items; private string email = ""; private bool busy, invited;
-    protected override async Task OnInitializedAsync() => await Load(); private async Task Load() => items = await Api.GetAsync<List<MemberDto>>("api/members") ?? [];
-    private async Task Invite() { busy = true; invited = false; try { using var r = await Api.Invite(email); await ApiClient.EnsureSuccess(r); invited = true; email = ""; await Load(); } finally { busy = false; } }
-    private async Task Change(MemberDto member) { using var r = await Api.ChangeMember(member.Id, !member.IsActive); await ApiClient.EnsureSuccess(r); await Load(); }
+    private List<MemberDto>? items;
+    protected override async Task OnInitializedAsync() => items = await Api.GetAsync<List<MemberDto>>("api/members") ?? [];
     private static string Initials(MemberDto m) => AvatarInitials.From(m.DisplayName, m.Email);
 }

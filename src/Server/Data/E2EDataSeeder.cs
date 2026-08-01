@@ -137,7 +137,9 @@ public static class E2EDataSeeder
         var listingId = await db.Listings.Where(x => x.ExternalId == "e2e-active").Select(x => x.Id).SingleAsync(ct);
         var voteIds = db.Votes.Where(x => x.ListingId == listingId).Select(x => x.Id);
         await db.VoteNoteRevisions.Where(x => voteIds.Contains(x.VoteId)).ExecuteDeleteAsync(ct);
+        await db.VoteRatings.Where(x => voteIds.Contains(x.VoteId)).ExecuteDeleteAsync(ct);
         await db.Votes.Where(x => x.ListingId == listingId).ExecuteDeleteAsync(ct);
+        await db.Members.Where(x => x.Email.EndsWith("@example.test") && x.Email != OwnerEmail && x.Email != MemberEmail).ExecuteDeleteAsync(ct);
         await db.SaveChangesAsync(ct);
     }
 }

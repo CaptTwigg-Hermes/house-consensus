@@ -12,6 +12,7 @@ test('owner restores an unresolved AI rejection to Browse', async ({ page }) => 
   await page.goto('/owner/review');
   const rejected = page.locator(`[data-testid="listing-card"][data-listing-id="${listingId}"]`);
   await expect(rejected).toBeVisible();
+  await expect(rejected.locator('.score-chip')).not.toContainText('??');
   await expect(rejected.getByTestId('ai-evidence')).toContainText('Single-family layout');
   await expect(rejected.getByTestId('ai-evidence').locator('pre')).toHaveCount(0);
   await expect(rejected.locator('.property-facts')).toContainText('164');

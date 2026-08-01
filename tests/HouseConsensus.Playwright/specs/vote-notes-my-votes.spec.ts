@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/test.js';
+import { castGuidedVote } from '../helpers/household.js';
 
 test('vote notes appear on compact My Votes cards and remain editable', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -8,11 +9,7 @@ test('vote notes appear on compact My Votes cards and remain editable', async ({
   const href = await card.locator('.card-main').getAttribute('href');
   expect(href).toBeTruthy();
   await page.goto(href!);
-  await page.getByTestId('vote-reject').click();
-  await expect(page.getByTestId('vote-note-sheet')).toBeVisible();
-  await page.getByTestId('vote-note').fill('Kitchen needs too much work');
-  await page.getByRole('button', { name: /save vote|gem stemme/i }).click();
-  await expect(page.getByTestId('vote-note-sheet')).toBeHidden();
+  await castGuidedVote(page, 'Dislike', 'Kitchen needs too much work');
   await page.getByTestId('detail-edit-note-open').click();
   await page.getByTestId('detail-edit-note').fill('Kitchen and bath need work');
   await page.getByRole('button', { name: /^save$|^gem$/i }).click();
@@ -33,8 +30,17 @@ test('vote notes appear on compact My Votes cards and remain editable', async ({
   await voted.getByTestId('my-vote-save-note').click();
   await expect(voted).toContainText('Kitchen and bathroom need too much work');
 
-  await voted.getByTestId('vote-interested').click();
-  await page.getByTestId('vote-skip-comment').click();
+  const changeVote = voted.getByTestId('vote-interested');
+  await expect(changeVote).toHaveText(/change vote|ændr stemme/i);
+  await changeVote.click();
+  const changeSheet = page.getByTestId('guided-vote-sheet');
+  await expect(changeSheet.locator('.category-rating').first().locator('label.selected')).toContainText(/dislike|kan ikke lide/i);
+  await changeSheet.getByRole('button', { name: /review vote|gennemgå stemme/i }).click();
+  await expect(changeSheet.getByTestId('vote-note')).toHaveValue('Kitchen and bathroom need too much work');
+  await changeSheet.getByRole('button', { name: /back|tilbage/i }).click();
+  await changeSheet.getByRole('button', { name: /cancel|annuller/i }).click();
+
+  await castGuidedVote(page, 'Like', undefined, voted);
   await expect(voted.locator('.choice.like')).toBeVisible();
 
   await page.getByTestId('my-votes-like-filter').click();

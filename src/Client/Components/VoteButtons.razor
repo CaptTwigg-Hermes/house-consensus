@@ -1,45 +1,80 @@
 @inject I18n L
 @inject ApiClient Api
+@inject IJSRuntime JS
 
-<div class="vote-actions">
-    <button data-testid="vote-interested" class="btn like" disabled="@busy" @onclick="() => Choose(VoteChoice.Like)">♥ @L["Like"]</button>
-    <button data-testid="vote-reject" class="btn dislike" disabled="@busy" @onclick="() => Choose(VoteChoice.Dislike)">× @L["Dislike"]</button>
-</div>
-@if (choosing)
+<button data-testid="vote-interested" class="btn primary" disabled="@busy" @onclick="Open">@(Latest is null ? L["StartVoting"] : L["ChangeVote"])</button>
+@if (open)
 {
     <div class="sheet-backdrop open" @onclick="Cancel">
-        <section class="vote-note-sheet" data-testid="vote-note-sheet" role="dialog" aria-modal="true" aria-labelledby="vote-note-title" @onclick:stopPropagation>
+        <section id="guided-vote-dialog" class="guided-vote-sheet" data-testid="guided-vote-sheet" role="dialog" aria-modal="true" aria-labelledby="guided-vote-title" @onclick:stopPropagation @onkeydown="KeyDown">
             <div class="drawer-handle" aria-hidden="true"></div>
-            <h2 id="vote-note-title">@(choice == VoteChoice.Like ? L["Like"] : L["Dislike"])</h2>
-            <p class="muted">@L["ReasonOptional"]</p>
-            <div class="tag-grid">@foreach (var tag in Enum.GetValues<ReasonTag>()) { <button type="button" class="tag @(tags.Contains(tag) ? "selected" : "")" @onclick="() => Toggle(tag)">@L.Enum(tag)</button> }</div>
-            <label class="vote-note-label" for="vote-note">@L["VoteNote"]</label>
-            <textarea id="vote-note" data-testid="vote-note" maxlength="2000" rows="4" placeholder="@L["VoteNotePlaceholder"]" @bind="note"></textarea>
-            <div class="sheet-actions">
-                <button type="button" class="btn @(choice == VoteChoice.Like ? "like" : "dislike")" disabled="@busy" @onclick="() => Save(note)">@L["SaveVote"]</button>
-                <button type="button" data-testid="vote-skip-comment" class="btn ghost" disabled="@busy" @onclick="() => Save(null)">@L["SkipComment"]</button>
-                <button type="button" class="text-btn" disabled="@busy" @onclick="Cancel">@L["Cancel"]</button>
-            </div>
+            <h2 id="guided-vote-title">@L["GuidedVoting"]</h2>
+            @if (!showSummary)
+            {
+                <p class="muted">@L["RateCategories"]</p>
+                @foreach (var category in VoteCategories.All)
+                {
+                    <fieldset class="category-rating"><legend>@L.Enum(category)</legend>
+                        @foreach (var option in Enum.GetValues<CategoryRating>().OrderBy(x => (int)x))
+                        {
+                            var inputId = $"vote-{category}-{option}";
+                            <label for="@inputId" class="@(ratings[category] == option ? "selected" : "")"><input id="@inputId" type="radio" name="@($"vote-{category}")" value="@option" checked="@(ratings[category] == option)" @onchange="() => Rate(category, option)" /><span>@L.Enum(option)</span></label>
+                        }
+                    </fieldset>
+                }
+            }
+            @if (showSummary)
+            {
+                <section class="vote-summary" aria-live="polite"><h3>@L["VoteSummary"]</h3><p>@L["Tally"]: @Likes @L["Like"] · @Dislikes @L["Dislike"] · @Neutrals @L["Neutral"]</p><p><strong>@L["DerivedResult"]: @L.Enum(Derived)</strong>@if (Total == 0) { <span> — @L["TieDislike"]</span> }</p></section>
+                <label for="vote-note">@L["VoteNote"]</label><textarea id="vote-note" data-testid="vote-note" maxlength="2000" rows="4" @bind="note"></textarea>
+                <div class="sheet-actions"><button type="button" class="btn primary" disabled="@busy" @onclick="Save">@L["Confirm"]</button><button type="button" class="btn ghost" @onclick="() => showSummary = false">@L["Back"]</button></div>
+            }
+            else
+            {
+                @if (validation) { <p class="notice error" role="alert">@L["RateOneCategory"]</p> }
+                <div class="sheet-actions"><button type="button" class="btn primary" @onclick="Review">@L["ReviewVote"]</button><button type="button" class="btn ghost" @onclick="Cancel">@L["Cancel"]</button></div>
+            }
         </section>
     </div>
 }
 @code {
     [Parameter] public Guid ListingId { get; set; }
+    [Parameter] public VoteDto? Latest { get; set; }
     [Parameter] public EventCallback OnVoted { get; set; }
-    private bool choosing, busy;
-    private VoteChoice choice;
-    private string note = "";
-    private readonly HashSet<ReasonTag> tags = [];
-    private void Choose(VoteChoice value) { choice = value; choosing = true; tags.Clear(); note = ""; }
-    private void Toggle(ReasonTag tag) { if (!tags.Add(tag)) tags.Remove(tag); }
-    private void Cancel() { if (!busy) choosing = false; }
-    private async Task Save(string? value)
+    private bool open, busy, validation, showSummary, focusDialogOnRender; private string? note;
+    private readonly Dictionary<VoteCategory, CategoryRating> ratings = VoteCategories.All.ToDictionary(x => x, _ => CategoryRating.Neutral);
+    private int Total => ratings.Values.Sum(x => (int)x); private VoteChoice Derived => Total > 0 ? VoteChoice.Like : VoteChoice.Dislike;
+    private int Likes => ratings.Values.Count(x => x == CategoryRating.Like); private int Dislikes => ratings.Values.Count(x => x == CategoryRating.Dislike); private int Neutrals => ratings.Values.Count(x => x == CategoryRating.Neutral);
+    private void Open() { foreach (var category in VoteCategories.All) ratings[category] = Latest?.Ratings?.FirstOrDefault(x => x.Category == category)?.Rating ?? CategoryRating.Neutral; note = Latest?.Note; validation = showSummary = false; open = true; focusDialogOnRender = true; }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!focusDialogOnRender || !open) return;
+        focusDialogOnRender = false;
+        await JS.InvokeVoidAsync("hc.dialogOpen", "guided-vote-dialog");
+    }
+    private void Rate(VoteCategory category, CategoryRating value) { ratings[category] = value; validation = false; }
+    private void Review() { validation = ratings.Values.All(x => x == CategoryRating.Neutral); showSummary = !validation; }
+    private async Task KeyDown(KeyboardEventArgs e) { if (e.Key == "Escape") await Cancel(); }
+    private async Task Cancel()
+    {
+        if (busy) return;
+        await CloseSheet();
+    }
+    private async Task CloseSheet()
+    {
+        open = false;
+        showSummary = false;
+        focusDialogOnRender = false;
+        await JS.InvokeVoidAsync("hc.dialogClose");
+        await InvokeAsync(StateHasChanged);
+    }
+    private async Task Save()
     {
         busy = true;
         try
         {
-            await Api.Vote(ListingId, choice, tags.ToArray(), value);
-            choosing = false;
+            await Api.Vote(ListingId, ratings.Select(x => new VoteRatingInput(x.Key, x.Value)).ToArray(), note);
+            await CloseSheet();
             await OnVoted.InvokeAsync();
         }
         finally { busy = false; }

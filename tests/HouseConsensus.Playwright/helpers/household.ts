@@ -1,4 +1,4 @@
-import { expect, type Browser, type BrowserContext, type Page, type TestInfo } from '@playwright/test';
+import { expect, type Browser, type BrowserContext, type Locator, type Page, type TestInfo } from '@playwright/test';
 
 export interface Identity { email: string; name: string }
 export interface HouseholdSession {
@@ -18,13 +18,6 @@ export function identity(testInfo: TestInfo, role: string): Identity {
   const stem = `${testInfo.project.name}-${testInfo.workerIndex}-${testInfo.repeatEachIndex}-${Date.now()}-${role}`
     .toLowerCase().replace(/[^a-z0-9-]/g, '-');
   return { email: `${stem}@example.test`, name: role === 'owner' ? 'E2E Owner' : 'E2E Member' };
-}
-
-export async function inviteMember(ownerPage: Page, member: Identity): Promise<void> {
-  await ownerPage.goto('/owner/members');
-  await ownerPage.getByTestId('member-invite-email').fill(member.email);
-  await ownerPage.getByRole('button', { name: /invite member/i }).click();
-  await expect(ownerPage.getByTestId('member-notice')).toBeVisible();
 }
 
 export async function createSeededE2EHousehold(browser: Browser, baseURL: string): Promise<HouseholdSession> {
@@ -56,6 +49,18 @@ export async function createSeededE2EHousehold(browser: Browser, baseURL: string
     ownerPage,
     memberPage
   };
+}
+
+export async function castGuidedVote(page: Page, choice: 'Like' | 'Dislike', note?: string, root?: Locator): Promise<void> {
+  await (root ?? page).getByTestId('vote-interested').click();
+  const sheet = page.getByTestId('guided-vote-sheet');
+  await expect(sheet).toBeVisible();
+  const localizedChoice = choice === 'Like' ? /^(Like|Kan lide)$/ : /^(Dislike|Kan ikke lide)$/;
+  await sheet.locator('.category-rating').first().locator('label').filter({ hasText: localizedChoice }).click();
+  await sheet.getByRole('button', { name: /review vote|gennemgå stemme/i }).click();
+  if (note) await sheet.getByTestId('vote-note').fill(note);
+  await sheet.getByRole('button', { name: /confirm|bekræft/i }).click();
+  await expect(sheet).toHaveCount(0);
 }
 
 export async function closeHousehold(household: HouseholdSession): Promise<void> {

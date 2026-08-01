@@ -2,8 +2,11 @@ namespace HouseConsensus.Shared;
 
 public sealed record RequestMagicLink(string Email);
 public sealed record ConsumeMagicLink(string Token);
-public sealed record CreateInvite(string Email);
-public sealed record CastVote(VoteChoice Choice, ReasonTag[]? Tags, string? Note = null);
+public sealed record CastVote(IReadOnlyCollection<VoteRatingInput>? Ratings, string? Note = null, VoteChoice? Choice = null);
+public sealed record VoteRatingInput(VoteCategory Category, CategoryRating Rating);
+public sealed record VoteRatingDto(VoteCategory Category, CategoryRating Rating);
+public sealed record CreateManualListing(string Url, string Address, string? City = null, decimal? AskingPrice = null);
+public sealed record ManualListingResult(Guid ListingId, bool Existing);
 public sealed record EditVoteNote(string? Note);
 public sealed record AddComment(string Body);
 public sealed record EditComment(string Body);
@@ -14,10 +17,10 @@ public sealed record UpdateLanguage(string Language);
 public sealed record UpdateProfile(string DisplayName, string AvatarColor);
 public sealed record AuthModeDto(bool CloudflareAccess);
 public sealed record MemberDto(Guid Id, string Email, string DisplayName, string Language, MemberRole Role, bool IsActive, string AvatarColor = "");
-public sealed record VoteDto(long Id, Guid ListingId, Guid MemberId, VoteChoice Choice, ReasonTag[] Tags, DateTimeOffset CreatedAt, string? Note = null, string MemberInitials = "", string MemberColor = "");
+public sealed record VoteDto(long Id, Guid ListingId, Guid MemberId, VoteChoice Choice, ReasonTag[] Tags, DateTimeOffset CreatedAt, string? Note = null, string MemberInitials = "", string MemberColor = "", IReadOnlyCollection<VoteRatingDto>? Ratings = null, int Total = 0);
 public sealed record ListingDto(
     Guid Id, string ExternalId, string Address, string? City, decimal? Price,
-    double FamilyFitScore, ListingState State, bool AiAssessed, double? AiConfidence,
+    double? FamilyFitScore, ListingState State, bool AiAssessed, double? AiConfidence,
     string? AiEvidence, string? ModelVersion, string? RuleVersion, string? SourceUrl,
     bool Consensus, IReadOnlyCollection<VoteDto> Votes,
     string? PreviewImageUrl = null, int? LivingArea = null, int? LotArea = null,
@@ -36,7 +39,8 @@ public sealed record ListingDto(
     string? Condition = null, string? GardenOrientation = null, string? MultigenFit = null,
     DateTimeOffset? ImportedAt = null, string? PostalCode = null, bool? Preferred = null,
     bool? IsNew = null, string? FamilyUnits = null, string? CommuteJson = null, DateTimeOffset? FirstSeenAt = null,
-    double? RoadNoiseDb = null, double? RailNoiseDb = null, double? AirNoiseDb = null);
+    double? RoadNoiseDb = null, double? RailNoiseDb = null, double? AirNoiseDb = null,
+    bool IsManuallyAdded = false, Guid? ManuallyAddedById = null, string? ManuallyAddedByName = null, DateTimeOffset? ManuallyAddedAt = null, bool CanWithdraw = false, bool CanArchive = false);
 
 
 public sealed record AiRuleImpactDto(int Eligible, int Evaluated, int WouldReject, int WouldRestore, int Changed, Guid[] ListingIds);

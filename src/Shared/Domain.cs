@@ -5,6 +5,12 @@ public enum MemberRole { Member, Owner }
 public enum VoteChoice { Like, Dislike, NotVoted }
 public enum ListingState { Active, FilterRejected, AiRejected, ManuallyRejected, Restored, Archived }
 public enum ReasonTag { Layout, Privacy, Garden, Condition, Location, Noise, Price, Other, PrivacyFromNeighbors }
+public enum VoteCategory { Layout, Privacy, Garden, Condition, Location, Noise, Price, MultiGenerationFit, Commute, Buildability }
+public enum CategoryRating { Dislike = -1, Neutral = 0, Like = 1 }
+public static class VoteCategories
+{
+    public static readonly VoteCategory[] All = [VoteCategory.Layout, VoteCategory.Privacy, VoteCategory.Garden, VoteCategory.Condition, VoteCategory.Location, VoteCategory.Noise, VoteCategory.Price, VoteCategory.MultiGenerationFit, VoteCategory.Commute, VoteCategory.Buildability];
+}
 public enum OverrideAction { Restore, Reject }
 
 public sealed class Member
@@ -41,7 +47,7 @@ public sealed class Listing
     public required string Address { get; set; }
     public string? City { get; set; }
     public decimal? Price { get; set; }
-    public double FamilyFitScore { get; set; }
+    public double? FamilyFitScore { get; set; }
     public ListingState State { get; private set; } = ListingState.Active;
     public bool AiAssessed { get; set; }
     public double? AiConfidence { get; set; }
@@ -50,6 +56,12 @@ public sealed class Listing
     public string? RuleVersion { get; set; }
     public string? LearningRuleVersion { get; private set; }
     public string? SourceUrl { get; set; }
+    public string? CanonicalUrl { get; set; }
+    public string? NormalizedAddress { get; set; }
+    public bool IsManuallyAdded { get; private set; }
+    public Guid? ManuallyAddedById { get; private set; }
+    public DateTimeOffset? ManuallyAddedAt { get; private set; }
+    public bool ManualLifecycleProtected { get; private set; }
     public string? PreviewImageUrl { get; set; }
     public int? LivingArea { get; set; }
     public int? LotArea { get; set; }
@@ -97,6 +109,12 @@ public sealed class Listing
     public DateTimeOffset? ArchivedAt { get; private set; }
     public List<ListingOverride> Overrides { get; } = [];
     public bool IsQueueEligible => State is ListingState.Active or ListingState.Restored;
+    public static Listing CreateManual(string sourceUrl, string address, Guid memberId, DateTimeOffset at)
+    {
+        var canonical = ManualListing.NormalizeUrl(sourceUrl);
+        var normalized = ManualListing.NormalizeAddress(address);
+        return new Listing { ExternalId = $"manual:{Guid.NewGuid():N}", Address = address.Trim(), SourceUrl = canonical, CanonicalUrl = canonical, NormalizedAddress = normalized, IsManuallyAdded = true, ManuallyAddedById = memberId, ManuallyAddedAt = at, ManualLifecycleProtected = true, FamilyFitScore = null, ImportedAt = at };
+    }
     public void ApplyOverride(OverrideAction action, Guid ownerId, string? reason, DateTimeOffset at)
     {
         Overrides.Add(new ListingOverride { ListingId = Id, OwnerId = ownerId, Action = action, Reason = reason, CreatedAt = at });
@@ -106,13 +124,14 @@ public sealed class Listing
     }
     public void ApplyImportDecision(bool aiRejected)
     {
-        if (Overrides.Count != 0) return;
+        if (Overrides.Count != 0 || ManualLifecycleProtected) return;
         State = aiRejected ? ListingState.AiRejected : ListingState.Active;
     }
     public void ApplyLearningRejection(string version) => ApplyLearningDecision(version, true);
     public void ApplyLearningDecision(string version, bool rejected)
     {
         if (string.IsNullOrWhiteSpace(version)) throw new DomainException("Rule version is required.");
+        if (ManualLifecycleProtected) return;
         State = rejected ? ListingState.AiRejected : ListingState.Active;
         LearningRuleVersion = version;
         ArchivedAt = null;
@@ -125,7 +144,7 @@ public sealed class Listing
         LearningRuleVersion = previousVersion;
     }
     public void ClearLearningRejection() { if (LearningRuleVersion is not null && Overrides.Count == 0) State = ListingState.Active; LearningRuleVersion = null; }
-    public void Archive(DateTimeOffset at) { State = ListingState.Archived; ArchivedAt = at; }
+    public void Archive(DateTimeOffset at, bool automated = false) { if (automated && ManualLifecycleProtected) return; State = ListingState.Archived; ArchivedAt = at; }
 }
 
 public sealed class ListingOverride
@@ -147,26 +166,33 @@ public sealed class Vote
     public ReasonTag[] Tags { get; init; } = [];
     public string? Note { get; private set; }
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
+    public List<VoteRating> Ratings { get; } = [];
     public List<VoteNoteRevision> NoteRevisions { get; } = [];
+    public int Total => Ratings.Sum(x => (int)x.Rating);
     public Vote() { }
-    public Vote(Guid listingId, Guid memberId, VoteChoice choice, ReasonTag[] tags, string? note, DateTimeOffset at)
+    public Vote(Guid listingId, Guid memberId, IEnumerable<VoteRating> ratings, string? note, DateTimeOffset at)
     {
-        ListingId = listingId; MemberId = memberId; Choice = choice;
-        Tags = tags.Distinct().ToArray(); Note = NormalizeNote(note); CreatedAt = at;
+        var values = ratings.ToArray();
+        if (values.Length != VoteCategories.All.Length || values.Select(x => x.Category).Distinct().Count() != VoteCategories.All.Length || VoteCategories.All.Any(x => values.All(r => r.Category != x))) throw new DomainException("All ten voting categories are required exactly once.");
+        if (values.Any(x => !Enum.IsDefined(x.Rating))) throw new DomainException("Each category rating must be Dislike, Neutral, or Like.");
+        if (values.All(x => x.Rating == CategoryRating.Neutral)) throw new DomainException("Rate at least one category.");
+        ListingId = listingId; MemberId = memberId; Note = NormalizeNote(note); CreatedAt = at; Ratings.AddRange(values.Select(x => new VoteRating { Category = x.Category, Rating = x.Rating })); Choice = Total > 0 ? VoteChoice.Like : VoteChoice.Dislike;
     }
+    public Vote(Guid listingId, Guid memberId, VoteChoice choice, ReasonTag[] tags, string? note, DateTimeOffset at)
+    { ListingId = listingId; MemberId = memberId; Choice = choice; Tags = tags.Distinct().ToArray(); Note = NormalizeNote(note); CreatedAt = at; }
     public void EditNote(Guid actorId, string? note, DateTimeOffset at)
     {
         if (actorId != MemberId) throw new DomainException("Only the voter may edit their vote note.");
-        var normalized = NormalizeNote(note);
-        if (normalized == Note) return;
-        NoteRevisions.Add(new VoteNoteRevision { VoteId = Id, PreviousNote = Note, ActorId = actorId, ChangedAt = at });
-        Note = normalized;
+        var normalized = NormalizeNote(note); if (normalized == Note) return; NoteRevisions.Add(new VoteNoteRevision { VoteId = Id, PreviousNote = Note, ActorId = actorId, ChangedAt = at }); Note = normalized;
     }
-    private static string? NormalizeNote(string? note)
-    {
-        var value = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
-        return value?.Length > 2000 ? throw new DomainException("Vote note must be at most 2000 characters.") : value;
-    }
+    private static string? NormalizeNote(string? note) { var value = string.IsNullOrWhiteSpace(note) ? null : note.Trim(); return value?.Length > 2000 ? throw new DomainException("Vote note must be at most 2000 characters.") : value; }
+}
+public sealed class VoteRating
+{
+    public long Id { get; init; }
+    public long VoteId { get; init; }
+    public VoteCategory Category { get; set; }
+    public CategoryRating Rating { get; set; }
 }
 public sealed class VoteNoteRevision
 {
@@ -379,6 +405,32 @@ public static class AiLearningRules
             return op switch { "eq" => Math.Abs(number - value) < .0001, "neq" => Math.Abs(number - value) >= .0001, "lt" => number < value, "lte" => number <= value, "gt" => number > value, "gte" => number >= value, _ => false };
         }
         return false;
+    }
+}
+
+public static class ManualListing
+{
+    public const int MaxCanonicalUrlLength = 2048;
+    public const int MaxNormalizedAddressLength = 500;
+    public const decimal MaxAskingPrice = 999_999_999_999.99m;
+    private static readonly HashSet<string> Tracking = new(StringComparer.OrdinalIgnoreCase) { "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "gclid", "fbclid" };
+    public static string NormalizeUrl(string value)
+    {
+        if (!Uri.TryCreate(value?.Trim(), UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps || string.IsNullOrWhiteSpace(uri.Host) || !string.IsNullOrEmpty(uri.UserInfo)) throw new DomainException("A valid HTTPS URL is required.");
+        var query = System.Web.HttpUtility.ParseQueryString(uri.Query); foreach (var key in query.AllKeys.Where(x => x is not null && Tracking.Contains(x!)).ToArray()) query.Remove(key);
+        var builder = new UriBuilder(uri) { Scheme = "https", Host = uri.IdnHost.ToLowerInvariant(), Port = uri.IsDefaultPort ? -1 : uri.Port, Fragment = "", Query = query.ToString() ?? "", Path = uri.AbsolutePath == "/" ? "/" : uri.AbsolutePath.TrimEnd('/') };
+        var normalized = builder.Uri.AbsoluteUri.TrimEnd('?');
+        if (normalized.Length > MaxCanonicalUrlLength) throw new DomainException($"Listing URL must normalize to at most {MaxCanonicalUrlLength} characters.");
+        return normalized;
+    }
+    public static string NormalizeAddress(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) throw new DomainException("Address is required.");
+        var display = value.Trim();
+        if (display.Length > MaxNormalizedAddressLength) throw new DomainException($"Address must be at most {MaxNormalizedAddressLength} characters.");
+        var normalized = System.Text.RegularExpressions.Regex.Replace(display.ToLowerInvariant(), @"\s+", " ").Replace(" ,", ",");
+        if (normalized.Length > MaxNormalizedAddressLength) throw new DomainException($"Address must normalize to at most {MaxNormalizedAddressLength} characters.");
+        return normalized;
     }
 }
 

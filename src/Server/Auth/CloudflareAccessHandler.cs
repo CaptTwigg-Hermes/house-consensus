@@ -21,7 +21,7 @@ public sealed class CloudflareAccessHandler(
         var email = await validator.ValidateAsync(assertion, Context.RequestAborted);
         if (email is null) return AuthenticateResult.Fail("Cloudflare Access assertion is invalid.");
         var member = await members.ResolveAsync(email, Context.RequestAborted);
-        if (member is null) return AuthenticateResult.Fail("Cloudflare Access user is not an active member.");
+        if (member is null) return AuthenticateResult.Fail("Cloudflare Access user could not be provisioned.");
 
         var claims = new[]
         {

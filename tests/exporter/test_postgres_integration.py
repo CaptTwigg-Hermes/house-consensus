@@ -2,6 +2,7 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+import uuid
 
 import consensus_exporter.postgres as postgres_module
 import psycopg
@@ -24,10 +25,136 @@ def database_url():
 
 def _case(source_id="one", **match):
     return ExportCase.from_records(
-        {"caseID": source_id, "address": "A 1"},
+        {"caseID": source_id, "address": f"A {source_id}"},
         {"id": source_id, "family_score": 50, **match},
     )
 
+
+def test_canonical_root_url_matches_application_behavior():
+    assert postgres_module._canonical_listing_url("https://Example.dk/?utm_source=x#photos") == "https://example.dk/"
+    assert postgres_module._canonical_listing_url("https://Example.dk:8443/home/") == "https://example.dk:8443/home"
+    assert postgres_module._canonical_listing_url("https://user:secret@example.dk/home") is None
+    assert postgres_module._canonical_listing_url("https://[2001:db8::1]:8443/home/") == "https://[2001:db8::1]:8443/home"
+    assert postgres_module._canonical_listing_url("https://example.dk:70000/home") is None
+    assert postgres_module._canonical_listing_url("https://münchen.example/home") == "https://xn--mnchen-3ya.example/home"
+    assert postgres_module._canonical_listing_url("https://127.0.0.1:8443/home") == "https://127.0.0.1:8443/home"
+    assert postgres_module._canonical_listing_url("https://example.dk/a/../home/") == "https://example.dk/home"
+    assert postgres_module._canonical_listing_url("https://example.dk/%2e%2e/home/") == "https://example.dk/home"
+    assert postgres_module._canonical_listing_url("https://example.dk/%7Euser/") == "https://example.dk/~user"
+    assert postgres_module._canonical_listing_url("https://example.dk/a//home/") == "https://example.dk/a//home"
+    assert postgres_module._canonical_listing_url("https://example.dk/home?q=a%20b") == "https://example.dk/home?q=a+b"
+    assert postgres_module._canonical_listing_url("https://example.dk/home?q=%7E%2F%C3%B8") == "https://example.dk/home?q=~%2f%C3%B8"
+    assert postgres_module._canonical_listing_url("https://127.000.000.001/home") == "https://127.0.0.1/home"
+    assert postgres_module._canonical_listing_url("https://127.1/home") == "https://127.0.0.1/home"
+    assert postgres_module._canonical_listing_url("https://2130706433/home") == "https://127.0.0.1/home"
+    assert postgres_module._canonical_listing_url("https://0177.0.0.1/home") == "https://127.0.0.1/home"
+    assert postgres_module._canonical_listing_url("https://0x7f.0.0.1/home") == "https://127.0.0.1/home"
+    assert postgres_module._canonical_listing_url("https://example.dk/%zz/home") == "https://example.dk/%25zz/home"
+    assert postgres_module._canonical_listing_url("https://example.dk/home?A=1&a=2") == "https://example.dk/home?A=1&A=2"
+    assert postgres_module._canonical_listing_url("https://4294967296/home") == "https://4294967296/home"
+    assert postgres_module._canonical_listing_url("https://09.0.0.1/home") == "https://09.0.0.1/home"
+    assert postgres_module._canonical_listing_url("https://0x100000000/home") == "https://0x100000000/home"
+    assert postgres_module._canonical_listing_url("https://256.1.1.1/home") == "https://256.1.1.1/home"
+    assert postgres_module._normalize_listing_address("a" * 501) is None
+    assert postgres_module._canonical_listing_url("https://example.dk/" + "a" * 2049) is None
+
+
+def test_oversized_imported_address_does_not_abort_export(database_url):
+    PostgresExporter(database_url).export([_case("oversized-address", address="a" * 501)], run_id="oversized-address")
+    with psycopg.connect(database_url) as conn:
+        ensure_schema(conn)
+        row = conn.execute('select "NormalizedAddress" from listings where "ExternalId"=%s', ("oversized-address",)).fetchone()
+    assert row == (None,)
+
+
+def test_oversized_imported_url_does_not_abort_export(database_url):
+    PostgresExporter(database_url).export([_case("oversized-url", url="https://example.dk/" + "a" * 2049)], run_id="oversized-url")
+    with psycopg.connect(database_url) as conn:
+        row = conn.execute('select "CanonicalUrl" from listings where "ExternalId"=%s', ("oversized-url",)).fetchone()
+    assert row == (None,)
+
+
+def test_export_does_not_match_unrelated_null_canonical_urls(database_url):
+    imported_at = datetime(2026, 7, 29, 11, tzinfo=timezone.utc)
+    with psycopg.connect(database_url) as conn:
+        ensure_schema(conn)
+        conn.execute(
+            '''INSERT INTO listings ("Id","ExternalId","Address","FamilyFitScore","State","ImportedAt","AiAssessed","SourceUrl","CanonicalUrl","NormalizedAddress")
+               VALUES (%s,'legacy-invalid','Legacyvej 9',80,'active',%s,false,'not a url',NULL,'legacyvej 9')''',
+            (uuid.uuid4(), imported_at),
+        )
+        conn.commit()
+    PostgresExporter(database_url).export([_case("incoming-invalid", address="Nyvej 10", url="also not a url")], run_id="null-canonical-no-match")
+    with psycopg.connect(database_url) as conn:
+        rows = conn.execute('select "ExternalId" from listings order by "ExternalId"').fetchall()
+    assert rows == [("incoming-invalid",), ("legacy-invalid",)]
+
+
+def test_export_canonicalizes_legacy_source_url_before_duplicate_matching(database_url):
+    archived_at = datetime(2026, 7, 29, 11, tzinfo=timezone.utc)
+    with psycopg.connect(database_url) as conn:
+        ensure_schema(conn)
+        conn.execute(
+            '''INSERT INTO listings ("Id","ExternalId","Address","FamilyFitScore","State","ImportedAt","ArchivedAt","AiAssessed","SourceUrl","CanonicalUrl","NormalizedAddress")
+               VALUES (%s,'legacy-canonical','Legacyvej 1',80,'archived',%s,%s,false,'https://Example.dk/home/?utm_source=old#photo',NULL,'legacyvej 1')''',
+            (uuid.uuid4(), archived_at, archived_at),
+        )
+        conn.commit()
+    PostgresExporter(database_url).export([_case("incoming-new-id", address="Different address", url="https://example.dk/home")], run_id="legacy-canonical-match")
+    with psycopg.connect(database_url) as conn:
+        rows = conn.execute('select "ExternalId","CanonicalUrl" from listings').fetchall()
+    assert rows == [("legacy-canonical", "https://example.dk/home")]
+
+
+def test_export_rejects_split_url_and_address_identity_without_mutation(database_url):
+    exporter = PostgresExporter(database_url)
+    exporter.export([_case("split-url", address="Urlvej 1", url="https://example.dk/split-url")], run_id="split-url")
+    exporter.export([_case("split-address", address="Adressevej 2", url="https://example.dk/split-address")], run_id="split-address")
+    with pytest.raises(ValueError, match="different existing listings"):
+        exporter.export([_case("split-conflict", address="Adressevej 2", url="https://example.dk/split-url")], run_id="split-conflict")
+    with psycopg.connect(database_url) as conn:
+        rows = conn.execute('select "ExternalId","CanonicalUrl","NormalizedAddress" from listings order by "ExternalId"').fetchall()
+    assert len(rows) == 2
+    assert {row[0] for row in rows} == {"split-url", "split-address"}
+
+
+def test_importer_preserves_manually_archived_listing_state_and_timestamp(database_url):
+    archived_at = datetime(2026, 7, 1, 12, tzinfo=timezone.utc)
+    manual_id = "11111111-1111-1111-1111-111111111111"
+    with psycopg.connect(database_url) as conn:
+        ensure_schema(conn)
+        conn.execute(
+            '''INSERT INTO listings
+               ("Id","ExternalId","Address","FamilyFitScore","State","AiAssessed","ImportedAt","ArchivedAt","SourceUrl","CanonicalUrl","NormalizedAddress","IsManuallyAdded","ManualLifecycleProtected")
+               VALUES (%s,'manual:archived','Manualvej 1',NULL,'archived',false,%s,%s,'https://example.dk/manual-archived','https://example.dk/manual-archived','manualvej 1',true,true)''',
+            (manual_id, archived_at, archived_at),
+        )
+        conn.commit()
+    PostgresExporter(database_url).export(
+        [_case("imported-copy", address="Manualvej 1", url="https://example.dk/manual-archived")],
+        run_id="manual-archived-reappearance",
+    )
+    with psycopg.connect(database_url) as conn:
+        row = conn.execute('select "ExternalId","State"::text,"ArchivedAt","ManualLifecycleProtected" from listings where "Id"=%s', (manual_id,)).fetchone()
+        count = conn.execute('select count(*) from listings').fetchone()[0]
+    assert row == ("manual:archived", "archived", archived_at, True)
+    assert count == 1
+
+
+def test_imported_rows_deduplicate_by_normalized_address(database_url):
+    exporter = PostgresExporter(database_url)
+    exporter.export([_case("address-one", address="  Samevej  1 ")], run_id="address-one")
+    exporter.export([_case("address-two", address="samevej 1")], run_id="address-two")
+    with psycopg.connect(database_url) as conn:
+        assert conn.execute('select count(*) from listings where "NormalizedAddress"=%s', ("samevej 1",)).fetchone()[0] == 1
+
+
+def test_imported_rows_store_manual_deduplication_keys(database_url):
+    case = _case("dedup-keys", url="https://Example.dk/home/?utm_source=mail#photos")
+    PostgresExporter(database_url).export([case], run_id="dedup-keys")
+    with psycopg.connect(database_url) as conn:
+        keys = conn.execute('select "CanonicalUrl","NormalizedAddress" from listings where "ExternalId"=%s', ("dedup-keys",)).fetchone()
+    assert keys == ("https://example.dk/home", "a dedup-keys")
 
 def test_idempotent_upsert_provenance_ai_and_override_preservation(database_url):
     exporter = PostgresExporter(database_url)

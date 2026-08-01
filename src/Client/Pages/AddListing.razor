@@ -1,0 +1,18 @@
+@page "/listings/add"
+@inject ApiClient Api
+@inject NavigationManager Nav
+@inject I18n L
+<PageTitle>@L["AddListing"] · @L["AppName"]</PageTitle>
+<section class="panel form-panel"><p class="eyebrow">@L["Manual"]</p><h1>@L["AddListing"]</h1><p class="muted">@L["AddListingIntro"]</p>
+<form @onsubmit="Submit" @onsubmit:preventDefault>
+<label for="manual-url">@L["ListingUrl"]</label><input id="manual-url" data-testid="manual-url" type="url" inputmode="url" required pattern="https://.*" maxlength="2048" @bind="url" />
+<label for="manual-address">@L["Address"]</label><input id="manual-address" data-testid="manual-address" required maxlength="500" @bind="address" />
+<label for="manual-city">@L["City"] (@L["Optional"])</label><input id="manual-city" data-testid="manual-city" maxlength="200" @bind="city" />
+<label for="manual-price">@L["Price"] (@L["Optional"])</label><input id="manual-price" data-testid="manual-price" type="number" min="0" step="1000" @bind="askingPrice" />
+@if (!string.IsNullOrWhiteSpace(error)) { <p class="notice error" role="alert">@error</p> }
+<button data-testid="manual-submit" class="btn primary" disabled="@busy" type="submit">@L["AddListing"]</button>
+</form></section>
+@code {
+    private string url = "", address = "", city = "", error = ""; private decimal? askingPrice; private bool busy;
+    private async Task Submit() { busy = true; error = ""; try { var result = await Api.CreateManualListing(url, address, city, askingPrice); if (result is not null) Nav.NavigateTo($"listing/{result.ListingId}"); } catch (HttpRequestException) { error = L["ManualListingError"]; } finally { busy = false; } }
+}
