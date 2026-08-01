@@ -1935,6 +1935,7 @@ textarea:focus-visible {
 
 /* Universal navigation drawer and guided voting */
 .dialog-open { overflow: hidden; }
+.listing-card:has(.sheet-backdrop) { transform: none; transition: none; }
 .menu-trigger { width: 44px; height: 44px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); color: var(--forest); font-size: 1.35rem; cursor: pointer; }
 .drawer-backdrop, .sheet-backdrop { position: fixed; inset: 0; z-index: 900; background: rgba(18, 35, 30, .48); backdrop-filter: blur(2px); }
 .main-drawer { position: fixed; z-index: 910; inset: 0 auto 0 0; width: min(88vw, 360px); padding: max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom)); background: var(--paper); box-shadow: 16px 0 48px rgba(15, 36, 29, .24); display: grid; grid-template-rows: auto 1fr auto; gap: 14px; overflow-y: auto; }

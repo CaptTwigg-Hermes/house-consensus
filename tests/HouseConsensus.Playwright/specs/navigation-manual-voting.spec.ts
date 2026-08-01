@@ -55,3 +55,28 @@ test('manual listing persists optional fields and opens the guided ten-category 
   await sheet.getByRole('button', { name: 'Confirm' }).click();
   await expect(page.getByRole('button', { name: 'Change vote' })).toBeVisible();
 });
+
+test('guided vote overlay stays viewport-fixed while its house card is hovered', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  const card = page.getByTestId('listing-card').first();
+  await expect(card).toBeVisible();
+  await card.hover();
+  await card.getByTestId('vote-interested').click();
+
+  const backdrop = page.locator('.sheet-backdrop');
+  await expect(backdrop).toBeVisible();
+  const box = (await backdrop.boundingBox())!;
+  expect(box.x).toBeLessThanOrEqual(1);
+  expect(box.y).toBeLessThanOrEqual(1);
+  expect(box.width).toBeGreaterThanOrEqual(1278);
+  expect(box.height).toBeGreaterThanOrEqual(798);
+
+  await page.mouse.move(-10, -10);
+  await page.mouse.move(640, 400);
+  const reenteredBox = (await backdrop.boundingBox())!;
+  expect(reenteredBox.x).toBeLessThanOrEqual(1);
+  expect(reenteredBox.y).toBeLessThanOrEqual(1);
+  expect(reenteredBox.width).toBeGreaterThanOrEqual(1278);
+  expect(reenteredBox.height).toBeGreaterThanOrEqual(798);
+});
