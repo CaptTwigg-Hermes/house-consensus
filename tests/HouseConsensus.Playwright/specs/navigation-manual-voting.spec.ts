@@ -80,3 +80,14 @@ test('guided vote overlay stays viewport-fixed while its house card is hovered',
   expect(reenteredBox.width).toBeGreaterThanOrEqual(1278);
   expect(reenteredBox.height).toBeGreaterThanOrEqual(798);
 });
+
+test('header shows the authoritative running server version', async ({ page }) => {
+  await page.goto('/');
+  const response = await page.request.get('/api/version');
+  expect(response.ok()).toBeTruthy();
+  expect(response.headers()['cache-control']).toContain('no-store');
+  const body = await response.json() as { version: string };
+  expect(body.version).toMatch(/^v(dev|[0-9a-f]{7})$/);
+  if (process.env.E2E_EXPECTED_VERSION) expect(body.version).toBe(process.env.E2E_EXPECTED_VERSION);
+  await expect(page.getByTestId('app-version')).toHaveText(body.version);
+});

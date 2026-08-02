@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Reflection;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -52,6 +53,11 @@ app.UseAuthentication();
 if (debugAutoLogin) app.UseMiddleware<DebugAutoLoginMiddleware>();
 app.UseAuthorization();
 app.MapHealthChecks("/health"); app.MapHub<ConsensusHub>("/hubs/consensus");
+app.MapGet("/api/version", (HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return Results.Ok(RunningBuildVersion());
+}).AllowAnonymous();
 
 var auth = app.MapGroup("/api/auth");
 auth.MapGet("/mode", () => Results.Ok(new AuthModeDto(cloudflareAccess.Enabled))).AllowAnonymous();
@@ -283,6 +289,13 @@ static async Task<IResult> ChangeComment(Guid id, ClaimsPrincipal user, AppDbCon
         return Results.Ok(new { c.Id, c.Body, c.IsDeleted, c.UpdatedAt });
     }
     catch (DomainException ex) { return Results.Json(new { error = ex.Message }, statusCode: 403); }
+}
+static BuildVersionDto RunningBuildVersion()
+{
+    var value = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "";
+    var release = value.Split('+', 2)[0];
+    var version = release.Length >= 7 && release[..7].All(Uri.IsHexDigit) ? release[..7].ToLowerInvariant() : "dev";
+    return new($"v{version}");
 }
 static string Csv(string value)
 {

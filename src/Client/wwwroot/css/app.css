@@ -81,6 +81,16 @@ a {
   font-size: 1.15rem
 }
 
+.app-version {
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: .65rem;
+  line-height: 1.2;
+}
+
 .brand-mark {
   width: 64px;
   height: 64px;

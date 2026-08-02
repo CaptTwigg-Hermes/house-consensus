@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @inject AuthState Auth
+@inject ApiClient Api
 @inject I18n L
 @inject NavigationManager Nav
 @inject LiveUpdates Live
@@ -8,7 +9,7 @@
 
 <div class="app-frame" data-testid="app-shell">
 <header class="topbar">
-    <NavLink class="brand" href=""><span class="brand-mark small"><AppIcon Name="home" /></span><span>@L["AppName"]</span></NavLink>
+    <NavLink class="brand" href=""><span class="brand-mark small"><AppIcon Name="home" /></span><span>@L["AppName"]</span><small class="app-version" data-testid="app-version">@buildVersion</small></NavLink>
     <button @ref="menuTrigger" type="button" class="menu-trigger" data-testid="menu-trigger" aria-label="@L["Menu"]" aria-expanded="@drawerOpen" aria-controls="main-drawer" @onclick="OpenDrawer">☰</button>
 </header>
 @if (drawerOpen)
@@ -45,10 +46,18 @@
 </div>
 
 @code {
+    private string buildVersion = "v?";
     private bool drawerOpen;
     private bool focusDrawerOnRender;
     private ElementReference menuTrigger;
-    protected override async Task OnInitializedAsync() { Live.Changed += Refresh; Nav.LocationChanged += Navigated; await Live.StartAsync(); }
+    protected override async Task OnInitializedAsync()
+    {
+        Live.Changed += Refresh;
+        Nav.LocationChanged += Navigated;
+        try { buildVersion = (await Api.GetAsync<BuildVersionDto>("api/version"))?.Version ?? "v?"; }
+        catch (HttpRequestException) { buildVersion = "v?"; }
+        await Live.StartAsync();
+    }
     private string ProfileName => string.IsNullOrWhiteSpace(Auth.User?.DisplayName) ? Auth.User?.Email.Split('@')[0] ?? "" : Auth.User.DisplayName;
     private string ProfileInitials => AvatarInitials.From(Auth.User?.DisplayName ?? "", Auth.User?.Email ?? "");
     private string ProfileColor => AvatarColor.Resolve(Auth.User?.AvatarColor, Auth.User?.Id ?? Guid.Empty);

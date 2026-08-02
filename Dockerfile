@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1.7
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG BUILD_VERSION=dev
 WORKDIR /src
 COPY Directory.Build.props Directory.Packages.props HouseConsensus.slnx ./
 COPY src/Shared/HouseConsensus.Shared.csproj src/Shared/
@@ -9,7 +10,7 @@ RUN dotnet restore src/Server/HouseConsensus.Server.csproj
 COPY src/Shared src/Shared
 COPY src/Client src/Client
 COPY src/Server src/Server
-RUN dotnet publish src/Server/HouseConsensus.Server.csproj -c Release --no-restore -o /app /p:UseAppHost=false
+RUN dotnet publish src/Server/HouseConsensus.Server.csproj -c Release --no-restore -o /app /p:UseAppHost=false /p:InformationalVersion="${BUILD_VERSION}"
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 RUN apt-get update && apt-get install -y --no-install-recommends wget && rm -rf /var/lib/apt/lists/*
 WORKDIR /app

@@ -34,6 +34,8 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          build-args: |
+            BUILD_VERSION=${{ github.sha }}
           push: true
           platforms: linux/amd64
           tags: ${{ steps.metadata.outputs.tags }}
