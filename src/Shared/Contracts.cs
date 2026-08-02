@@ -6,6 +6,12 @@ public sealed record CastVote(IReadOnlyCollection<VoteRatingInput>? Ratings, str
 public sealed record VoteRatingInput(VoteCategory Category, CategoryRating Rating);
 public sealed record VoteRatingDto(VoteCategory Category, CategoryRating Rating);
 public sealed record CreateManualListing(string Url, string Address, string? City = null, decimal? AskingPrice = null);
+public sealed record FetchManualListing(string Url);
+public sealed record ManualListingPreview(
+    string Address, string? City, string? PostalCode, decimal? AskingPrice,
+    int? LivingArea, int? LotArea, int? Rooms, int? Floors, int? Bathrooms, int? YearBuilt,
+    string? EnergyLabel, int? MonthlyExpense, int? DaysOnMarket, string? PreviewImageUrl,
+    double? Latitude, double? Longitude, string ExternalId);
 public sealed record ManualListingResult(Guid ListingId, bool Existing);
 public sealed record EditVoteNote(string? Note);
 public sealed record AddComment(string Body);

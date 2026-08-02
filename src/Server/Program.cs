@@ -32,10 +32,13 @@ builder.Services.AddAuthorization(o => o.AddPolicy("owner", p => p.RequireClaim(
 builder.Services.Configure<ForwardedHeadersOptions>(o => { o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto; o.ForwardLimit = 1; });
 var magicRequestPermitLimit = builder.Configuration.GetValue("Auth:MagicRequestPermitLimit", 5);
 var magicConsumePermitLimit = builder.Configuration.GetValue("Auth:MagicConsumePermitLimit", 20);
-builder.Services.AddRateLimiter(o => { o.RejectionStatusCode = StatusCodes.Status429TooManyRequests; o.AddPolicy("magic-request", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = magicRequestPermitLimit, Window = TimeSpan.FromMinutes(15), QueueLimit = 0 })); o.AddPolicy("magic-consume", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = magicConsumePermitLimit, Window = TimeSpan.FromMinutes(15), QueueLimit = 0 })); });
+var listingLookupPermitLimit = builder.Configuration.GetValue("Listings:LookupPermitLimit", 12);
+builder.Services.AddRateLimiter(o => { o.RejectionStatusCode = StatusCodes.Status429TooManyRequests; o.AddPolicy("magic-request", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = magicRequestPermitLimit, Window = TimeSpan.FromMinutes(15), QueueLimit = 0 })); o.AddPolicy("magic-consume", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = magicConsumePermitLimit, Window = TimeSpan.FromMinutes(15), QueueLimit = 0 })); o.AddPolicy("listing-lookup", context => RateLimitPartition.GetFixedWindowLimiter(context.User.Identity?.IsAuthenticated == true ? context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "authenticated" : context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = listingLookupPermitLimit, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 })); });
 builder.Services.AddSignalR(); builder.Services.AddHealthChecks().AddDbContextCheck<AppDbContext>();
 builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddScoped<MagicLinkService>(); builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddMemoryCache(options => options.SizeLimit = 128 * 1024 * 1024); builder.Services.AddHttpClient<ListingImageService>(client => { client.Timeout = TimeSpan.FromSeconds(15); client.DefaultRequestHeaders.UserAgent.ParseAdd("HouseConsensus/1.0"); });
+builder.Services.AddHttpClient<BoligsidenListingLookup>(client => client.Timeout = TimeSpan.FromSeconds(20))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 if (builder.Environment.IsDevelopment() && e2eSeedData)
     builder.Services.AddScoped<IAiRuleGenerator, E2EAiRuleGenerator>();
 else
@@ -55,10 +58,10 @@ app.UseStaticFiles(new StaticFileOptions
             context.Context.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
     }
 });
-app.UseRateLimiter();
 app.Use(async (context, next) => { var unsafeApiRequest = context.Request.Path.StartsWithSegments("/api") && (HttpMethods.IsPost(context.Request.Method) || HttpMethods.IsPut(context.Request.Method) || HttpMethods.IsPatch(context.Request.Method) || HttpMethods.IsDelete(context.Request.Method)); if (unsafeApiRequest && context.Request.Headers["X-House-Consensus-CSRF"] != "1") { context.Response.StatusCode = StatusCodes.Status400BadRequest; await context.Response.WriteAsJsonAsync(new { error = "Missing same-origin request header." }); return; } await next(); });
 app.UseAuthentication();
 if (debugAutoLogin) app.UseMiddleware<DebugAutoLoginMiddleware>();
+app.UseRateLimiter();
 app.UseAuthorization();
 app.MapHealthChecks("/health"); app.MapHub<ConsensusHub>("/hubs/consensus");
 app.MapGet("/api/version", (HttpContext context) =>
@@ -83,27 +86,46 @@ var members = app.MapGroup("/api/members").RequireAuthorization("owner");
 members.MapGet("/", async (AppDbContext db, CancellationToken ct) => (await db.Members.OrderBy(x => x.Email).ToListAsync(ct)).Select(ToMemberDto));
 
 var listings = app.MapGroup("/api/listings").RequireAuthorization();
-listings.MapPost("/", async (CreateManualListing request, ClaimsPrincipal user, AppDbContext db, IHubContext<ConsensusHub> hub, TimeProvider clock, CancellationToken ct) =>
+listings.MapPost("/preview", async (FetchManualListing request, BoligsidenListingLookup lookup, CancellationToken ct) =>
+{
+    var preview = await lookup.ResolveAsync(request.Url, ct);
+    return preview is null ? Results.NotFound(new { error = "No active Boligsiden listing was found for that address." }) : Results.Ok(preview);
+}).RequireRateLimiting("listing-lookup");
+listings.MapPost("/", async (CreateManualListing request, ClaimsPrincipal user, AppDbContext db, IHubContext<ConsensusHub> hub, BoligsidenListingLookup lookup, TimeProvider clock, CancellationToken ct) =>
 {
     var memberId = user.MemberId();
     if (!await db.Members.AnyAsync(x => x.Id == memberId && x.IsActive, ct)) return Results.Forbid();
     try
     {
+        var fetched = await lookup.ResolveAsync(request.Url, ct);
+        var submittedAddress = fetched?.Address ?? request.Address;
+        var submittedCity = fetched?.City ?? request.City;
+        var submittedPrice = fetched?.AskingPrice ?? request.AskingPrice;
         var url = ManualListing.NormalizeUrl(request.Url);
-        var address = ManualListing.NormalizeAddress(request.Address);
-        if (request.AskingPrice < 0 || request.AskingPrice > ManualListing.MaxAskingPrice || request.City?.Trim().Length > 200) return Results.BadRequest(new { error = "Optional listing details are invalid." });
+        var address = ManualListing.NormalizeAddress(submittedAddress);
+        if (submittedPrice < 0 || submittedPrice > ManualListing.MaxAskingPrice || submittedCity?.Trim().Length > 200) return Results.BadRequest(new { error = "Optional listing details are invalid." });
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await db.Database.ExecuteSqlRawAsync("LOCK TABLE listings IN SHARE ROW EXCLUSIVE MODE", ct);
         var existing = await FindManualDuplicate(url, address, db, ct);
         if (existing is not null) { await transaction.CommitAsync(ct); return Results.Ok(new ManualListingResult(existing.Id, true)); }
-        var listing = Listing.CreateManual(url, request.Address, memberId, clock.GetUtcNow());
-        listing.City = string.IsNullOrWhiteSpace(request.City) ? null : request.City.Trim(); listing.Price = request.AskingPrice; db.Listings.Add(listing);
+        var listing = Listing.CreateManual(url, submittedAddress, memberId, clock.GetUtcNow());
+        listing.City = string.IsNullOrWhiteSpace(submittedCity) ? null : submittedCity.Trim();
+        listing.Price = submittedPrice;
+        if (fetched is not null)
+        {
+            listing.PostalCode = fetched.PostalCode; listing.LivingArea = fetched.LivingArea; listing.LotArea = fetched.LotArea;
+            listing.Rooms = fetched.Rooms; listing.Floors = fetched.Floors; listing.Bathrooms = fetched.Bathrooms;
+            listing.YearBuilt = fetched.YearBuilt; listing.EnergyLabel = fetched.EnergyLabel; listing.MonthlyExpense = fetched.MonthlyExpense;
+            listing.DaysOnMarket = fetched.DaysOnMarket; listing.PreviewImageUrl = fetched.PreviewImageUrl;
+            listing.Latitude = fetched.Latitude; listing.Longitude = fetched.Longitude;
+        }
+        db.Listings.Add(listing);
         await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
         await hub.Clients.All.SendAsync("ListingStateChanged", listing.Id, listing.State, ct);
         return Results.Created($"/api/listings/{listing.Id}", new ManualListingResult(listing.Id, false));
     }
     catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
-});
+}).RequireRateLimiting("listing-lookup");
 listings.MapGet("/queue", async (ClaimsPrincipal user, AppDbContext db, CancellationToken ct) => (await ListingDtos(db.Listings.Where(x => x.State == ListingState.Active || x.State == ListingState.Restored).OrderByDescending(x => x.IsManuallyAdded).ThenByDescending(x => x.ManuallyAddedAt).ThenByDescending(x => x.FamilyFitScore), db, user, ct)).Where(x => !x.Votes.Any(v => v.MemberId == user.MemberId() && v.Choice != VoteChoice.NotVoted)));
 listings.MapGet("/browse", async (string? city, decimal? minPrice, decimal? maxPrice, ClaimsPrincipal user, AppDbContext db, CancellationToken ct) => { var q = db.Listings.Where(x => x.State != ListingState.Archived); if (!string.IsNullOrWhiteSpace(city)) q = q.Where(x => x.City != null && EF.Functions.ILike(x.City, $"%{city}%")); if (minPrice.HasValue) q = q.Where(x => x.Price >= minPrice); if (maxPrice.HasValue) q = q.Where(x => x.Price <= maxPrice); return await ListingDtos(q.OrderByDescending(x => x.IsManuallyAdded).ThenByDescending(x => x.ManuallyAddedAt).ThenByDescending(x => x.FamilyFitScore), db, user, ct); });
 listings.MapGet("/consensus", async (ClaimsPrincipal user, AppDbContext db, CancellationToken ct) => { var all = await ListingDtos(db.Listings.Where(x => x.State == ListingState.Active || x.State == ListingState.Restored), db, user, ct); return all.Where(x => x.Consensus); });

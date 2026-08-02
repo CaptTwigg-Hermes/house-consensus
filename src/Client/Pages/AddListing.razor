@@ -1,18 +1,120 @@
 @page "/listings/add"
 @inject ApiClient Api
 @inject NavigationManager Nav
-@inject I18n L
-<PageTitle>@L["AddListing"] · @L["AppName"]</PageTitle>
-<section class="panel form-panel"><p class="eyebrow">@L["Manual"]</p><h1>@L["AddListing"]</h1><p class="muted">@L["AddListingIntro"]</p>
-<form @onsubmit="Submit" @onsubmit:preventDefault>
-<label for="manual-url">@L["ListingUrl"]</label><input id="manual-url" data-testid="manual-url" type="url" inputmode="url" required pattern="https://.*" maxlength="2048" @bind="url" />
-<label for="manual-address">@L["Address"]</label><input id="manual-address" data-testid="manual-address" required maxlength="500" @bind="address" />
-<label for="manual-city">@L["City"] (@L["Optional"])</label><input id="manual-city" data-testid="manual-city" maxlength="200" @bind="city" />
-<label for="manual-price">@L["Price"] (@L["Optional"])</label><input id="manual-price" data-testid="manual-price" type="number" min="0" step="1000" @bind="askingPrice" />
+@inject I18n I18n
+@implements IDisposable
+
+<PageTitle>@I18n["AddListing"] · @I18n["AppName"]</PageTitle>
+<section class="panel form-panel"><p class="eyebrow">@I18n["Manual"]</p><h1>@I18n["AddListing"]</h1><p class="muted">@I18n["AddListingIntro"]</p>
+<EditForm Model="this" OnSubmit="Submit">
+<label for="manual-url">@I18n["ListingUrl"]</label><input id="manual-url" data-testid="manual-url" type="url" inputmode="url" required pattern="https://.*" maxlength="2048" @bind="Url" @bind:event="oninput" @onblur="TryFetchDetails" />
+<button type="button" data-testid="manual-fetch" class="btn secondary" @onclick="FetchDetails" disabled="@fetching">@(fetching ? I18n["FetchingListing"] : I18n["FetchListing"])</button>
+@if (preview is not null) { <p class="notice success" data-testid="manual-fetch-success">@I18n["ListingFetched"]</p><p class="muted">@FetchedSummary</p> }
+<label for="manual-address">@I18n["Address"]</label><input id="manual-address" data-testid="manual-address" required maxlength="500" @bind="address" />
+<label for="manual-city">@I18n["City"] (@I18n["Optional"])</label><input id="manual-city" data-testid="manual-city" maxlength="200" @bind="city" />
+<label for="manual-price">@I18n["Price"] (@I18n["Optional"])</label><InputNumber id="manual-price" data-testid="manual-price" min="0" step="1000" @bind-Value="askingPrice" />
 @if (!string.IsNullOrWhiteSpace(error)) { <p class="notice error" role="alert">@error</p> }
-<button data-testid="manual-submit" class="btn primary" disabled="@busy" type="submit">@L["AddListing"]</button>
-</form></section>
+<button data-testid="manual-submit" class="btn primary" disabled="@saving" type="submit">@I18n["AddListing"]</button>
+</EditForm></section>
+
 @code {
-    private string url = "", address = "", city = "", error = ""; private decimal? askingPrice; private bool busy;
-    private async Task Submit() { busy = true; error = ""; try { var result = await Api.CreateManualListing(url, address, city, askingPrice); if (result is not null) Nav.NavigateTo($"listing/{result.ListingId}"); } catch (HttpRequestException) { error = L["ManualListingError"]; } finally { busy = false; } }
+    private string url = "";
+    private string Url
+    {
+        get => url;
+        set
+        {
+            if (string.Equals(url, value, StringComparison.Ordinal)) return;
+            url = value;
+            ClearPreviewFields();
+            fetchCancellation.Cancel();
+        }
+    }
+    private string address = "";
+    private string? city;
+    private decimal? askingPrice;
+    private bool saving;
+    private bool fetching;
+    private string? error;
+    private ManualListingPreview? preview;
+    private bool previewFieldsPopulated;
+    private CancellationTokenSource fetchCancellation = new();
+
+    private string FetchedSummary => preview is null ? "" : string.Join(" · ", new string?[]
+    {
+        preview.Address,
+        $"{preview.PostalCode} {preview.City}".Trim(),
+        preview.LivingArea is null ? null : $"{preview.LivingArea} m²",
+        preview.LotArea is null ? null : $"{preview.LotArea} m² {I18n["Lot"]}"
+    }.Where(x => !string.IsNullOrWhiteSpace(x)));
+
+    private async Task TryFetchDetails()
+    {
+        if (IsBoligsidenAddress(url) && preview is null) await FetchDetails();
+    }
+
+    private async Task FetchDetails()
+    {
+        if (!IsBoligsidenAddress(url))
+        {
+            error = I18n["BoligsidenUrlRequired"];
+            return;
+        }
+        fetchCancellation.Cancel();
+        fetchCancellation.Dispose();
+        var requestCancellation = new CancellationTokenSource();
+        fetchCancellation = requestCancellation;
+        fetching = true;
+        error = null;
+        ClearPreviewFields();
+        try
+        {
+            var requestedUrl = url;
+            var fetched = await Api.FetchManualListing(requestedUrl, requestCancellation.Token);
+            requestCancellation.Token.ThrowIfCancellationRequested();
+            if (!string.Equals(url, requestedUrl, StringComparison.Ordinal)) return;
+            preview = fetched;
+            if (preview is null) { error = I18n["ListingFetchError"]; return; }
+            address = preview.Address;
+            city = preview.City;
+            askingPrice = preview.AskingPrice;
+            previewFieldsPopulated = true;
+        }
+        catch (OperationCanceledException) when (requestCancellation.IsCancellationRequested) { }
+        catch { error = I18n["ListingFetchError"]; }
+        finally { if (ReferenceEquals(fetchCancellation, requestCancellation)) fetching = false; }
+    }
+
+    private void ClearPreviewFields()
+    {
+        preview = null;
+        if (!previewFieldsPopulated) return;
+        address = "";
+        city = "";
+        askingPrice = null;
+        previewFieldsPopulated = false;
+    }
+
+    private async Task Submit()
+    {
+        saving = true; error = null;
+        try
+        {
+            var result = await Api.CreateManualListing(url, address, city, askingPrice);
+            if (result is not null) Nav.NavigateTo($"listing/{result.ListingId}");
+        }
+        catch { error = I18n["ManualListingError"]; }
+        finally { saving = false; }
+    }
+
+    private static bool IsBoligsidenAddress(string? value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps &&
+        (string.Equals(uri.Host, "boligsiden.dk", StringComparison.OrdinalIgnoreCase) || string.Equals(uri.Host, "www.boligsiden.dk", StringComparison.OrdinalIgnoreCase)) &&
+        uri.AbsolutePath.StartsWith("/adresse/", StringComparison.OrdinalIgnoreCase);
+
+    public void Dispose()
+    {
+        fetchCancellation.Cancel();
+        fetchCancellation.Dispose();
+    }
 }
