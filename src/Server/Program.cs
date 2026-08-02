@@ -46,7 +46,15 @@ app.UseForwardedHeaders();
 if (app.Environment.IsProduction()) { app.UseHsts(); if (!cloudflareAccess.Enabled) app.UseHttpsRedirection(); }
 app.UseExceptionHandler(e => e.Run(async c => { c.Response.StatusCode = 500; await c.Response.WriteAsJsonAsync(new { error = "An unexpected error occurred." }); }));
 app.UseBlazorFrameworkFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = context =>
+    {
+        var name = Path.GetFileName(context.Context.Request.Path.Value);
+        if (name is "service-worker.js" or "service-worker-assets.js")
+            context.Context.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+    }
+});
 app.UseRateLimiter();
 app.Use(async (context, next) => { var unsafeApiRequest = context.Request.Path.StartsWithSegments("/api") && (HttpMethods.IsPost(context.Request.Method) || HttpMethods.IsPut(context.Request.Method) || HttpMethods.IsPatch(context.Request.Method) || HttpMethods.IsDelete(context.Request.Method)); if (unsafeApiRequest && context.Request.Headers["X-House-Consensus-CSRF"] != "1") { context.Response.StatusCode = StatusCodes.Status400BadRequest; await context.Response.WriteAsJsonAsync(new { error = "Missing same-origin request header." }); return; } await next(); });
 app.UseAuthentication();

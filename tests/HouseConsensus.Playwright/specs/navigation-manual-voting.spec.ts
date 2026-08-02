@@ -66,19 +66,21 @@ test('guided vote overlay stays viewport-fixed while its house card is hovered',
 
   const backdrop = page.locator('.sheet-backdrop');
   await expect(backdrop).toBeVisible();
-  const box = (await backdrop.boundingBox())!;
-  expect(box.x).toBeLessThanOrEqual(1);
-  expect(box.y).toBeLessThanOrEqual(1);
-  expect(box.width).toBeGreaterThanOrEqual(1278);
-  expect(box.height).toBeGreaterThanOrEqual(798);
+  const expectViewportBackdrop = (box: { x: number; y: number; width: number; height: number }) => {
+    expect(box.x).toBeGreaterThanOrEqual(-1);
+    expect(box.x).toBeLessThanOrEqual(1);
+    expect(box.y).toBeGreaterThanOrEqual(-1);
+    expect(box.y).toBeLessThanOrEqual(1);
+    expect(box.x + box.width).toBeGreaterThanOrEqual(1279);
+    expect(box.x + box.width).toBeLessThanOrEqual(1281);
+    expect(box.y + box.height).toBeGreaterThanOrEqual(799);
+    expect(box.y + box.height).toBeLessThanOrEqual(801);
+  };
+  expectViewportBackdrop((await backdrop.boundingBox())!);
 
   await page.mouse.move(-10, -10);
   await page.mouse.move(640, 400);
-  const reenteredBox = (await backdrop.boundingBox())!;
-  expect(reenteredBox.x).toBeLessThanOrEqual(1);
-  expect(reenteredBox.y).toBeLessThanOrEqual(1);
-  expect(reenteredBox.width).toBeGreaterThanOrEqual(1278);
-  expect(reenteredBox.height).toBeGreaterThanOrEqual(798);
+  expectViewportBackdrop((await backdrop.boundingBox())!);
 });
 
 test('header shows the authoritative running server version', async ({ page }) => {
@@ -90,4 +92,9 @@ test('header shows the authoritative running server version', async ({ page }) =
   expect(body.version).toMatch(/^v(dev|[0-9a-f]{7})$/);
   if (process.env.E2E_EXPECTED_VERSION) expect(body.version).toBe(process.env.E2E_EXPECTED_VERSION);
   await expect(page.getByTestId('app-version')).toHaveText(body.version);
+  for (const path of ['/service-worker.js', '/service-worker-assets.js']) {
+    const workerAsset = await page.request.get(path);
+    expect(workerAsset.ok()).toBeTruthy();
+    expect(workerAsset.headers()['cache-control']).toContain('no-store');
+  }
 });
