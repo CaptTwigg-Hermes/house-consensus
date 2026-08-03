@@ -143,7 +143,7 @@ listings.MapPost("/{id:guid}/votes", async (Guid id, CastVote request, ClaimsPri
     if (request.Choice == VoteChoice.NotVoted) return Results.BadRequest(new { error = "Clearing votes is not supported." });
     try
     {
-        var vote = new Vote(id, user.MemberId(), (request.Ratings ?? []).Select(x => new VoteRating { Category = x.Category, Rating = x.Rating }), request.Note, clock.GetUtcNow());
+        var vote = new Vote(id, user.MemberId(), (request.Ratings ?? []).Select(x => new VoteRating { Category = x.Category, Rating = x.Rating }), request.OverallScore, request.Note, clock.GetUtcNow());
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await LockListingMutation(id, db, ct);
         if (!await db.Listings.AnyAsync(x => x.Id == id && (x.State == ListingState.Active || x.State == ListingState.Restored), ct)) return Results.NotFound();
@@ -278,7 +278,7 @@ static async Task Bootstrap(WebApplication app)
 static bool IsEmail(string value) => System.Net.Mail.MailAddress.TryCreate(value, out var parsed) && parsed.Address == value.Trim();
 static async Task SignIn(HttpContext c, Member m) { var claims = new[] { new Claim(ClaimTypes.NameIdentifier, m.Id.ToString()), new Claim(ClaimTypes.Email, m.Email), new Claim(ClaimTypes.Role, m.Role.ToString()) }; await c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme)), new AuthenticationProperties { IsPersistent = true, ExpiresUtc = DateTimeOffset.UtcNow.AddDays(30) }); }
 static MemberDto ToMemberDto(Member m) => new(m.Id, m.Email, m.DisplayName, m.Language, m.Role, m.IsActive, AvatarColor.Resolve(m.AvatarColor, m.Id));
-static VoteDto ToVoteDto(Vote v, string memberInitials = "", string memberColor = "") => new(v.Id, v.ListingId, v.MemberId, v.Choice, v.Tags, v.CreatedAt, v.Note, memberInitials, memberColor, v.Ratings.Select(x => new VoteRatingDto(x.Category, x.Rating)).ToArray(), v.Total);
+static VoteDto ToVoteDto(Vote v, string memberInitials = "", string memberColor = "") => new(v.Id, v.ListingId, v.MemberId, v.Choice, v.Tags, v.CreatedAt, v.Note, memberInitials, memberColor, v.Ratings.Select(x => new VoteRatingDto(x.Category, x.Rating)).ToArray(), v.Total, v.OverallScore);
 static async Task<List<VoteDto>> VoteDtos(IEnumerable<Vote> source, AppDbContext db, CancellationToken ct)
 {
     var votes = source.ToList();

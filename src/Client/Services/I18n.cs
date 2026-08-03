@@ -258,6 +258,8 @@ public sealed class I18n
         ["MultiGenerationFit"] = ("Multi-generation fit", "Flergenerationsmatch"),
         ["Buildability"] = ("Buildability", "Byggemuligheder"),
         ["VoteSummary"] = ("Review your vote", "Gennemgå din stemme"),
+        ["OverallScore"] = ("How much do you like this home overall?", "Hvor godt kan du samlet set lide denne bolig?"),
+        ["OverallScoreHint"] = ("Choose 1 for not at all and 5 for love it.", "Vælg 1 for slet ikke og 5 for elsker den."),
         ["Tally"] = ("Tally", "Optælling"),
         ["DerivedResult"] = ("Derived result", "Beregnet resultat"),
         ["TieDislike"] = ("A tie counts as Dislike", "Ved stemmelighed bliver resultatet Kan ikke lide"),

@@ -1,0 +1,37 @@
+@inject AuthState Auth
+@inject I18n L
+@inject NavigationManager Nav
+@inject LiveUpdates Live
+
+<nav aria-label="@L["Menu"]">
+    <NavLink href="" Match="NavLinkMatch.All"><AppIcon Name="home" />@L["Queue"]</NavLink>
+    <NavLink href="browse"><AppIcon Name="search" />@L["Browse"]</NavLink>
+    <NavLink class="drawer-primary" href="listings/add"><span aria-hidden="true">＋</span>@L["AddListing"]</NavLink>
+    <NavLink href="everyone-likes"><AppIcon Name="heart" />@L["EveryoneLikes"]</NavLink>
+    <NavLink href="my-votes"><AppIcon Name="check" />@L["MyVotes"]</NavLink>
+    <NavLink href="household-votes"><AppIcon Name="members" />@L["HouseholdVotes"]</NavLink>
+    <NavLink href="profile" aria-label="@L["Profile"]"><AppIcon Name="profile" />@L["Profile"]</NavLink>
+    @if (Auth.IsOwner)
+    {
+        <div class="nav-section">@L["Owner"]</div>
+        <NavLink href="owner/review"><AppIcon Name="review" />@L["Review"]</NavLink>
+        <NavLink href="owner/feedback"><AppIcon Name="spark" />@L["Feedback"]</NavLink>
+        <NavLink href="owner/members"><AppIcon Name="members" />@L["Members"]</NavLink>
+    }
+</nav>
+<footer>
+    <NavLink class="drawer-account" href="profile"><span class="avatar" style="--avatar-color: @ProfileColor; background-color: var(--avatar-color)">@ProfileInitials</span><span data-testid="@(Desktop ? "desktop-current-user-email" : "current-user-email")">@ProfileName</span></NavLink>
+    <span class="live-pill @(Live.Connected ? "online" : "")"><i></i>@L["Live"]</span>
+    <label>@L["Language"]<select class="language" data-testid="@(Desktop ? "desktop-language-select" : "language-select")" value="@Auth.User?.Language" @onchange="LanguageChanged"><option value="en">EN</option><option value="da">DA</option></select></label>
+    <button class="btn ghost" @onclick="Logout"><AppIcon Name="logout" /> @L["SignOut"]</button>
+</footer>
+
+@code {
+    [Parameter] public bool Desktop { get; set; }
+
+    private string ProfileName => string.IsNullOrWhiteSpace(Auth.User?.DisplayName) ? Auth.User?.Email.Split('@')[0] ?? "" : Auth.User.DisplayName;
+    private string ProfileInitials => AvatarInitials.From(Auth.User?.DisplayName ?? "", Auth.User?.Email ?? "");
+    private string ProfileColor => AvatarColor.Resolve(Auth.User?.AvatarColor, Auth.User?.Id ?? Guid.Empty);
+    private async Task LanguageChanged(ChangeEventArgs e) => await Auth.SetLanguageAsync(e.Value?.ToString() ?? "en");
+    private async Task Logout() { await Auth.LogoutAsync(); Nav.NavigateTo("", true); }
+}

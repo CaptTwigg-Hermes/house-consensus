@@ -822,12 +822,13 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
 
         var ratings = VoteCategories.All.Select(category => new VoteRatingInput(category, category == VoteCategory.Layout ? CategoryRating.Like : CategoryRating.Neutral)).ToArray();
         var invalidRatings = ratings.ToArray(); invalidRatings[1] = new VoteRatingInput(VoteCategory.Privacy, (CategoryRating)99);
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/listings/{created.ListingId}/votes", new CastVote(invalidRatings, "invalid"), ct)).StatusCode);
-        var firstVote = await client.PostAsJsonAsync($"/api/listings/{created.ListingId}/votes", new CastVote(ratings, "first"), ct);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/listings/{created.ListingId}/votes", new CastVote(invalidRatings, 4, "invalid"), ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/listings/{created.ListingId}/votes", new CastVote(ratings, 0), ct)).StatusCode);
+        var firstVote = await client.PostAsJsonAsync($"/api/listings/{created.ListingId}/votes", new CastVote(ratings, 4, "first"), ct);
         var afterActivity = await client.GetFromJsonAsync<ListingDto>($"/api/listings/{created.ListingId}", ct);
         Assert.False(afterActivity?.CanWithdraw); Assert.False(afterActivity?.CanArchive);
         ratings[0] = new VoteRatingInput(VoteCategory.Layout, CategoryRating.Dislike);
-        var secondVote = await client.PostAsJsonAsync($"/api/listings/{created.ListingId}/votes", new CastVote(ratings, "second"), ct);
+        var secondVote = await client.PostAsJsonAsync($"/api/listings/{created.ListingId}/votes", new CastVote(ratings, 2, "second"), ct);
         Assert.Equal(HttpStatusCode.OK, firstVote.StatusCode); Assert.Equal(HttpStatusCode.OK, secondVote.StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.DeleteAsync($"/api/listings/{created.ListingId}", ct)).StatusCode);
 
@@ -835,7 +836,7 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
         var listing = await verify.Listings.SingleAsync(x => x.Id == created.ListingId, ct);
         Assert.True(listing.IsManuallyAdded); Assert.True(listing.ManualLifecycleProtected); Assert.Equal("Roskilde", listing.City); Assert.Equal(7_500_000m, listing.Price); Assert.Null(listing.FamilyFitScore);
         var votes = await verify.Votes.Include(x => x.Ratings).Where(x => x.ListingId == created.ListingId).OrderBy(x => x.Id).ToArrayAsync(ct);
-        Assert.Equal(2, votes.Length); Assert.Equal(VoteChoice.Like, votes[0].Choice); Assert.Equal(VoteChoice.Dislike, votes[1].Choice); Assert.All(votes, x => Assert.Equal(10, x.Ratings.Count));
+        Assert.Equal(2, votes.Length); Assert.Equal(VoteChoice.Like, votes[0].Choice); Assert.Equal(VoteChoice.Dislike, votes[1].Choice); Assert.All(votes, x => Assert.Equal(10, x.Ratings.Count)); Assert.Equal(4, votes[0].OverallScore); Assert.Equal(2, votes[1].OverallScore);
     }
 
     [Fact]

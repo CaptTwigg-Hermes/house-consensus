@@ -1,5 +1,4 @@
 @inherits LayoutComponentBase
-@inject AuthState Auth
 @inject ApiClient Api
 @inject I18n L
 @inject NavigationManager Nav
@@ -9,36 +8,19 @@
 
 <div class="app-frame" data-testid="app-shell">
 <header class="topbar">
-    <NavLink class="brand" href=""><span class="brand-mark small"><AppIcon Name="home" /></span><span>@L["AppName"]</span><small class="app-version" data-testid="app-version">@buildVersion</small></NavLink>
     <button @ref="menuTrigger" type="button" class="menu-trigger" data-testid="menu-trigger" aria-label="@L["Menu"]" aria-expanded="@drawerOpen" aria-controls="main-drawer" @onclick="OpenDrawer">☰</button>
+    <NavLink class="brand" href=""><span class="brand-mark small"><AppIcon Name="home" /></span><span>@L["AppName"]</span><small class="app-version" data-testid="app-version">@buildVersion</small></NavLink>
 </header>
+<aside class="navigation-panel desktop-navigation" data-testid="desktop-navigation" aria-label="@L["Menu"]">
+    <header><h2>@L["Menu"]</h2></header>
+    <MainNavigation Desktop />
+</aside>
 @if (drawerOpen)
 {
     <div class="drawer-backdrop" data-testid="drawer-backdrop" @onclick="CloseDrawer"></div>
-    <aside id="main-drawer" class="main-drawer open" data-testid="main-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" @onkeydown="DrawerKeyDown">
+    <aside id="main-drawer" class="navigation-panel main-drawer open" data-testid="main-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" @onkeydown="DrawerKeyDown">
         <header><h2 id="drawer-title">@L["Menu"]</h2><button type="button" class="icon-btn" aria-label="@L["Close"]" @onclick="CloseDrawer">×</button></header>
-        <nav aria-label="@L["Menu"]">
-            <NavLink href="" Match="NavLinkMatch.All"><AppIcon Name="home" />@L["Queue"]</NavLink>
-            <NavLink href="browse"><AppIcon Name="search" />@L["Browse"]</NavLink>
-            <NavLink class="drawer-primary" href="listings/add"><span aria-hidden="true">＋</span>@L["AddListing"]</NavLink>
-            <NavLink href="everyone-likes"><AppIcon Name="heart" />@L["EveryoneLikes"]</NavLink>
-            <NavLink href="my-votes"><AppIcon Name="check" />@L["MyVotes"]</NavLink>
-            <NavLink href="household-votes"><AppIcon Name="members" />@L["HouseholdVotes"]</NavLink>
-            <NavLink href="profile" aria-label="@L["Profile"]"><AppIcon Name="profile" />@L["Profile"]</NavLink>
-            @if (Auth.IsOwner)
-            {
-                <div class="nav-section">@L["Owner"]</div>
-                <NavLink href="owner/review"><AppIcon Name="review" />@L["Review"]</NavLink>
-                <NavLink href="owner/feedback"><AppIcon Name="spark" />@L["Feedback"]</NavLink>
-                <NavLink href="owner/members"><AppIcon Name="members" />@L["Members"]</NavLink>
-            }
-        </nav>
-        <footer>
-            <NavLink class="drawer-account" href="profile"><span class="avatar" style="--avatar-color: @ProfileColor; background-color: var(--avatar-color)">@ProfileInitials</span><span data-testid="current-user-email">@ProfileName</span></NavLink>
-            <span class="live-pill @(Live.Connected ? "online" : "")"><i></i>@L["Live"]</span>
-            <label>@L["Language"]<select class="language" data-testid="language-select" value="@Auth.User?.Language" @onchange="LanguageChanged"><option value="en">EN</option><option value="da">DA</option></select></label>
-            <button class="btn ghost" @onclick="Logout"><AppIcon Name="logout" /> @L["SignOut"]</button>
-        </footer>
+        <MainNavigation />
     </aside>
 }
 <main class="content">@Body</main>
@@ -58,9 +40,6 @@
         catch (HttpRequestException) { buildVersion = "v?"; }
         await Live.StartAsync();
     }
-    private string ProfileName => string.IsNullOrWhiteSpace(Auth.User?.DisplayName) ? Auth.User?.Email.Split('@')[0] ?? "" : Auth.User.DisplayName;
-    private string ProfileInitials => AvatarInitials.From(Auth.User?.DisplayName ?? "", Auth.User?.Email ?? "");
-    private string ProfileColor => AvatarColor.Resolve(Auth.User?.AvatarColor, Auth.User?.Id ?? Guid.Empty);
     private void OpenDrawer() { drawerOpen = true; focusDrawerOnRender = true; }
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -71,8 +50,6 @@
     private async Task CloseDrawer() { if (!drawerOpen) return; drawerOpen = false; await JS.InvokeVoidAsync("hc.dialogClose"); await menuTrigger.FocusAsync(); }
     private async Task DrawerKeyDown(KeyboardEventArgs e) { if (e.Key == "Escape") await CloseDrawer(); }
     private void Navigated(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) => InvokeAsync(CloseDrawer);
-    private async Task LanguageChanged(ChangeEventArgs e) => await Auth.SetLanguageAsync(e.Value?.ToString() ?? "en");
-    private async Task Logout() { await Auth.LogoutAsync(); Nav.NavigateTo("", true); }
     private void Refresh() => InvokeAsync(StateHasChanged);
     public void Dispose() { Live.Changed -= Refresh; Nav.LocationChanged -= Navigated; }
 }

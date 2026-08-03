@@ -27,7 +27,14 @@
             {
                 <section class="vote-summary" aria-live="polite"><h3>@L["VoteSummary"]</h3><p>@L["Tally"]: @Likes @L["Like"] · @Dislikes @L["Dislike"] · @Neutrals @L["Neutral"]</p><p><strong>@L["DerivedResult"]: @L.Enum(Derived)</strong>@if (Total == 0) { <span> — @L["TieDislike"]</span> }</p></section>
                 <label for="vote-note">@L["VoteNote"]</label><textarea id="vote-note" data-testid="vote-note" maxlength="2000" rows="4" @bind="note"></textarea>
-                <div class="sheet-actions"><button type="button" class="btn primary" disabled="@busy" @onclick="Save">@L["Confirm"]</button><button type="button" class="btn ghost" @onclick="() => showSummary = false">@L["Back"]</button></div>
+                <fieldset class="overall-score" data-testid="overall-score"><legend>@L["OverallScore"]</legend><p id="overall-score-hint" class="muted">@L["OverallScoreHint"]</p><div class="overall-score-options">
+                    @foreach (var score in Enumerable.Range(1, 5))
+                    {
+                        var scoreId = $"overall-score-{score}";
+                        <label for="@scoreId" class="@(overallScore == score ? "selected" : "")"><input id="@scoreId" data-testid="@scoreId" type="radio" name="overall-score" value="@score" checked="@(overallScore == score)" @onchange="() => overallScore = score" aria-describedby="overall-score-hint" /><span>@score</span></label>
+                    }
+                </div></fieldset>
+                <div class="sheet-actions"><button type="button" class="btn primary" disabled="@(busy || overallScore is null)" @onclick="Save">@L["Confirm"]</button><button type="button" class="btn ghost" @onclick="() => showSummary = false">@L["Back"]</button></div>
             }
             else
             {
@@ -41,11 +48,11 @@
     [Parameter] public Guid ListingId { get; set; }
     [Parameter] public VoteDto? Latest { get; set; }
     [Parameter] public EventCallback OnVoted { get; set; }
-    private bool open, busy, validation, showSummary, focusDialogOnRender; private string? note;
+    private bool open, busy, validation, showSummary, focusDialogOnRender; private string? note; private int? overallScore;
     private readonly Dictionary<VoteCategory, CategoryRating> ratings = VoteCategories.All.ToDictionary(x => x, _ => CategoryRating.Neutral);
     private int Total => ratings.Values.Sum(x => (int)x); private VoteChoice Derived => Total > 0 ? VoteChoice.Like : VoteChoice.Dislike;
     private int Likes => ratings.Values.Count(x => x == CategoryRating.Like); private int Dislikes => ratings.Values.Count(x => x == CategoryRating.Dislike); private int Neutrals => ratings.Values.Count(x => x == CategoryRating.Neutral);
-    private void Open() { foreach (var category in VoteCategories.All) ratings[category] = Latest?.Ratings?.FirstOrDefault(x => x.Category == category)?.Rating ?? CategoryRating.Neutral; note = Latest?.Note; validation = showSummary = false; open = true; focusDialogOnRender = true; }
+    private void Open() { foreach (var category in VoteCategories.All) ratings[category] = Latest?.Ratings?.FirstOrDefault(x => x.Category == category)?.Rating ?? CategoryRating.Neutral; note = Latest?.Note; overallScore = Latest?.OverallScore; validation = showSummary = false; open = true; focusDialogOnRender = true; }
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!focusDialogOnRender || !open) return;
@@ -73,7 +80,7 @@
         busy = true;
         try
         {
-            await Api.Vote(ListingId, ratings.Select(x => new VoteRatingInput(x.Key, x.Value)).ToArray(), note);
+            await Api.Vote(ListingId, ratings.Select(x => new VoteRatingInput(x.Key, x.Value)).ToArray(), overallScore!.Value, note);
             await CloseSheet();
             await OnVoted.InvokeAsync();
         }

@@ -51,7 +51,7 @@ export async function createSeededE2EHousehold(browser: Browser, baseURL: string
   };
 }
 
-export async function castGuidedVote(page: Page, choice: 'Like' | 'Dislike', note?: string, root?: Locator): Promise<void> {
+export async function castGuidedVote(page: Page, choice: 'Like' | 'Dislike', note?: string, root?: Locator, overallScore = 4): Promise<void> {
   await (root ?? page).getByTestId('vote-interested').click();
   const sheet = page.getByTestId('guided-vote-sheet');
   await expect(sheet).toBeVisible();
@@ -59,6 +59,7 @@ export async function castGuidedVote(page: Page, choice: 'Like' | 'Dislike', not
   await sheet.locator('.category-rating').first().locator('label').filter({ hasText: localizedChoice }).click();
   await sheet.getByRole('button', { name: /review vote|gennemgå stemme/i }).click();
   if (note) await sheet.getByTestId('vote-note').fill(note);
+  await sheet.getByTestId('overall-score').locator('label').filter({ hasText: new RegExp(`^${overallScore}$`) }).click();
   await sheet.getByRole('button', { name: /confirm|bekræft/i }).click();
   await expect(sheet).toHaveCount(0);
 }

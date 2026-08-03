@@ -165,18 +165,20 @@ public sealed class Vote
     public VoteChoice Choice { get; init; }
     public ReasonTag[] Tags { get; init; } = [];
     public string? Note { get; private set; }
+    public int? OverallScore { get; init; }
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     public List<VoteRating> Ratings { get; } = [];
     public List<VoteNoteRevision> NoteRevisions { get; } = [];
     public int Total => Ratings.Sum(x => (int)x.Rating);
     public Vote() { }
-    public Vote(Guid listingId, Guid memberId, IEnumerable<VoteRating> ratings, string? note, DateTimeOffset at)
+    public Vote(Guid listingId, Guid memberId, IEnumerable<VoteRating> ratings, int overallScore, string? note, DateTimeOffset at)
     {
+        if (overallScore is < 1 or > 5) throw new DomainException("Overall score must be from 1 to 5.");
         var values = ratings.ToArray();
         if (values.Length != VoteCategories.All.Length || values.Select(x => x.Category).Distinct().Count() != VoteCategories.All.Length || VoteCategories.All.Any(x => values.All(r => r.Category != x))) throw new DomainException("All ten voting categories are required exactly once.");
         if (values.Any(x => !Enum.IsDefined(x.Rating))) throw new DomainException("Each category rating must be Dislike, Neutral, or Like.");
         if (values.All(x => x.Rating == CategoryRating.Neutral)) throw new DomainException("Rate at least one category.");
-        ListingId = listingId; MemberId = memberId; Note = NormalizeNote(note); CreatedAt = at; Ratings.AddRange(values.Select(x => new VoteRating { Category = x.Category, Rating = x.Rating })); Choice = Total > 0 ? VoteChoice.Like : VoteChoice.Dislike;
+        ListingId = listingId; MemberId = memberId; OverallScore = overallScore; Note = NormalizeNote(note); CreatedAt = at; Ratings.AddRange(values.Select(x => new VoteRating { Category = x.Category, Rating = x.Rating })); Choice = Total > 0 ? VoteChoice.Like : VoteChoice.Dislike;
     }
     public Vote(Guid listingId, Guid memberId, VoteChoice choice, ReasonTag[] tags, string? note, DateTimeOffset at)
     { ListingId = listingId; MemberId = memberId; Choice = choice; Tags = tags.Distinct().ToArray(); Note = NormalizeNote(note); CreatedAt = at; }

@@ -2,7 +2,7 @@ namespace HouseConsensus.Shared;
 
 public sealed record RequestMagicLink(string Email);
 public sealed record ConsumeMagicLink(string Token);
-public sealed record CastVote(IReadOnlyCollection<VoteRatingInput>? Ratings, string? Note = null, VoteChoice? Choice = null);
+public sealed record CastVote(IReadOnlyCollection<VoteRatingInput>? Ratings, int OverallScore, string? Note = null, VoteChoice? Choice = null);
 public sealed record VoteRatingInput(VoteCategory Category, CategoryRating Rating);
 public sealed record VoteRatingDto(VoteCategory Category, CategoryRating Rating);
 public sealed record CreateManualListing(string Url, string Address, string? City = null, decimal? AskingPrice = null);
@@ -24,7 +24,7 @@ public sealed record UpdateProfile(string DisplayName, string AvatarColor);
 public sealed record AuthModeDto(bool CloudflareAccess);
 public sealed record BuildVersionDto(string Version);
 public sealed record MemberDto(Guid Id, string Email, string DisplayName, string Language, MemberRole Role, bool IsActive, string AvatarColor = "");
-public sealed record VoteDto(long Id, Guid ListingId, Guid MemberId, VoteChoice Choice, ReasonTag[] Tags, DateTimeOffset CreatedAt, string? Note = null, string MemberInitials = "", string MemberColor = "", IReadOnlyCollection<VoteRatingDto>? Ratings = null, int Total = 0);
+public sealed record VoteDto(long Id, Guid ListingId, Guid MemberId, VoteChoice Choice, ReasonTag[] Tags, DateTimeOffset CreatedAt, string? Note = null, string MemberInitials = "", string MemberColor = "", IReadOnlyCollection<VoteRatingDto>? Ratings = null, int Total = 0, int? OverallScore = null);
 public sealed record ListingDto(
     Guid Id, string ExternalId, string Address, string? City, decimal? Price,
     double? FamilyFitScore, ListingState State, bool AiAssessed, double? AiConfidence,

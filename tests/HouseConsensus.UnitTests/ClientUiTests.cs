@@ -48,7 +48,7 @@ public sealed class ClientUiTests
     {
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
         var profilePath = Path.Combine(root, "src/Client/Pages/Profile.razor");
-        var layout = File.ReadAllText(Path.Combine(root, "src/Client/Layout/MainLayout.razor"));
+        var navigation = File.ReadAllText(Path.Combine(root, "src/Client/Layout/MainNavigation.razor"));
         var i18n = File.ReadAllText(Path.Combine(root, "src/Client/Services/I18n.cs"));
 
         Assert.True(File.Exists(profilePath));
@@ -59,8 +59,8 @@ public sealed class ClientUiTests
         Assert.Contains("data-testid=\"profile-color", profile, StringComparison.Ordinal);
         Assert.Contains("data-testid=\"profile-save\"", profile, StringComparison.Ordinal);
         Assert.Contains("Auth.SetProfileAsync", profile, StringComparison.Ordinal);
-        Assert.Contains("href=\"profile\"", layout, StringComparison.Ordinal);
-        Assert.Contains("aria-label=\"@L[\"Profile\"]\"", layout, StringComparison.Ordinal);
+        Assert.Contains("href=\"profile\"", navigation, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"@L[\"Profile\"]\"", navigation, StringComparison.Ordinal);
         foreach (var key in new[] { "Profile", "Nickname", "AvatarColor", "ProfileSaved" })
             Assert.Contains($"[\"{key}\"]", i18n, StringComparison.Ordinal);
     }
@@ -267,12 +267,13 @@ public sealed class ClientUiTests
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
         var auth = File.ReadAllText(Path.Combine(root, "src/Client/Components/AuthGate.razor"));
         var layout = File.ReadAllText(Path.Combine(root, "src/Client/Layout/MainLayout.razor"));
+        var navigation = File.ReadAllText(Path.Combine(root, "src/Client/Layout/MainNavigation.razor"));
         var members = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Owner/Members.razor"));
         Assert.Contains("data-testid=\"auth-email\"", auth, StringComparison.Ordinal);
         Assert.Contains("data-testid=\"auth-link-sent\"", auth, StringComparison.Ordinal);
         Assert.Contains("data-testid=\"app-shell\"", layout, StringComparison.Ordinal);
-        Assert.Contains("data-testid=\"current-user-email\"", layout, StringComparison.Ordinal);
-        Assert.Contains("data-testid=\"language-select\"", layout, StringComparison.Ordinal);
+        Assert.Contains("\"current-user-email\"", navigation, StringComparison.Ordinal);
+        Assert.Contains("\"language-select\"", navigation, StringComparison.Ordinal);
         Assert.DoesNotContain("member-invite-email", members, StringComparison.Ordinal);
         Assert.DoesNotContain("member-notice", members, StringComparison.Ordinal);
         Assert.DoesNotContain("Api.Invite", members, StringComparison.Ordinal);
@@ -503,7 +504,7 @@ public sealed class ClientUiTests
     {
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
         var page = File.ReadAllText(Path.Combine(root, "src/Client/Pages/HouseholdVotes.razor"));
-        var nav = File.ReadAllText(Path.Combine(root, "src/Client/Layout/MainLayout.razor"));
+        var nav = File.ReadAllText(Path.Combine(root, "src/Client/Layout/MainNavigation.razor"));
 
         Assert.Contains("@page \"/household-votes\"", page);
         Assert.Contains("vote.MemberInitials", page);
