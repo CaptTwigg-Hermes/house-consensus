@@ -54,7 +54,7 @@ app.UseStaticFiles(new StaticFileOptions
     OnPrepareResponse = context =>
     {
         var name = Path.GetFileName(context.Context.Request.Path.Value);
-        if (name is "service-worker.js" or "service-worker-assets.js")
+        if (name is "service-worker.js" or "service-worker-assets.js" or "app.css")
             context.Context.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
     }
 });

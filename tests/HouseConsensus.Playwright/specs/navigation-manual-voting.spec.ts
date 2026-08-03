@@ -144,4 +144,7 @@ test('header shows the authoritative running server version', async ({ page }) =
     expect(workerAsset.ok()).toBeTruthy();
     expect(workerAsset.headers()['cache-control']).toContain('no-store');
   }
+  const stylesheet = await page.request.get('/css/app.css');
+  expect(stylesheet.ok()).toBeTruthy();
+  expect(stylesheet.headers()['cache-control']).toContain('no-store');
 });
