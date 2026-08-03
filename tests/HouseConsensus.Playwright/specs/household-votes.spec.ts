@@ -29,6 +29,45 @@ test('household votes presents shared feedback as a responsive visual dashboard'
 
     const votes = household.memberPage.getByTestId('household-votes');
     await expect(votes).toBeVisible();
+    const sort = household.memberPage.getByTestId('household-sort');
+    await expect(sort).toBeVisible();
+    await expect(sort).toHaveValue('LatestActivity');
+    await expect(sort.locator('option')).toHaveCount(5);
+    await sort.selectOption('PriceHigh');
+    await expect(sort).toHaveValue('PriceHigh');
+    const [meResponse, listingsResponse] = await Promise.all([
+      household.memberPage.request.get('/api/auth/me'),
+      household.memberPage.request.get('/api/listings/browse')
+    ]);
+    expect(meResponse.ok()).toBeTruthy();
+    expect(listingsResponse.ok()).toBeTruthy();
+    const me = await meResponse.json() as { id: string };
+    const listings = await listingsResponse.json() as Array<{
+      id: string;
+      address: string;
+      price: number | null;
+      votes: Array<{ memberId: string }>;
+    }>;
+    const visibleListings = listings.filter((listing) => listing.votes.some((vote) => vote.memberId !== me.id));
+    const visibleById = new Map(visibleListings.map((listing) => [listing.id.toLowerCase(), listing]));
+    const renderedPriceOrder = await household.memberPage.getByTestId('household-vote-card')
+      .locator('.household-vote-listing')
+      .evaluateAll((links) => links.map((link) => link.getAttribute('href')!.split('/').pop()!.toLowerCase()));
+    expect(new Set(renderedPriceOrder)).toEqual(new Set(visibleById.keys()));
+    const renderedPrices = renderedPriceOrder.map((id) => visibleById.get(id)!.price);
+    expect(renderedPrices.filter((price) => price !== null).length).toBeGreaterThan(1);
+    let reachedMissingPrice = false;
+    let previousPrice = Number.POSITIVE_INFINITY;
+    for (const price of renderedPrices) {
+      if (price === null) {
+        reachedMissingPrice = true;
+        continue;
+      }
+      expect(reachedMissingPrice).toBe(false);
+      expect(price).toBeLessThanOrEqual(previousPrice);
+      previousPrice = price;
+    }
+    await sort.selectOption('LatestActivity');
     await expect(household.memberPage.getByTestId('household-homes-count').locator('strong')).toHaveText(pulse.homes);
     await expect(household.memberPage.getByTestId('household-positive-count').locator('strong')).toHaveText(pulse.positive);
     await expect(household.memberPage.getByTestId('household-note-count').locator('strong')).toHaveText(pulse.notes);
@@ -61,11 +100,14 @@ test('household votes presents shared feedback as a responsive visual dashboard'
       viewport: window.innerWidth,
       pageWidth: document.documentElement.scrollWidth,
       columns: getComputedStyle(document.querySelector('.household-votes')!).gridTemplateColumns,
-      cardWidth: document.querySelector('.household-vote-card')!.getBoundingClientRect().width
+      cardWidth: document.querySelector('.household-vote-card')!.getBoundingClientRect().width,
+      sortRight: document.querySelector('[data-testid="household-sort"]')!.getBoundingClientRect().right
     }));
     expect(mobileGeometry.pageWidth).toBe(mobileGeometry.viewport);
     expect(mobileGeometry.columns.split(' ')).toHaveLength(1);
     expect(mobileGeometry.cardWidth).toBeGreaterThan(340);
+    expect(mobileGeometry.sortRight).toBeLessThanOrEqual(mobileGeometry.viewport);
+    await household.memberPage.screenshot({ path: 'test-results/household-votes-sort-mobile.png', fullPage: true });
 
     await household.memberPage.getByTestId('menu-trigger').click();
     await household.memberPage.getByTestId('language-select').selectOption('da');

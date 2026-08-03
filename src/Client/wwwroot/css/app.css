@@ -1865,6 +1865,10 @@ textarea:focus-visible {
 .household-pulse-stat.positive { background: #edf4e9; }
 .household-pulse-stat.notes { background: #fbefe8; }
 .household-pulse-stat.positive span, .household-pulse-stat.notes span { color: #626b66; }
+.household-votes-toolbar { display: flex; justify-content: flex-end; margin: -6px 0 14px; }
+.household-sort-control { display: grid; gap: 5px; min-width: min(100%, 240px); color: var(--forest); font-size: .75rem; font-weight: 700; }
+.household-sort-control select { width: 100%; min-height: 44px; padding: 9px 36px 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+.household-sort-control select:focus-visible { outline: 3px solid rgba(216,107,69,.32); outline-offset: 2px; }
 .household-votes { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; gap: 18px; }
 .household-vote-card { overflow: hidden; border: 1px solid var(--line); border-radius: 20px; background: var(--paper); box-shadow: 0 10px 30px rgba(24,57,47,.08); transition: transform .2s ease, box-shadow .2s ease; }
 .household-vote-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }

@@ -40,6 +40,19 @@ else
         </div>
     </section>
 
+    <div class="household-votes-toolbar">
+        <label class="household-sort-control">
+            <span>@L["Sort"]</span>
+            <select data-testid="household-sort" @bind="sort">
+                <option value="@HouseholdVoteSort.LatestActivity">@L["Newest"]</option>
+                <option value="@HouseholdVoteSort.MostPositive">@L["PositiveVotes"]</option>
+                <option value="@HouseholdVoteSort.FamilyFit">@L["FamilyScore"]</option>
+                <option value="@HouseholdVoteSort.PriceLow">@L["PriceLow"]</option>
+                <option value="@HouseholdVoteSort.PriceHigh">@L["PriceHigh"]</option>
+            </select>
+        </label>
+    </div>
+
     <div class="household-votes" data-testid="household-votes">
         @foreach (var listing in Items)
         {
@@ -97,9 +110,9 @@ else
 @code {
     private bool loading = true;
     private ListingDto[] listings = [];
+    private HouseholdVoteSort sort = HouseholdVoteSort.LatestActivity;
     private IEnumerable<VoteDto> OtherVotes(ListingDto listing) => listing.Votes.Where(v => v.MemberId != Auth.User?.Id);
-    private ListingDto[] Items => listings.Where(x => OtherVotes(x).Any())
-        .OrderByDescending(x => OtherVotes(x).Max(v => v.CreatedAt)).ToArray();
+    private ListingDto[] Items => HouseholdVoteSorting.Sort(listings, Auth.User?.Id, sort);
     private int LikeCount => Items.Sum(LikeCountFor);
     private int NoteCount => Items.Sum(x => OtherVotes(x).Count(v => !string.IsNullOrWhiteSpace(v.Note)));
 
