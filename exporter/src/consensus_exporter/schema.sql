@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS listings (
     "LotArea" integer, "Rooms" integer, "YearBuilt" integer, "Bathrooms" integer,
     "Bedrooms" integer, "Floors" integer, "EnergyLabel" text, "Quiet" boolean,
     "RoadNoiseDb" double precision, "RailNoiseDb" double precision, "AirNoiseDb" double precision,
+    "RoadNoiseStatus" character varying(20), "RoadNoiseLnightDb" double precision, "RoadNoiseLnightStatus" character varying(20),
+    "RailNoiseStatus" character varying(20), "RailNoiseLnightDb" double precision, "RailNoiseLnightStatus" character varying(20),
+    "AirNoiseStatus" character varying(20), "AirNoiseLnightDb" double precision, "AirNoiseLnightStatus" character varying(20),
     "BuildableHeadroom" integer, "GroundFloorBedroom" boolean,
     "SeparateEntrance" boolean, "SecondKitchen" boolean, "PrivacyScore" integer,
     "FamilyPrivacyScore" double precision, "KidsSpaceScore" double precision,
@@ -45,6 +48,27 @@ ALTER TABLE listings ADD COLUMN IF NOT EXISTS "Quiet" boolean;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "RoadNoiseDb" double precision;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "RailNoiseDb" double precision;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "AirNoiseDb" double precision;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "RoadNoiseStatus" character varying(20);
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "RoadNoiseLnightDb" double precision;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "RoadNoiseLnightStatus" character varying(20);
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "RailNoiseStatus" character varying(20);
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "RailNoiseLnightDb" double precision;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "RailNoiseLnightStatus" character varying(20);
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "AirNoiseStatus" character varying(20);
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "AirNoiseLnightDb" double precision;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS "AirNoiseLnightStatus" character varying(20);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='CK_listings_noise_statuses') THEN
+    ALTER TABLE listings ADD CONSTRAINT "CK_listings_noise_statuses" CHECK (
+      ("RoadNoiseStatus" IS NULL OR "RoadNoiseStatus" IN ('covered','no_contour','unavailable','stale','error')) AND
+      ("RoadNoiseLnightStatus" IS NULL OR "RoadNoiseLnightStatus" IN ('covered','no_contour','unavailable','stale','error')) AND
+      ("RailNoiseStatus" IS NULL OR "RailNoiseStatus" IN ('covered','no_contour','unavailable','stale','error')) AND
+      ("RailNoiseLnightStatus" IS NULL OR "RailNoiseLnightStatus" IN ('covered','no_contour','unavailable','stale','error')) AND
+      ("AirNoiseStatus" IS NULL OR "AirNoiseStatus" IN ('covered','no_contour','unavailable','stale','error')) AND
+      ("AirNoiseLnightStatus" IS NULL OR "AirNoiseLnightStatus" IN ('covered','no_contour','unavailable','stale','error'))
+    );
+  END IF;
+END $$;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "BuildableHeadroom" integer;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "GroundFloorBedroom" boolean;
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS "SeparateEntrance" boolean;

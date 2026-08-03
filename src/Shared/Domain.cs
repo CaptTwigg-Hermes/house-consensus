@@ -73,8 +73,17 @@ public sealed class Listing
     public string? EnergyLabel { get; set; }
     public bool? Quiet { get; set; }
     public double? RoadNoiseDb { get; set; }
+    public string? RoadNoiseStatus { get; set; }
+    public double? RoadNoiseLnightDb { get; set; }
+    public string? RoadNoiseLnightStatus { get; set; }
     public double? RailNoiseDb { get; set; }
+    public string? RailNoiseStatus { get; set; }
+    public double? RailNoiseLnightDb { get; set; }
+    public string? RailNoiseLnightStatus { get; set; }
     public double? AirNoiseDb { get; set; }
+    public string? AirNoiseStatus { get; set; }
+    public double? AirNoiseLnightDb { get; set; }
+    public string? AirNoiseLnightStatus { get; set; }
     public int? BuildableHeadroom { get; set; }
     public bool? GroundFloorBedroom { get; set; }
     public bool? SeparateEntrance { get; set; }

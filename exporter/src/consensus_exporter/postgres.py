@@ -167,6 +167,8 @@ def _privacy_rating(data: dict) -> int | None:
 
 def _number(data: dict, *keys: str) -> float | None:
     value = _first(data, *keys)
+    if isinstance(value, bool):
+        return None
     try:
         number = float(value) if value is not None else None
         return number if number is None or math.isfinite(number) else None
@@ -459,11 +461,85 @@ def _source_first_seen(case: ExportCase, fetched_at: datetime) -> tuple[datetime
     return first_seen, timedelta(0) <= age < timedelta(hours=120)
 
 
+_NOISE_STATUSES = frozenset({"covered", "no_contour", "unavailable", "stale", "error"})
+
+
+@dataclass(frozen=True, slots=True)
+class NoiseFacts:
+    quiet: bool | None
+    road_lden_db: float | None
+    road_lden_status: str
+    road_lnight_db: float | None
+    road_lnight_status: str
+    rail_lden_db: float | None
+    rail_lden_status: str
+    rail_lnight_db: float | None
+    rail_lnight_status: str
+    air_lden_db: float | None
+    air_lden_status: str
+    air_lnight_db: float | None
+    air_lnight_status: str
+
+
+def _noise_observation(source: object, indicator: str) -> tuple[float | None, str]:
+    if not isinstance(source, dict):
+        return None, "unavailable"
+    observation = source.get(indicator)
+    if not isinstance(observation, dict):
+        return None, "unavailable"
+    status = str(observation.get("status") or "").strip().lower()
+    if status not in _NOISE_STATUSES:
+        status = "unavailable"
+    value = _number(observation, "db_value")
+    if status not in {"covered", "stale"}:
+        value = None
+    elif value is None:
+        status = "unavailable"
+    return value, status
+
+
+def _noise_facts(raw: dict) -> NoiseFacts:
+    sources = raw.get("noise_sources")
+    if isinstance(sources, dict):
+        road_lden_db, road_lden_status = _noise_observation(sources.get("ROAD"), "Lden")
+        road_lnight_db, road_lnight_status = _noise_observation(sources.get("ROAD"), "Lnight")
+        rail_lden_db, rail_lden_status = _noise_observation(sources.get("RAIL"), "Lden")
+        rail_lnight_db, rail_lnight_status = _noise_observation(sources.get("RAIL"), "Lnight")
+        air_lden_db, air_lden_status = _noise_observation(sources.get("AIR"), "Lden")
+        air_lnight_db, air_lnight_status = _noise_observation(sources.get("AIR"), "Lnight")
+        quiet = (
+            road_lden_db < 50
+            if road_lden_status == "covered" and road_lden_db is not None
+            else None
+        )
+        return NoiseFacts(
+            quiet,
+            road_lden_db, road_lden_status, road_lnight_db, road_lnight_status,
+            rail_lden_db, rail_lden_status, rail_lnight_db, rail_lnight_status,
+            air_lden_db, air_lden_status, air_lnight_db, air_lnight_status,
+        )
+
+    def legacy(*keys: str) -> tuple[float | None, str]:
+        value = _number(raw, *keys)
+        return value, "covered" if value is not None else "unavailable"
+
+    road_lden_db, road_lden_status = legacy("road_noise_db", "noise_road_db")
+    rail_lden_db, rail_lden_status = legacy("rail_noise_db", "noise_rail_db")
+    air_lden_db, air_lden_status = legacy("air_noise_db", "noise_air_db")
+    quiet = road_lden_db < 50 if road_lden_status == "covered" else None
+    return NoiseFacts(
+        quiet,
+        road_lden_db, road_lden_status, None, "unavailable",
+        rail_lden_db, rail_lden_status, None, "unavailable",
+        air_lden_db, air_lden_status, None, "unavailable",
+    )
+
+
 def _card_facts(case: ExportCase, fetched_at: datetime) -> tuple:
     raw = case.raw
     first_seen, is_new = _source_first_seen(case, fetched_at)
     energy = _first(raw, "energy_label", "energyLabel")
-    noise = _first(raw, "noise_status")
+    noise = _noise_facts(raw)
     return (
         _first(raw, "preview_image"),
         _integer(raw, "housing_area_m2", "housingArea"),
@@ -474,7 +550,7 @@ def _card_facts(case: ExportCase, fetched_at: datetime) -> tuple:
         _integer(raw, "vision_bedroom_count"),
         _integer(raw, "number_of_floors", "numberOfFloors"),
         str(energy).upper() if energy else None,
-        noise == "quiet" if noise is not None else None,
+        noise.quiet,
         _integer(raw, "buildable_headroom_m2"),
         _boolean(raw, "vision_ground_floor_bedroom"),
         _boolean(raw, "vision_separate_entrance"),
@@ -503,9 +579,18 @@ def _card_facts(case: ExportCase, fetched_at: datetime) -> tuple:
         is_new,
         first_seen,
         _first(raw, "family_units"),
-        _number(raw, "road_noise_db") if raw.get("road_noise_db") is not None else _number(raw, "noise_road_db"),
-        _number(raw, "rail_noise_db") if raw.get("rail_noise_db") is not None else _number(raw, "noise_rail_db"),
-        _number(raw, "air_noise_db") if raw.get("air_noise_db") is not None else _number(raw, "noise_air_db"),
+        noise.road_lden_db,
+        noise.rail_lden_db,
+        noise.air_lden_db,
+        noise.road_lden_status,
+        noise.road_lnight_db,
+        noise.road_lnight_status,
+        noise.rail_lden_status,
+        noise.rail_lnight_db,
+        noise.rail_lnight_status,
+        noise.air_lden_status,
+        noise.air_lnight_db,
+        noise.air_lnight_status,
     )
 
 
@@ -727,10 +812,10 @@ class PostgresExporter:
                      "SharedLivingScore","PracticalScore","FamilyPrivacyWeight","KidsSpaceWeight","GardenWeight",
                      "SharedLivingWeight","PracticalWeight","ScoreRuleVersion","ScoreCoveragePct",
                      "FamilyPrivacyAvailable","ScoreNotesJson","Latitude","Longitude","MonthlyExpense",
-                     "DaysOnMarket","CommuteMinutes","CommuteJson","BuildableStatus","Condition","GardenOrientation","MultigenFit","PostalCode","Preferred","IsNew","FirstSeenAt","FamilyUnits","RoadNoiseDb","RailNoiseDb","AirNoiseDb","LearningRuleVersion")
+                     "DaysOnMarket","CommuteMinutes","CommuteJson","BuildableStatus","Condition","GardenOrientation","MultigenFit","PostalCode","Preferred","IsNew","FirstSeenAt","FamilyUnits","RoadNoiseDb","RailNoiseDb","AirNoiseDb","RoadNoiseStatus","RoadNoiseLnightDb","RoadNoiseLnightStatus","RailNoiseStatus","RailNoiseLnightDb","RailNoiseLnightStatus","AirNoiseStatus","AirNoiseLnightDb","AirNoiseLnightStatus","LearningRuleVersion")
                     VALUES (%s,%s,%s,%s,%s,%s,%s::listing_state,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                             %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT("ExternalId") DO UPDATE SET
                      "Address"=excluded."Address","City"=excluded."City","Price"=excluded."Price",
                      "FamilyFitScore"=excluded."FamilyFitScore",
@@ -772,7 +857,11 @@ class PostgresExporter:
                      "IsNew"=(LEAST(COALESCE(current."FirstSeenAt",excluded."FirstSeenAt"),excluded."FirstSeenAt") > excluded."ImportedAt" - interval '120 hours'),
                      "FamilyUnits"=excluded."FamilyUnits",
                      "RoadNoiseDb"=excluded."RoadNoiseDb","RailNoiseDb"=excluded."RailNoiseDb",
-                     "AirNoiseDb"=excluded."AirNoiseDb",
+                     "AirNoiseDb"=excluded."AirNoiseDb","RoadNoiseStatus"=excluded."RoadNoiseStatus",
+                     "RoadNoiseLnightDb"=excluded."RoadNoiseLnightDb","RoadNoiseLnightStatus"=excluded."RoadNoiseLnightStatus",
+                     "RailNoiseStatus"=excluded."RailNoiseStatus","RailNoiseLnightDb"=excluded."RailNoiseLnightDb",
+                     "RailNoiseLnightStatus"=excluded."RailNoiseLnightStatus","AirNoiseStatus"=excluded."AirNoiseStatus",
+                     "AirNoiseLnightDb"=excluded."AirNoiseLnightDb","AirNoiseLnightStatus"=excluded."AirNoiseLnightStatus",
                      "LearningRuleVersion"=CASE WHEN EXISTS (SELECT 1 FROM listing_overrides o WHERE o."ListingId"=current."Id") THEN current."LearningRuleVersion" ELSE excluded."LearningRuleVersion" END
                     RETURNING "Id"
                     """,

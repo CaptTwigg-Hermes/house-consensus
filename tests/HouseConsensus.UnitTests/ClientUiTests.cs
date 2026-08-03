@@ -665,6 +665,44 @@ public sealed class ClientUiTests
         Assert.Contains("HideDisliked", i18n, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Rendered_noise_levels_distinguish_mapping_statuses_and_show_night_values()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<I18n>();
+        await using var provider = services.BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(provider, provider.GetRequiredService<ILoggerFactory>());
+        var listing = new ListingDto(
+            Guid.NewGuid(), "noise", "Noisevej 1", null, null, null,
+            ListingState.Active, false, null, null, null, null, null, false, [],
+            RoadNoiseDb: null, RailNoiseDb: 67, AirNoiseDb: null,
+            RoadNoiseStatus: "no_contour", RoadNoiseLnightStatus: "error",
+            RailNoiseStatus: "stale", RailNoiseLnightDb: 57, RailNoiseLnightStatus: "covered",
+            AirNoiseStatus: "unavailable", AirNoiseLnightStatus: "no_contour");
+
+        var html = await renderer.Dispatcher.InvokeAsync(async () =>
+            (await renderer.RenderComponentAsync<NoiseLevels>(
+                Microsoft.AspNetCore.Components.ParameterView.FromDictionary(
+                    new Dictionary<string, object?> { [nameof(NoiseLevels.Listing)] = listing })))
+            .ToHtmlString());
+
+        Assert.Contains("Road", html, StringComparison.Ordinal);
+        Assert.Contains("Not mapped", html, StringComparison.Ordinal);
+        Assert.Contains("Unavailable", html, StringComparison.Ordinal);
+        Assert.Contains("Lookup failed", html, StringComparison.Ordinal);
+        Assert.Contains("67 dB", html, StringComparison.Ordinal);
+        Assert.Contains("57 dB", html, StringComparison.Ordinal);
+        Assert.Contains("Stale", html, StringComparison.Ordinal);
+        Assert.Contains("Lnight", html, StringComparison.Ordinal);
+
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var i18nSource = File.ReadAllText(Path.Combine(root, "src/Client/Services/I18n.cs"));
+        Assert.Contains(
+            "[\"NoiseLookupFailed\"] = (\"Lookup failed\", \"Opslag mislykkedes\")",
+            i18nSource, StringComparison.Ordinal);
+    }
+
     private sealed class CloudflareUnauthenticatedHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

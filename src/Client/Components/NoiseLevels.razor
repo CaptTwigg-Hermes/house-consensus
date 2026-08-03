@@ -1,21 +1,68 @@
+@using Microsoft.AspNetCore.Components.Rendering
 @inject I18n L
 
 <div class="noise-levels" data-testid="noise-levels" aria-label="@L["NoiseLevels"]">
-    @Level("road", L["RoadNoise"], Listing.RoadNoiseDb)
-    @Level("rail", L["RailNoise"], Listing.RailNoiseDb)
-    @Level("air", L["AirNoise"], Listing.AirNoiseDb)
+    @Level("road", L["RoadNoise"], Listing.RoadNoiseDb, Listing.RoadNoiseStatus, Listing.RoadNoiseLnightDb, Listing.RoadNoiseLnightStatus)
+    @Level("rail", L["RailNoise"], Listing.RailNoiseDb, Listing.RailNoiseStatus, Listing.RailNoiseLnightDb, Listing.RailNoiseLnightStatus)
+    @Level("air", L["AirNoise"], Listing.AirNoiseDb, Listing.AirNoiseStatus, Listing.AirNoiseLnightDb, Listing.AirNoiseLnightStatus)
 </div>
 
 @code {
     [Parameter, EditorRequired] public ListingDto Listing { get; set; } = default!;
 
-    private RenderFragment Level(string kind, string label, double? db) => builder =>
+    private RenderFragment Level(
+        string kind,
+        string label,
+        double? ldenDb,
+        string? ldenStatus,
+        double? lnightDb,
+        string? lnightStatus) => builder =>
     {
+        var normalizedLden = NormalizeStatus(ldenStatus, ldenDb);
+        var normalizedLnight = NormalizeStatus(lnightStatus, lnightDb);
+        var title = $"{label}: Lden {Value(ldenDb, normalizedLden)}; Lnight {Value(lnightDb, normalizedLnight)}";
         builder.OpenElement(0, "span");
-        builder.AddAttribute(1, "class", $"noise-level {kind} {(db.HasValue ? "mapped" : "unmapped")}");
-        builder.AddAttribute(2, "title", db.HasValue ? $"{label}: {db.Value:0.#} dB(A)" : $"{label}: {L["NoMappedData"]}");
-        builder.OpenElement(3, "strong"); builder.AddContent(4, label); builder.CloseElement();
-        builder.OpenElement(5, "small"); builder.AddContent(6, db.HasValue ? $"{db.Value:0.#} dB" : L["NoMappedData"]); builder.CloseElement();
+        builder.AddAttribute(1, "class", $"noise-level {kind} status-{normalizedLden}");
+        builder.AddAttribute(2, "title", title);
+        builder.AddAttribute(3, "aria-label", title);
+        builder.AddAttribute(4, "data-status-lden", normalizedLden);
+        builder.AddAttribute(5, "data-status-lnight", normalizedLnight);
+        builder.OpenElement(6, "strong"); builder.AddContent(7, label); builder.CloseElement();
+        Indicator(builder, 10, "Lden", Value(ldenDb, normalizedLden));
+        Indicator(builder, 20, "Lnight", Value(lnightDb, normalizedLnight));
         builder.CloseElement();
+    };
+
+    private static void Indicator(RenderTreeBuilder builder, int sequence, string indicator, string value)
+    {
+        builder.OpenElement(sequence, "small");
+        builder.OpenElement(sequence + 1, "span");
+        builder.AddAttribute(sequence + 2, "class", "noise-indicator");
+        builder.AddContent(sequence + 3, indicator);
+        builder.CloseElement();
+        builder.OpenElement(sequence + 4, "span");
+        builder.AddContent(sequence + 5, value);
+        builder.CloseElement();
+        builder.CloseElement();
+    }
+
+    private static string NormalizeStatus(string? status, double? db) => status switch
+    {
+        "covered" when db.HasValue => "covered",
+        "stale" when db.HasValue => "stale",
+        "no_contour" => "no_contour",
+        "unavailable" => "unavailable",
+        "error" => "error",
+        _ when db.HasValue => "covered",
+        _ => "unavailable",
+    };
+
+    private string Value(double? db, string status) => status switch
+    {
+        "covered" when db.HasValue => $"{db.Value:0.#} dB",
+        "stale" when db.HasValue => $"{db.Value:0.#} dB · {L["Stale"]}",
+        "no_contour" => L["NoMappedData"],
+        "error" => L["NoiseLookupFailed"],
+        _ => L["Unavailable"],
     };
 }

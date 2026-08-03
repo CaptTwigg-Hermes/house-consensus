@@ -36,31 +36,30 @@ def test_e2e_artifacts_do_not_bind_mount_unc_checkout_paths():
     assert "playwright-report:/tests/playwright-report" in compose
 
 
-def test_e2e_browser_allows_internal_http_and_image_contains_css_fixture():
+def test_e2e_browser_allows_internal_http_and_proxies_listing_images():
     compose = Path("tests/HouseConsensus.Playwright/compose.e2e.yml").read_text()
     dockerfile = Path("tests/HouseConsensus.Playwright/Dockerfile").read_text()
-
-    config = Path("tests/HouseConsensus.Playwright/playwright.config.ts").read_text()
+    runner = Path("tests/HouseConsensus.Playwright/scripts/run-e2e.sh").read_text()
+    browse = Path("tests/HouseConsensus.Playwright/specs/browse-map.spec.ts").read_text()
+    auth = Path("tests/HouseConsensus.Playwright/specs/auth-cloudflare.spec.ts").read_text()
+    members = Path("tests/HouseConsensus.Playwright/specs/owner-members.spec.ts").read_text()
 
     assert "E2E_BASE_URL: http://app:8080" in compose
     assert "context: ../.." in compose
     assert "dockerfile: tests/HouseConsensus.Playwright/Dockerfile" in compose
     assert "COPY tests/HouseConsensus.Playwright/package.json" in dockerfile
     assert "COPY src/Client/wwwroot/css/app.css /src/Client/wwwroot/css/app.css" in dockerfile
-    runner = Path("tests/HouseConsensus.Playwright/scripts/run-e2e.sh").read_text()
-    helper = Path("tests/HouseConsensus.Playwright/helpers/household.ts").read_text()
     assert "getent ahostsv4 app" in runner
     assert 'export E2E_BASE_URL="$BASE_URL"' in runner
-    assert "sameOriginPath" in helper
-    assert "page.goto(sameOriginPath(link))" in helper
-    assert "memberPage.goto(sameOriginPath(inviteLink))" in helper
-    auth_invite = Path("tests/HouseConsensus.Playwright/specs/auth-invite.spec.ts").read_text()
-    owner_members = Path("tests/HouseConsensus.Playwright/specs/owner-members.spec.ts").read_text()
-    assert "memberPage.goto(sameOriginPath(inviteLink))" in auth_invite
-    assert "memberPage.goto(sameOriginPath(inviteLink))" in owner_members
+    assert "card-image img" in browse
+    assert "api\\/listings\\/" in browse
+    assert "\\/image$/" in browse
+    assert "memberPage.goto('/')" in auth
+    assert "memberPage.goto('/')" in members
     assert "mock-ollama:" in compose
     assert "AiLearning__BaseUrl: http://mock-ollama:11434" in compose
     assert "AiLearning__Model: deterministic-e2e" in compose
+
 
 
 def test_runtime_image_uses_the_dotnet_builtin_non_root_user():
@@ -133,7 +132,7 @@ def test_production_compose_uses_existing_cloudflare_tunnel_and_requires_access_
     assert 'CloudflareAccess__Enabled: "true"' in compose
     assert "CloudflareAccess__TeamDomain: ${CLOUDFLARE_ACCESS_TEAM_DOMAIN:?" in compose
     assert "CloudflareAccess__Audience: ${CLOUDFLARE_ACCESS_AUDIENCE:?" in compose
-    assert "${APP_BIND_IP:-127.0.0.1}:${APP_PORT:-8080}:8080" in compose
+    assert "${APP_BIND_IP:-127.0.0.1}:${APP_PORT:-9000}:8080" in compose
     assert "existing TrueNAS Cloudflare Tunnel" in readme
     assert "CLOUDFLARE_ACCESS_TEAM_DOMAIN=" in env_example
     assert "CLOUDFLARE_ACCESS_AUDIENCE=" in env_example

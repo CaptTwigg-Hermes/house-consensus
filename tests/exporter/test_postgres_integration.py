@@ -393,7 +393,7 @@ def test_export_populates_house_card_facts(database_url):
         3,
         1,
         "A2020",
-        True,
+        False,
         220,
         True,
         True,
@@ -414,11 +414,51 @@ def test_export_populates_house_card_facts(database_url):
         "likely",
         "4000",
         True,
-        True,
+        False,
         datetime(2026, 7, 25, 8, tzinfo=timezone.utc),
         "two_family",
     )
     assert actual[30:] == (62.5, 57.5, 67.5)
+
+
+def test_export_persists_nested_noise_evidence_and_does_not_claim_quiet(database_url):
+    noise_sources = {
+        "ROAD": {
+            "Lden": {"status": "no_contour", "db_value": 55.0, "source_service": "road-map"},
+            "Lnight": {"status": "error", "db_value": 61.0, "error": "missing layer"},
+        },
+        "RAIL": {
+            "Lden": {"status": "stale", "db_value": 67.0, "observation_id": 41},
+            "Lnight": {"status": "covered", "db_value": 57.0, "observation_id": 42},
+        },
+        "AIR": {
+            "Lden": {"status": "covered", "db_value": 62.0, "source_raster": "airport-lden"},
+            "Lnight": {"status": "no_contour", "db_value": 44.0, "source_raster": "airport-night"},
+        },
+    }
+    PostgresExporter(database_url).export(
+        [_case("nested-noise", noise_status="quiet", noise_sources=noise_sources)],
+        run_id="nested-noise",
+    )
+
+    with psycopg.connect(database_url) as conn:
+        actual = conn.execute(
+            '''SELECT "Quiet","RoadNoiseDb","RoadNoiseStatus","RoadNoiseLnightDb","RoadNoiseLnightStatus",
+                      "RailNoiseDb","RailNoiseStatus","RailNoiseLnightDb","RailNoiseLnightStatus",
+                      "AirNoiseDb","AirNoiseStatus","AirNoiseLnightDb","AirNoiseLnightStatus"
+               FROM listings WHERE "ExternalId"='nested-noise' '''
+        ).fetchone()
+        raw = conn.execute(
+            '''SELECT raw_payload->'noise_sources' FROM listing_imports i
+               JOIN listings l ON l."Id"=i.listing_id WHERE l."ExternalId"='nested-noise' '''
+        ).fetchone()[0]
+
+    assert actual == (
+        None, None, "no_contour", None, "error",
+        67.0, "stale", 57.0, "covered",
+        62.0, "covered", None, "no_contour",
+    )
+    assert raw == noise_sources
 
 
 def test_tombstone_operation_archives_listing_and_records_identity(database_url):
@@ -509,6 +549,23 @@ def test_exports_family_score_breakdown(database_url):
             "garden": 70,
             "shared_living": 80,
             "practical": 80,
+            "weights": {
+                "privacy": 30,
+                "kids_space": 20,
+                "garden": 20,
+                "shared_living": 15,
+                "practical": 15,
+            },
+            "score_version": "family-score-v2",
+            "privacy_available": True,
+            "score_coverage_pct": 100,
+            "notes": {
+                "privacy": [],
+                "kids_space": [],
+                "garden": [],
+                "shared_living": [],
+                "practical": [],
+            },
         },
     )
 
@@ -551,7 +608,7 @@ def test_exports_family_score_breakdown(database_url):
         family_score=33.9,
         vision_privacy_score=1,
         family_score_breakdown={
-            "privacy": 0,
+            "privacy": None,
             "kids_space": 33,
             "garden": 46,
             "shared_living": 6,
@@ -562,6 +619,16 @@ def test_exports_family_score_breakdown(database_url):
                 "garden": 20 / 0.7,
                 "shared_living": 15 / 0.7,
                 "practical": 15 / 0.7,
+            },
+            "score_version": "family-score-v2-no-privacy",
+            "privacy_available": False,
+            "score_coverage_pct": 100,
+            "notes": {
+                "privacy": [],
+                "kids_space": [],
+                "garden": [],
+                "shared_living": [],
+                "practical": [],
             },
         },
     )
@@ -929,3 +996,28 @@ def test_export_rejects_duplicate_source_ids_before_database_writes(database_url
             "(select count(*) from listing_imports)"
         ).fetchone()
     assert counts == (0, 0, 0)
+
+
+def test_export_rejects_boolean_noise_measurements(database_url):
+    PostgresExporter(database_url).export(
+        [
+            _case(
+                "boolean-noise",
+                noise_sources={
+                    "ROAD": {
+                        "Lden": {"status": "covered", "db_value": True},
+                        "Lnight": {"status": "covered", "db_value": False},
+                    }
+                },
+            )
+        ],
+        run_id="boolean-noise",
+    )
+    with psycopg.connect(database_url) as conn:
+        row = conn.execute(
+            'select "RoadNoiseDb","RoadNoiseStatus","RoadNoiseLnightDb",'
+            '"RoadNoiseLnightStatus","Quiet" from listings '
+            'where "ExternalId"=%s',
+            ("boolean-noise",),
+        ).fetchone()
+    assert row == (None, "unavailable", None, "unavailable", None)

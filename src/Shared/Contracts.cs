@@ -47,7 +47,10 @@ public sealed record ListingDto(
     DateTimeOffset? ImportedAt = null, string? PostalCode = null, bool? Preferred = null,
     bool? IsNew = null, string? FamilyUnits = null, string? CommuteJson = null, DateTimeOffset? FirstSeenAt = null,
     double? RoadNoiseDb = null, double? RailNoiseDb = null, double? AirNoiseDb = null,
-    bool IsManuallyAdded = false, Guid? ManuallyAddedById = null, string? ManuallyAddedByName = null, DateTimeOffset? ManuallyAddedAt = null, bool CanWithdraw = false, bool CanArchive = false);
+    bool IsManuallyAdded = false, Guid? ManuallyAddedById = null, string? ManuallyAddedByName = null, DateTimeOffset? ManuallyAddedAt = null, bool CanWithdraw = false, bool CanArchive = false,
+    string? RoadNoiseStatus = null, double? RoadNoiseLnightDb = null, string? RoadNoiseLnightStatus = null,
+    string? RailNoiseStatus = null, double? RailNoiseLnightDb = null, string? RailNoiseLnightStatus = null,
+    string? AirNoiseStatus = null, double? AirNoiseLnightDb = null, string? AirNoiseLnightStatus = null);
 
 
 public sealed record AiRuleImpactDto(int Eligible, int Evaluated, int WouldReject, int WouldRestore, int Changed, Guid[] ListingIds);
