@@ -163,12 +163,65 @@ CREATE TABLE IF NOT EXISTS delisted_listings (
 CREATE TABLE IF NOT EXISTS export_runs (
     run_id text PRIMARY KEY, source_scope text NOT NULL,
     fetched_at timestamptz NOT NULL, completed_at timestamptz,
+    completion_ordinal bigint,
     snapshot_count integer NOT NULL, manifest_sha256 text NOT NULL,
-    source_config_sha256 text
+    source_config_sha256 text,
+    reconciliation_status text NOT NULL DEFAULT 'running',
+    archival_candidate_count integer NOT NULL DEFAULT 0,
+    archival_blocked_count integer NOT NULL DEFAULT 0,
+    archived_count integer NOT NULL DEFAULT 0
 );
 ALTER TABLE export_runs ADD COLUMN IF NOT EXISTS snapshot_count integer;
 ALTER TABLE export_runs ADD COLUMN IF NOT EXISTS manifest_sha256 text;
 ALTER TABLE export_runs ADD COLUMN IF NOT EXISTS source_config_sha256 text;
+ALTER TABLE export_runs ADD COLUMN IF NOT EXISTS reconciliation_status text NOT NULL DEFAULT 'running';
+ALTER TABLE export_runs ADD COLUMN IF NOT EXISTS archival_candidate_count integer NOT NULL DEFAULT 0;
+ALTER TABLE export_runs ADD COLUMN IF NOT EXISTS archival_blocked_count integer NOT NULL DEFAULT 0;
+ALTER TABLE export_runs ADD COLUMN IF NOT EXISTS archived_count integer NOT NULL DEFAULT 0;
+CREATE SEQUENCE IF NOT EXISTS export_run_completion_ordinal_seq AS bigint;
+ALTER TABLE export_runs ADD COLUMN IF NOT EXISTS completion_ordinal bigint;
+WITH base AS (
+    SELECT COALESCE(MAX(completion_ordinal), 0) AS ordinal FROM export_runs
+), ranked AS (
+    SELECT run_id, ROW_NUMBER() OVER (
+        ORDER BY completed_at, fetched_at, run_id
+    ) AS ordinal
+    FROM export_runs
+    WHERE completed_at IS NOT NULL AND completion_ordinal IS NULL
+)
+UPDATE export_runs e
+SET completion_ordinal = base.ordinal + ranked.ordinal
+FROM base, ranked
+WHERE e.run_id = ranked.run_id;
+DO $$ DECLARE max_ordinal bigint; BEGIN
+    SELECT MAX(completion_ordinal) INTO max_ordinal FROM export_runs;
+    IF max_ordinal IS NULL THEN
+        PERFORM setval('export_run_completion_ordinal_seq', 1, false);
+    ELSE
+        PERFORM setval(
+            'export_run_completion_ordinal_seq',
+            GREATEST(
+                max_ordinal,
+                (SELECT last_value FROM export_run_completion_ordinal_seq)
+            ),
+            true
+        );
+    END IF;
+END $$;
+UPDATE export_runs SET reconciliation_status='outcome_unknown'
+WHERE completed_at IS NOT NULL AND reconciliation_status='running';
+CREATE UNIQUE INDEX IF NOT EXISTS ux_export_runs_completion_ordinal
+    ON export_runs(completion_ordinal) WHERE completion_ordinal IS NOT NULL;
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname='ck_export_runs_completion_pair'
+        AND conrelid='export_runs'::regclass
+    ) THEN
+        ALTER TABLE export_runs ADD CONSTRAINT ck_export_runs_completion_pair
+            CHECK ((completed_at IS NULL) = (completion_ordinal IS NULL));
+    END IF;
+END $$;
 DO $$ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint

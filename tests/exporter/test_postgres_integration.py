@@ -1,7 +1,7 @@
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import uuid
 
 import consensus_exporter.postgres as postgres_module
@@ -198,6 +198,252 @@ def test_idempotent_upsert_provenance_ai_and_override_preservation(database_url)
     assert counts == (1, 1, 1)
 
 
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_retrying_older_completed_run_does_not_restore_stale_projection(
+    database_url, dry_run
+):
+    exporter = PostgresExporter(database_url)
+    first_snapshot = [
+        _case("changed", address="Old address", price=1_000_000),
+        _case("absent", address="Absent address", price=2_000_000),
+    ]
+    exporter.export(
+        first_snapshot,
+        run_id="stale-retry-a",
+        fetched_at=datetime(2026, 7, 24, 8, tzinfo=timezone.utc),
+    )
+    exporter.export(
+        [_case("changed", address="New address", price=3_000_000)],
+        run_id="stale-retry-b",
+        fetched_at=datetime(2026, 7, 27, 8, tzinfo=timezone.utc),
+    )
+
+    def projection_state():
+        with psycopg.connect(database_url) as conn:
+            return (
+                conn.execute(
+                    'select row_to_json(l)::text from listings l order by "ExternalId"'
+                ).fetchall(),
+                conn.execute(
+                    "select row_to_json(s)::text from listing_export_state s "
+                    "order by listing_id"
+                ).fetchall(),
+            )
+
+    before_retry = projection_state()
+    retry = exporter.export(
+        first_snapshot,
+        run_id="stale-retry-a",
+        fetched_at=datetime(2026, 7, 24, 8, tzinfo=timezone.utc),
+        dry_run=dry_run,
+    )
+
+    assert projection_state() == before_retry
+    assert retry.exported == 0
+    assert retry.inserted == 0
+    assert retry.updated == 0
+    assert retry.reactivated == 0
+
+
+@pytest.mark.parametrize("completed_at_offset_seconds", [0, -3600])
+def test_superseded_retry_uses_completion_order_not_wall_clock(
+    database_url, completed_at_offset_seconds
+):
+    exporter = PostgresExporter(database_url)
+    first_snapshot = [_case("ordinal", address="Old address", price=1_000_000)]
+    exporter.export(
+        first_snapshot,
+        run_id="ordinal-a",
+        fetched_at=datetime(2026, 7, 24, 8, tzinfo=timezone.utc),
+    )
+    exporter.export(
+        [_case("ordinal", address="New address", price=3_000_000)],
+        run_id="ordinal-b",
+        fetched_at=datetime(2026, 7, 27, 8, tzinfo=timezone.utc),
+    )
+    with psycopg.connect(database_url) as conn:
+        first_completed_at = conn.execute(
+            "select completed_at from export_runs where run_id='ordinal-a'"
+        ).fetchone()[0]
+        conn.execute(
+            "update export_runs set completed_at=%s where run_id='ordinal-b'",
+            (
+                first_completed_at + timedelta(seconds=completed_at_offset_seconds),
+            ),
+        )
+
+    retry = exporter.export(
+        first_snapshot,
+        run_id="ordinal-a",
+        fetched_at=datetime(2026, 7, 24, 8, tzinfo=timezone.utc),
+    )
+
+    with psycopg.connect(database_url) as conn:
+        listing = conn.execute(
+            'select "Address","Price" from listings where "ExternalId"=%s',
+            ("ordinal",),
+        ).fetchone()
+        completion_orders = conn.execute(
+            """select run_id,completion_ordinal from export_runs
+            where run_id in ('ordinal-a','ordinal-b') order by completion_ordinal"""
+        ).fetchall()
+
+    assert listing == ("New address", 3_000_000)
+    assert retry.exported == 0
+    assert completion_orders == [("ordinal-a", 1), ("ordinal-b", 2)]
+
+
+def test_retry_checks_for_newer_completion_after_listing_serialization(database_url):
+    exporter = PostgresExporter(database_url)
+    first_snapshot = [
+        _case("race-changed", address="Old address", price=1_000_000),
+        _case("race-absent", address="Absent address", price=2_000_000),
+    ]
+    exporter.export(
+        first_snapshot,
+        run_id="stale-race-a",
+        fetched_at=datetime(2026, 7, 24, 8, tzinfo=timezone.utc),
+    )
+
+    advisory_key = 812_604
+    blocker = psycopg.connect(database_url, autocommit=True)
+    blocker.execute("select pg_advisory_lock(%s)", (advisory_key,))
+    try:
+        with psycopg.connect(database_url) as conn:
+            conn.execute(
+                f"""create function block_stale_race_b_completion() returns trigger
+                language plpgsql as $$ begin
+                    if NEW.run_id='stale-race-b' and NEW.completed_at is not null then
+                        perform pg_advisory_xact_lock({advisory_key});
+                    end if;
+                    return NEW;
+                end $$"""
+            )
+            conn.execute(
+                """create trigger block_stale_race_b_completion
+                before update of completed_at on export_runs
+                for each row execute function block_stale_race_b_completion()"""
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            newer = pool.submit(
+                exporter.export,
+                [_case("race-changed", address="New address", price=3_000_000)],
+                run_id="stale-race-b",
+                fetched_at=datetime(2026, 7, 27, 8, tzinfo=timezone.utc),
+            )
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                with psycopg.connect(database_url) as observer:
+                    blocked = observer.execute(
+                        """select exists(select 1 from pg_stat_activity
+                        where datname=current_database() and wait_event_type='Lock'
+                        and wait_event='advisory')"""
+                    ).fetchone()[0]
+                if blocked:
+                    break
+                time.sleep(0.02)
+            else:
+                pytest.fail("newer export did not reach the completion barrier")
+
+            retry = pool.submit(
+                exporter.export,
+                first_snapshot,
+                run_id="stale-race-a",
+                fetched_at=datetime(2026, 7, 24, 8, tzinfo=timezone.utc),
+            )
+            time.sleep(0.1)
+            blocker.execute("select pg_advisory_unlock(%s)", (advisory_key,))
+            newer.result(timeout=5)
+            retry_result = retry.result(timeout=5)
+    finally:
+        blocker.execute("select pg_advisory_unlock(%s)", (advisory_key,))
+        blocker.close()
+
+    with psycopg.connect(database_url) as conn:
+        changed = conn.execute(
+            'select "Address","Price" from listings where "ExternalId"=%s',
+            ("race-changed",),
+        ).fetchone()
+        absent_state = conn.execute(
+            """select s.last_seen_run_id,s.missing_complete_snapshots
+            from listing_export_state s join listings l on l."Id"=s.listing_id
+            where l."ExternalId"=%s""",
+            ("race-absent",),
+        ).fetchone()
+
+    assert changed == ("New address", 3_000_000)
+    assert absent_state == ("stale-race-a", 1)
+    assert retry_result.exported == 0
+
+
+def test_current_completed_retry_dry_run_rolls_back_projection_refresh(database_url):
+    exporter = PostgresExporter(database_url)
+    fetched_at = datetime(2026, 7, 24, 8, tzinfo=timezone.utc)
+    case = _case("current-dry-retry", address="Snapshot address")
+    exporter.export([case], run_id="current-dry-retry", fetched_at=fetched_at)
+    with psycopg.connect(database_url) as conn:
+        conn.execute(
+            'update listings set "Address"=%s where "ExternalId"=%s',
+            ("Operator address", "current-dry-retry"),
+        )
+        original_outcome = conn.execute(
+            """select completed_at,completion_ordinal,reconciliation_status,
+            archival_candidate_count,archival_blocked_count,archived_count
+            from export_runs where run_id='current-dry-retry'"""
+        ).fetchone()
+
+    retry = exporter.export(
+        [case],
+        run_id="current-dry-retry",
+        fetched_at=fetched_at,
+        dry_run=True,
+    )
+
+    with psycopg.connect(database_url) as conn:
+        address = conn.execute(
+            'select "Address" from listings where "ExternalId"=%s',
+            ("current-dry-retry",),
+        ).fetchone()
+        retried_outcome = conn.execute(
+            """select completed_at,completion_ordinal,reconciliation_status,
+            archival_candidate_count,archival_blocked_count,archived_count
+            from export_runs where run_id='current-dry-retry'"""
+        ).fetchone()
+
+    assert address == ("Operator address",)
+    assert retried_outcome == original_outcome
+    assert retry.updated == 1
+
+
+def test_schema_backfills_legacy_completion_as_unknown_outcome(database_url):
+    with psycopg.connect(database_url) as conn:
+        conn.execute(
+            "alter table export_runs drop constraint ck_export_runs_completion_pair"
+        )
+        conn.execute(
+            """insert into export_runs
+            (run_id,source_scope,fetched_at,completed_at,snapshot_count,
+             manifest_sha256,reconciliation_status)
+            values ('legacy-completed','legacy',%s,%s,0,%s,'running')""",
+            (
+                datetime(2026, 1, 1, tzinfo=timezone.utc),
+                datetime(2026, 1, 2, tzinfo=timezone.utc),
+                "0" * 64,
+            ),
+        )
+        ensure_schema(conn)
+        legacy = conn.execute(
+            """select reconciliation_status,completion_ordinal,
+            archival_candidate_count,archival_blocked_count,archived_count
+            from export_runs where run_id='legacy-completed'"""
+        ).fetchone()
+
+    assert legacy[0] == "outcome_unknown"
+    assert legacy[1] is not None
+    assert legacy[2:] == (0, 0, 0)
+
+
 def test_archive_and_reappearance_lifecycle(database_url):
     exporter = PostgresExporter(database_url)
     initial = [_case(str(i)) for i in range(1, 7)]
@@ -306,6 +552,113 @@ def test_mass_removal_guard_blocks_archival_over_twenty_percent(database_url):
         ).fetchone()[0]
     assert archived == 0
     assert result.archival_blocked == 4
+
+
+def test_mass_removal_guard_allows_archival_at_exactly_twenty_percent(database_url):
+    exporter = PostgresExporter(database_url)
+    initial = [_case(str(i)) for i in range(5)]
+    exporter.export(
+        initial,
+        run_id="guard-exact-1",
+        fetched_at=datetime(2026, 7, 24, 8, tzinfo=timezone.utc),
+    )
+    exporter.export(
+        initial[:-1],
+        run_id="guard-exact-2",
+        fetched_at=datetime(2026, 7, 27, 8, tzinfo=timezone.utc),
+    )
+    result = exporter.export(
+        initial[:-1],
+        run_id="guard-exact-3",
+        fetched_at=datetime(2026, 7, 28, 8, tzinfo=timezone.utc),
+    )
+
+    assert result.archived == 1
+    assert result.archival_blocked == 0
+
+    with psycopg.connect(database_url) as conn:
+        first_outcome = conn.execute(
+            """select reconciliation_status, archival_candidate_count,
+                      archival_blocked_count, archived_count
+               from export_runs where run_id='guard-exact-3'"""
+        ).fetchone()
+    retry = exporter.export(
+        initial[:-1],
+        run_id="guard-exact-3",
+        fetched_at=datetime(2026, 7, 28, 8, tzinfo=timezone.utc),
+    )
+    with psycopg.connect(database_url) as conn:
+        retried_outcome = conn.execute(
+            """select reconciliation_status, archival_candidate_count,
+                      archival_blocked_count, archived_count
+               from export_runs where run_id='guard-exact-3'"""
+        ).fetchone()
+
+    assert first_outcome == ("completed", 1, 0, 1)
+    assert retried_outcome == first_outcome
+    assert retry.archived == 1
+    assert retry.archival_blocked == 0
+
+
+def test_snapshot_absence_never_archives_manual_protected_listing(database_url):
+    exporter = PostgresExporter(database_url)
+    initial = [_case(str(i)) for i in range(6)]
+    exporter.export(
+        initial,
+        run_id="manual-absence-1",
+        fetched_at=datetime(2026, 7, 24, 8, tzinfo=timezone.utc),
+    )
+    with psycopg.connect(database_url) as conn:
+        conn.execute(
+            'update listings set "IsManuallyAdded"=true,"ManualLifecycleProtected"=true where "ExternalId"=%s',
+            ("5",),
+        )
+    exporter.export(
+        initial[:-1],
+        run_id="manual-absence-2",
+        fetched_at=datetime(2026, 7, 27, 8, tzinfo=timezone.utc),
+    )
+    exporter.export(
+        initial[:-1],
+        run_id="manual-absence-3",
+        fetched_at=datetime(2026, 7, 28, 8, tzinfo=timezone.utc),
+    )
+
+    with psycopg.connect(database_url) as conn:
+        state = conn.execute(
+            'select "State"::text,"ArchivedAt" from listings where "ExternalId"=%s',
+            ("5",),
+        ).fetchone()
+
+    assert state == ("active", None)
+
+
+def test_mass_removal_guard_persists_operator_visible_run_outcome(database_url):
+    exporter = PostgresExporter(database_url)
+    exporter.export(
+        [_case(str(i)) for i in range(5)],
+        run_id="guard-visible-1",
+        fetched_at=datetime(2026, 7, 24, 8, tzinfo=timezone.utc),
+    )
+    exporter.export(
+        [_case("0")],
+        run_id="guard-visible-2",
+        fetched_at=datetime(2026, 7, 27, 8, tzinfo=timezone.utc),
+    )
+    exporter.export(
+        [_case("0")],
+        run_id="guard-visible-3",
+        fetched_at=datetime(2026, 7, 28, 8, tzinfo=timezone.utc),
+    )
+
+    with psycopg.connect(database_url) as conn:
+        outcome = conn.execute(
+            """select reconciliation_status, archival_candidate_count,
+                      archival_blocked_count, archived_count
+               from export_runs where run_id='guard-visible-3'"""
+        ).fetchone()
+
+    assert outcome == ("archival_blocked", 4, 4, 0)
 
 
 def test_explicit_schema_bootstrap_supports_a_fresh_application_database(database_url):
@@ -486,6 +839,76 @@ def test_tombstone_operation_archives_listing_and_records_identity(database_url)
         "http_404",
     )
     assert state == ("archived",)
+
+
+def test_tombstone_and_export_use_deadlock_free_lock_order(database_url):
+    exporter = PostgresExporter(database_url, ensure_schema_on_export=False)
+    external_id = "deadlock-order"
+    exporter.export([_case(external_id)], run_id="deadlock-order-initial")
+
+    barrier_key = 812_605
+    blocker = psycopg.connect(database_url, autocommit=True)
+    blocker.execute("select pg_advisory_lock(%s)", (barrier_key,))
+    try:
+        with psycopg.connect(database_url) as conn:
+            conn.execute(
+                f"""create function block_tombstone_insert() returns trigger
+                language plpgsql as $$ begin
+                    perform pg_advisory_xact_lock({barrier_key});
+                    return NEW;
+                end $$"""
+            )
+            conn.execute(
+                """create trigger block_tombstone_insert before insert on delisted_listings
+                for each row execute function block_tombstone_insert()"""
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            tombstone = pool.submit(
+                postgres_module.tombstone_listing,
+                database_url,
+                external_id=external_id,
+            )
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                with psycopg.connect(database_url) as observer:
+                    blocked = observer.execute(
+                        """select exists(select 1 from pg_stat_activity
+                        where datname=current_database() and wait_event_type='Lock'
+                        and wait_event='advisory')"""
+                    ).fetchone()[0]
+                if blocked:
+                    break
+                time.sleep(0.02)
+            else:
+                pytest.fail("tombstone did not reach the insert barrier")
+
+            reimport = pool.submit(
+                exporter.export,
+                [_case(external_id)],
+                run_id="deadlock-order-reimport",
+            )
+            time.sleep(0.1)
+            blocker.execute("select pg_advisory_unlock(%s)", (barrier_key,))
+            tombstone.result(timeout=5)
+            result = reimport.result(timeout=5)
+    finally:
+        blocker.execute("select pg_advisory_unlock(%s)", (barrier_key,))
+        blocker.close()
+
+    with psycopg.connect(database_url) as conn:
+        state = conn.execute(
+            'select "State"::text from listings where "ExternalId"=%s',
+            (external_id,),
+        ).fetchone()
+        tombstone_count = conn.execute(
+            "select count(*) from delisted_listings where external_id=%s",
+            (external_id,),
+        ).fetchone()[0]
+
+    assert state == ("archived",)
+    assert tombstone_count == 1
+    assert result.exported == 0
 
 
 def test_concurrent_uncommitted_tombstone_blocks_reimport(database_url):

@@ -115,6 +115,9 @@ def tombstone_listing(
         raise ValueError("external_id is required")
     verified_at = verified_at or datetime.now(timezone.utc)
     with psycopg.connect(database_url) as conn:
+        # Match exporter lock order: global listings serialization first,
+        # then the stable per-listing identity lock.
+        conn.execute("LOCK TABLE listings IN SHARE ROW EXCLUSIVE MODE")
         conn.execute(
             "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
             (external_id,),
@@ -671,8 +674,11 @@ class PostgresExporter:
                 "select pg_advisory_xact_lock(hashtextextended(%s, 1))", (run_id,)
             )
             existing_run = conn.execute(
-                "select source_scope,fetched_at,snapshot_count,manifest_sha256,source_config_sha256 "
-                "from export_runs where run_id=%s",
+                """select source_scope,fetched_at,snapshot_count,manifest_sha256,
+                source_config_sha256,completed_at,completion_ordinal,
+                reconciliation_status,archival_candidate_count,
+                archival_blocked_count,archived_count
+                from export_runs where run_id=%s""",
                 (run_id,),
             ).fetchone()
             run_identity = (
@@ -682,9 +688,59 @@ class PostgresExporter:
                 manifest_sha256,
                 source_config_sha256,
             )
-            if existing_run is not None and tuple(existing_run) != run_identity:
+            if existing_run is not None and tuple(existing_run[:5]) != run_identity:
                 raise RuntimeError(
                     f"run ID {run_id!r} already belongs to a different immutable snapshot"
+                )
+            # Validate immutable run identity before touching listings. Serialize
+            # before checking supersession so a newer in-flight run cannot commit
+            # between the check and this retry's projection writes.
+            conn.execute("LOCK TABLE listings IN SHARE ROW EXCLUSIVE MODE")
+            prior_reconciliation_outcome = (
+                tuple(existing_run[8:])
+                if existing_run is not None and existing_run[5] is not None
+                else None
+            )
+            superseded_completed_retry = (
+                prior_reconciliation_outcome is not None
+                and (
+                    existing_run[7] == "outcome_unknown"
+                    or conn.execute(
+                        """select exists(select 1 from export_runs
+                        where source_scope=%s and completed_at is not null
+                        and completion_ordinal>%s)""",
+                        (self.source_scope, existing_run[6]),
+                    ).fetchone()[0]
+                )
+            )
+            if superseded_completed_retry:
+                _, archival_blocked, archived = prior_reconciliation_outcome
+                active_total = conn.execute(
+                    'select count(*) from listings where "ArchivedAt" is null'
+                ).fetchone()[0]
+                geometry_covered = 0
+                if (
+                    _table_exists(conn, "spatial_ref_sys")
+                    and conn.execute(
+                        "select exists(select 1 from information_schema.columns where table_name='listings' and column_name='Location')"
+                    ).fetchone()[0]
+                ):
+                    geometry_covered = conn.execute(
+                        'select count(*) from listings where "ArchivedAt" is null and "Location" is not null'
+                    ).fetchone()[0]
+                if dry_run:
+                    conn.rollback()
+                return ExportResult(
+                    0,
+                    archived,
+                    0,
+                    0,
+                    archival_blocked,
+                    0,
+                    0,
+                    0,
+                    active_total,
+                    geometry_covered,
                 )
             if existing_run is None:
                 conn.execute(
@@ -693,10 +749,6 @@ class PostgresExporter:
                     "VALUES (%s,%s,%s,%s,%s,%s)",
                     (run_id, *run_identity),
                 )
-            # Validate immutable run identity before touching listings. Then serialize
-            # every listings mutation to avoid lock upgrades and keep importer/manual
-            # deduplication checks atomic.
-            conn.execute("LOCK TABLE listings IN SHARE ROW EXCLUSIVE MODE")
             _purge_legacy_hard_rejects(conn, hard_rejected_ids)
             learning_rule = _active_learning_rule(conn)
             votes_table_exists = _table_exists(conn, "votes")
@@ -1008,49 +1060,62 @@ class PostgresExporter:
                         except Exception:
                             media_errors += 1
                 exported += 1
-            conn.execute(
-                """UPDATE listing_export_state SET
-                missing_complete_snapshots=missing_complete_snapshots + CASE
-                    WHEN extract(isodow from %s::timestamptz) between 1 and 5
-                     AND last_missing_snapshot_date IS DISTINCT FROM (%s::timestamptz)::date THEN 1 ELSE 0 END,
-                last_missing_snapshot_date=(%s::timestamptz)::date
-                WHERE source_scope=%s AND last_seen_run_id<>%s""",
-                (fetched_at, fetched_at, fetched_at, self.source_scope, run_id),
-            )
-            candidates = conn.execute(
-                """SELECT count(*) FROM listings l JOIN listing_export_state s ON s.listing_id=l."Id"
-                WHERE s.source_scope=%s AND s.last_seen_run_id<>%s
-                AND s.missing_complete_snapshots>=2 AND l."ArchivedAt" IS NULL AND l."ManualLifecycleProtected"=false""",
-                (self.source_scope, run_id),
-            ).fetchone()[0]
-            retained = conn.execute(
-                """SELECT count(*) FROM listings l JOIN listing_export_state s ON s.listing_id=l."Id"
-                WHERE s.source_scope=%s AND l."ArchivedAt" IS NULL""",
-                (self.source_scope,),
-            ).fetchone()[0]
-            archival_blocked = (
-                candidates if candidates and candidates / max(retained, 1) > 0.20 else 0
-            )
-            archived = 0
-            if not archival_blocked:
-                archived = conn.execute(
-                    """UPDATE listings l SET "State"='archived',"ArchivedAt"=%s
-                    FROM listing_export_state s WHERE s.listing_id=l."Id" AND s.source_scope=%s
-                    AND s.last_seen_run_id<>%s AND s.missing_complete_snapshots>=2
-                    AND l."ArchivedAt" IS NULL AND l."ManualLifecycleProtected"=false""",
-                    (fetched_at, self.source_scope, run_id),
-                ).rowcount
+            if prior_reconciliation_outcome is not None:
+                candidates, archival_blocked, archived = prior_reconciliation_outcome
+            else:
                 conn.execute(
-                    """UPDATE listing_export_state s SET archive_reason='missing_from_two_complete_snapshots'
-                    WHERE source_scope=%s AND last_seen_run_id<>%s
-                    AND missing_complete_snapshots>=2 AND archive_reason IS NULL
-                    AND EXISTS (SELECT 1 FROM listings l WHERE l."Id"=s.listing_id AND l."ManualLifecycleProtected"=false)""",
-                    (self.source_scope, run_id),
+                    """UPDATE listing_export_state SET
+                    missing_complete_snapshots=missing_complete_snapshots + CASE
+                        WHEN extract(isodow from %s::timestamptz) between 1 and 5
+                         AND last_missing_snapshot_date IS DISTINCT FROM (%s::timestamptz)::date THEN 1 ELSE 0 END,
+                    last_missing_snapshot_date=(%s::timestamptz)::date
+                    WHERE source_scope=%s AND last_seen_run_id<>%s""",
+                    (fetched_at, fetched_at, fetched_at, self.source_scope, run_id),
                 )
-            conn.execute(
-                "UPDATE export_runs SET completed_at=%s WHERE run_id=%s",
-                (datetime.now(timezone.utc), run_id),
-            )
+                candidates = conn.execute(
+                    """SELECT count(*) FROM listings l JOIN listing_export_state s ON s.listing_id=l."Id"
+                    WHERE s.source_scope=%s AND s.last_seen_run_id<>%s
+                    AND s.missing_complete_snapshots>=2 AND l."ArchivedAt" IS NULL AND l."ManualLifecycleProtected"=false""",
+                    (self.source_scope, run_id),
+                ).fetchone()[0]
+                retained = conn.execute(
+                    """SELECT count(*) FROM listings l JOIN listing_export_state s ON s.listing_id=l."Id"
+                    WHERE s.source_scope=%s AND l."ArchivedAt" IS NULL""",
+                    (self.source_scope,),
+                ).fetchone()[0]
+                archival_blocked = (
+                    candidates if candidates and candidates / max(retained, 1) > 0.20 else 0
+                )
+                archived = 0
+                if not archival_blocked:
+                    archived = conn.execute(
+                        """UPDATE listings l SET "State"='archived',"ArchivedAt"=%s
+                        FROM listing_export_state s WHERE s.listing_id=l."Id" AND s.source_scope=%s
+                        AND s.last_seen_run_id<>%s AND s.missing_complete_snapshots>=2
+                        AND l."ArchivedAt" IS NULL AND l."ManualLifecycleProtected"=false""",
+                        (fetched_at, self.source_scope, run_id),
+                    ).rowcount
+                    conn.execute(
+                        """UPDATE listing_export_state s SET archive_reason='missing_from_two_complete_snapshots'
+                        WHERE source_scope=%s AND last_seen_run_id<>%s
+                        AND missing_complete_snapshots>=2 AND archive_reason IS NULL
+                        AND EXISTS (SELECT 1 FROM listings l WHERE l."Id"=s.listing_id AND l."ManualLifecycleProtected"=false)""",
+                        (self.source_scope, run_id),
+                    )
+                conn.execute(
+                    """UPDATE export_runs SET completed_at=%s,
+                    completion_ordinal=nextval('export_run_completion_ordinal_seq'),
+                    reconciliation_status=%s, archival_candidate_count=%s,
+                    archival_blocked_count=%s, archived_count=%s WHERE run_id=%s""",
+                    (
+                        datetime.now(timezone.utc),
+                        "archival_blocked" if archival_blocked else "completed",
+                        candidates,
+                        archival_blocked,
+                        archived,
+                        run_id,
+                    ),
+                )
             active_total = conn.execute(
                 'select count(*) from listings where "ArchivedAt" is null'
             ).fetchone()[0]
