@@ -668,7 +668,7 @@ class PostgresExporter:
         with psycopg.connect(self.database_url) as conn:
             # Production exporter credentials should only need DML. Schema DDL
             # is an explicit deployment/test operation, not a per-run side effect.
-            if self.ensure_schema_on_export:
+            if self.ensure_schema_on_export and not dry_run:
                 ensure_schema(conn)
             conn.execute(
                 "select pg_advisory_xact_lock(hashtextextended(%s, 1))", (run_id,)
@@ -706,10 +706,12 @@ class PostgresExporter:
                 and (
                     existing_run[7] == "outcome_unknown"
                     or conn.execute(
-                        """select exists(select 1 from export_runs
-                        where source_scope=%s and completed_at is not null
-                        and completion_ordinal>%s)""",
-                        (self.source_scope, existing_run[6]),
+                        """select exists(
+                            select 1 from export_runs
+                            where completed_at is not null
+                            and completion_ordinal>%s
+                        )""",
+                        (existing_run[6],),
                     ).fetchone()[0]
                 )
             )
@@ -984,6 +986,7 @@ class PostgresExporter:
                 if (
                     learning_applied
                     and learning_rule
+                    and not dry_run
                     and _table_exists(conn, "ai_rule_applications")
                 ):
                     previous_state = existing[1] if existing else baseline_state
@@ -1003,21 +1006,22 @@ class PostgresExporter:
                             fetched_at,
                         ),
                     )
-                conn.execute(
-                    """INSERT INTO listing_imports
-                    (listing_id,run_id,imported_at,payload_sha256,raw_payload,non_ai_passed,pipeline_decision)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(listing_id,run_id) DO NOTHING""",
-                    (
-                        listing_id,
-                        run_id,
-                        fetched_at,
-                        payload_hash,
-                        Jsonb(case.raw),
-                        case.non_ai_passed,
-                        case.pipeline_decision,
-                    ),
-                )
-                if evidence:
+                if not dry_run:
+                    conn.execute(
+                        """INSERT INTO listing_imports
+                        (listing_id,run_id,imported_at,payload_sha256,raw_payload,non_ai_passed,pipeline_decision)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(listing_id,run_id) DO NOTHING""",
+                        (
+                            listing_id,
+                            run_id,
+                            fetched_at,
+                            payload_hash,
+                            Jsonb(case.raw),
+                            case.non_ai_passed,
+                            case.pipeline_decision,
+                        ),
+                    )
+                if evidence and not dry_run:
                     _, evidence_hash = _canonical(evidence)
                     conn.execute(
                         """INSERT INTO ai_evidence
@@ -1035,7 +1039,7 @@ class PostgresExporter:
                             fetched_at,
                         ),
                     )
-                if self.media_cache:
+                if self.media_cache and not dry_run:
                     for kind, url in discover_media(case.raw):
                         try:
                             media = self.media_cache.cache(kind, url)
@@ -1102,20 +1106,21 @@ class PostgresExporter:
                         AND EXISTS (SELECT 1 FROM listings l WHERE l."Id"=s.listing_id AND l."ManualLifecycleProtected"=false)""",
                         (self.source_scope, run_id),
                     )
-                conn.execute(
-                    """UPDATE export_runs SET completed_at=%s,
-                    completion_ordinal=nextval('export_run_completion_ordinal_seq'),
-                    reconciliation_status=%s, archival_candidate_count=%s,
-                    archival_blocked_count=%s, archived_count=%s WHERE run_id=%s""",
-                    (
-                        datetime.now(timezone.utc),
-                        "archival_blocked" if archival_blocked else "completed",
-                        candidates,
-                        archival_blocked,
-                        archived,
-                        run_id,
-                    ),
-                )
+                if not dry_run:
+                    conn.execute(
+                        """UPDATE export_runs SET completed_at=%s,
+                        completion_ordinal=nextval('export_run_completion_ordinal_seq'),
+                        reconciliation_status=%s, archival_candidate_count=%s,
+                        archival_blocked_count=%s, archived_count=%s WHERE run_id=%s""",
+                        (
+                            datetime.now(timezone.utc),
+                            "archival_blocked" if archival_blocked else "completed",
+                            candidates,
+                            archival_blocked,
+                            archived,
+                            run_id,
+                        ),
+                    )
             active_total = conn.execute(
                 'select count(*) from listings where "ArchivedAt" is null'
             ).fetchone()[0]

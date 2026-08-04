@@ -3,9 +3,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import uuid
+from types import SimpleNamespace
 
 import consensus_exporter.postgres as postgres_module
 import psycopg
+from psycopg import sql
 import pytest
 from consensus_exporter.models import ExportCase
 from consensus_exporter.postgres import PostgresExporter, ensure_schema
@@ -375,6 +377,164 @@ def test_retry_checks_for_newer_completion_after_listing_serialization(database_
     assert changed == ("New address", 3_000_000)
     assert absent_state == ("stale-race-a", 1)
     assert retry_result.exported == 0
+
+
+def test_completed_retry_does_not_overwrite_newer_overlapping_scope(database_url):
+    older = PostgresExporter(database_url, source_scope="older-scope")
+    newer = PostgresExporter(database_url, source_scope="newer-scope")
+    older_case = _case("cross-scope", address="Old scope address", price=1_000_000)
+    newer_case = _case("cross-scope", address="New scope address", price=2_000_000)
+    fetched_at = datetime(2026, 7, 24, 8, tzinfo=timezone.utc)
+
+    older.export([older_case], run_id="cross-scope-old", fetched_at=fetched_at)
+    newer.export(
+        [newer_case],
+        run_id="cross-scope-new",
+        fetched_at=fetched_at + timedelta(hours=1),
+    )
+    retry = older.export(
+        [older_case],
+        run_id="cross-scope-old",
+        fetched_at=fetched_at,
+    )
+
+    with psycopg.connect(database_url) as conn:
+        projection = conn.execute(
+            'select "Address","Price" from listings where "ExternalId"=%s',
+            ("cross-scope",),
+        ).fetchone()
+
+    assert projection == ("New scope address", 2_000_000)
+    assert retry.exported == 0
+    assert retry.updated == 0
+
+
+def test_completed_retry_does_not_overwrite_newer_cross_scope_hard_reject(
+    database_url,
+):
+    older = PostgresExporter(database_url, source_scope="older-hard-scope")
+    newer = PostgresExporter(database_url, source_scope="newer-hard-scope")
+    fetched_at = datetime(2026, 7, 24, 8, tzinfo=timezone.utc)
+    older_case = _case("cross-scope-hard", address="Originally active")
+    newer_reject = ExportCase.from_records(
+        {"caseID": "cross-scope-hard", "address": "Rejected later"}, None
+    )
+
+    older.export([older_case], run_id="cross-scope-hard-old", fetched_at=fetched_at)
+    with psycopg.connect(database_url) as conn:
+        conn.execute('create table votes ("ListingId" uuid not null)')
+        conn.execute(
+            'insert into votes ("ListingId") select "Id" from listings where "ExternalId"=%s',
+            ("cross-scope-hard",),
+        )
+
+    newer.export(
+        [newer_reject],
+        run_id="cross-scope-hard-new",
+        fetched_at=fetched_at + timedelta(hours=1),
+    )
+    retry = older.export(
+        [older_case],
+        run_id="cross-scope-hard-old",
+        fetched_at=fetched_at,
+    )
+
+    with psycopg.connect(database_url) as conn:
+        projection = conn.execute(
+            'select "State"::text,"Address" from listings where "ExternalId"=%s',
+            ("cross-scope-hard",),
+        ).fetchone()
+        newer_imports = conn.execute(
+            "select count(*) from listing_imports where run_id='cross-scope-hard-new'"
+        ).fetchone()[0]
+
+    assert projection == ("filter_rejected", "Originally active")
+    assert newer_imports == 0
+    assert retry.exported == 0
+    assert retry.updated == 0
+
+
+def test_new_dry_run_does_not_advance_identity_sequences_or_cache_media(database_url):
+    class RecordingMediaCache:
+        def __init__(self):
+            self.calls = 0
+
+        def cache(self, kind, url):
+            self.calls += 1
+            return SimpleNamespace(
+                kind=kind,
+                source_url=url,
+                local_path="/tmp/dry-run-media",
+                content_type="image/jpeg",
+                sha256="0" * 64,
+                byte_size=1,
+            )
+
+    def sequence_state(conn):
+        return tuple(
+            conn.execute(
+                sql.SQL("select last_value,is_called from {}").format(
+                    sql.Identifier(name)
+                )
+            ).fetchone()
+            for name in (
+                "export_run_completion_ordinal_seq",
+                "listing_imports_id_seq",
+                "ai_evidence_id_seq",
+                "listing_media_id_seq",
+                "ai_rule_applications_Id_seq",
+            )
+        )
+
+    media_cache = RecordingMediaCache()
+    exporter = PostgresExporter(
+        database_url, media_cache=media_cache, ensure_schema_on_export=True
+    )
+    with psycopg.connect(database_url) as conn:
+        conn.execute(
+            'CREATE TABLE ai_rule_proposals ("Id" uuid, "Version" integer, "RuleJson" text, "IsActive" boolean)'
+        )
+        conn.execute(
+            "INSERT INTO ai_rule_proposals VALUES ('00000000-0000-0000-0000-000000000009',9,%s,true)",
+            ('{"combinator":"all","conditions":[{"field":"condition","operator":"eq","value":"poor"}]}',),
+        )
+        conn.execute("""CREATE TABLE ai_rule_applications (
+            "Id" bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            "ProposalId" uuid, "ListingId" uuid, "ListingExternalId" text,
+            "PreviousState" listing_state, "PreviousLearningRuleVersion" text,
+            "AppliedState" listing_state, "AppliedAt" timestamptz,
+            UNIQUE ("ProposalId","ListingId"))""")
+        conn.execute(
+            "select setval('export_run_completion_ordinal_seq',77,true)"
+        )
+        before = sequence_state(conn)
+
+    result = exporter.export(
+        [
+            _case(
+                "dry-sequence",
+                ai_status="assessed",
+                ai_decision="pass",
+                ai_confidence="high",
+                vision_condition="poor",
+                preview_image="https://example.invalid/dry.jpg",
+            )
+        ],
+        run_id="dry-sequence",
+        fetched_at=datetime(2026, 7, 24, 8, tzinfo=timezone.utc),
+        dry_run=True,
+    )
+
+    with psycopg.connect(database_url) as conn:
+        after = sequence_state(conn)
+        run_exists = conn.execute(
+            "select exists(select 1 from export_runs where run_id='dry-sequence')"
+        ).fetchone()[0]
+
+    assert result.exported == 1
+    assert after == before
+    assert media_cache.calls == 0
+    assert not run_exists
 
 
 def test_current_completed_retry_dry_run_rolls_back_projection_refresh(database_url):
