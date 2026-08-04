@@ -26,31 +26,69 @@ public sealed partial class BoligsidenListingLookup
         _boligsidenEndpoint = EnsureBase(boligsidenEndpoint);
     }
 
-    public async Task<ManualListingPreview?> ResolveAsync(string? sourceUrl, CancellationToken ct)
+    public Task<ManualListingPreview?> ResolveAsync(string? sourceUrl, CancellationToken ct)
     {
         var slug = AddressSlug(sourceUrl);
-        if (slug is null) return null;
+        return slug is null
+            ? Task.FromResult<ManualListingPreview?>(null)
+            : ResolveCandidatesAsync(slug.Replace('-', ' '), slug, null, null, null, ct);
+    }
+
+    public Task<ManualListingPreview?> ResolveAddressAsync(
+        string? sourceUrl, string? submittedAddress, CancellationToken ct) =>
+        ResolveAddressAsync(sourceUrl, submittedAddress, null, ct);
+
+    public Task<ManualListingPreview?> ResolveAddressAsync(
+        string? sourceUrl, string? submittedAddress, string? submittedCity,
+        CancellationToken ct)
+    {
+        if (!Uri.TryCreate(sourceUrl, UriKind.Absolute, out var uri) ||
+            uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo) ||
+            !SupportedRealtorHost(uri.Host) || string.IsNullOrWhiteSpace(submittedAddress) ||
+            submittedAddress.Length > ManualListing.MaxNormalizedAddressLength)
+            return Task.FromResult<ManualListingPreview?>(null);
+        var sourcePath = ComparableAddress(Uri.UnescapeDataString(uri.AbsolutePath));
+        var expectedStreet = ComparableAddress(submittedAddress.Split(',', 2)[0]);
+        var expectedCity = ComparableCity(submittedCity ?? AddressCity(submittedAddress));
+        return ResolveCandidatesAsync(
+            submittedAddress, null, expectedStreet, expectedCity, sourcePath, ct);
+    }
+
+    private async Task<ManualListingPreview?> ResolveCandidatesAsync(
+        string query, string? expectedSlug, string? expectedStreet,
+        string? expectedCity, string? expectedSourcePath, CancellationToken ct)
+    {
         await OutboundConcurrency.WaitAsync(ct);
         try
         {
-        var addressUrl = new Uri(_dawaEndpoint, $"adresser?q={Uri.EscapeDataString(slug.Replace('-', ' '))}&struktur=mini&per_side=5");
-        using var dawa = await GetJsonAsync(addressUrl, ct);
-        if (dawa is null || dawa.RootElement.ValueKind != JsonValueKind.Array) return null;
+            var addressUrl = new Uri(_dawaEndpoint, $"adresser?q={Uri.EscapeDataString(query)}&struktur=mini&per_side=5");
+            using var dawa = await GetJsonAsync(addressUrl, ct);
+            if (dawa is null || dawa.RootElement.ValueKind != JsonValueKind.Array) return null;
 
-        foreach (var candidate in dawa.RootElement.EnumerateArray())
-        {
-            if (!TryIdentifier(candidate, "id", out var addressId)) continue;
-            using var address = await GetJsonAsync(new Uri(_boligsidenEndpoint, $"addresses/{Uri.EscapeDataString(addressId)}"), ct);
-            if (address is null || !TryString(address.RootElement, "slugAddress", out var actualSlug) ||
-                !string.Equals(actualSlug, slug, StringComparison.OrdinalIgnoreCase)) continue;
+            foreach (var candidate in dawa.RootElement.EnumerateArray())
+            {
+                if (!TryIdentifier(candidate, "id", out var addressId)) continue;
+                if (expectedStreet is not null &&
+                    (!TryString(candidate, "betegnelse", out var candidateAddress) ||
+                     ComparableAddress(candidateAddress.Split(',', 2)[0]) != expectedStreet ||
+                     (expectedCity is { Length: > 0 } && ComparableCity(AddressCity(candidateAddress)) != expectedCity) ||
+                     !AddressAppearsInPath(candidateAddress, expectedSourcePath!))) continue;
+                using var address = await GetJsonAsync(new Uri(_boligsidenEndpoint, $"addresses/{Uri.EscapeDataString(addressId)}"), ct);
+                if (address is null || !TryString(address.RootElement, "slugAddress", out var actualSlug) ||
+                    (expectedSlug is not null && !string.Equals(actualSlug, expectedSlug, StringComparison.OrdinalIgnoreCase)) ||
+                    !AddressRecordMatches(address.RootElement, addressId, expectedStreet, expectedCity)) continue;
 
-            var caseId = OpenCaseId(address.RootElement);
-            if (caseId is null) continue;
-            using var detail = await GetJsonAsync(new Uri(_boligsidenEndpoint, $"cases/{Uri.EscapeDataString(caseId)}"), ct);
-            if (detail is null || !string.Equals(String(detail.RootElement, "status"), "open", StringComparison.OrdinalIgnoreCase)) continue;
-            return Map(detail.RootElement, caseId);
-        }
-        return null;
+                var caseId = OpenCaseId(address.RootElement);
+                if (caseId is null) continue;
+                using var detail = await GetJsonAsync(new Uri(_boligsidenEndpoint, $"cases/{Uri.EscapeDataString(caseId)}"), ct);
+                if (detail is null || !string.Equals(String(detail.RootElement, "status"), "open", StringComparison.OrdinalIgnoreCase) ||
+                    !TryString(detail.RootElement, "slugAddress", out var detailSlug) ||
+                    !string.Equals(detailSlug, actualSlug, StringComparison.OrdinalIgnoreCase) ||
+                    !detail.RootElement.TryGetProperty("address", out var detailAddress) ||
+                    !AddressRecordMatches(detailAddress, addressId, expectedStreet, expectedCity)) continue;
+                return Map(detail.RootElement, caseId);
+            }
+            return null;
         }
         finally { OutboundConcurrency.Release(); }
     }
@@ -81,14 +119,62 @@ public sealed partial class BoligsidenListingLookup
         var latitude = BoundedDouble(detail, "coordinates", "lat", -90, 90);
         var longitude = BoundedDouble(detail, "coordinates", "lon", -180, 180);
         if (latitude is null || longitude is null) { latitude = null; longitude = null; }
+        var city = String(address, "cityName");
+        var postalCode = BoundedInt(address, "zipCode", 1000, 9999)?.ToString();
+        var canonicalAddress = postalCode is not null && city is not null
+            ? $"{road} {house}, {postalCode} {city}"
+            : $"{road} {house}";
         return new ManualListingPreview(
-            $"{road} {house}", String(address, "cityName"), BoundedInt(address, "zipCode", 1000, 9999)?.ToString(),
+            canonicalAddress, city, postalCode,
             BoundedDecimal(detail, "priceCash", 1, ManualListing.MaxAskingPrice), BoundedInt(detail, "housingArea", 1, 100_000), BoundedInt(detail, "lotArea", 0, 100_000_000),
             BoundedInt(detail, "numberOfRooms", 1, 1_000), BoundedInt(detail, "numberOfFloors", 1, 100), BoundedInt(detail, "numberOfBathrooms", 0, 1_000),
             BoundedInt(detail, "yearBuilt", 1000, DateTime.UtcNow.Year + 2), EnergyLabel(detail), BoundedInt(detail, "monthlyExpense", 0, int.MaxValue),
             BoundedInt(detail, "daysOnMarket", 0, int.MaxValue), LargestAllowedImage(detail),
             latitude, longitude, caseId.Length <= 100 ? caseId : caseId[..100]);
     }
+
+    private static bool SupportedRealtorHost(string host)
+    {
+        host = host.Trim().TrimEnd('.').ToLowerInvariant();
+        if (host.StartsWith("www.", StringComparison.Ordinal)) host = host[4..];
+        return host is "estate.dk" or "danbolig.dk" or "nybolig.dk" or "home.dk" or
+            "edc.dk" or "lokalbolig.dk" or "realmaeglerne.dk" or "realmæglerne.dk";
+    }
+
+    private static bool AddressRecordMatches(
+        JsonElement address, string addressId, string? expectedStreet, string? expectedCity)
+    {
+        if (!TryString(address, "addressID", out var actualId) || actualId != addressId) return false;
+        if (expectedStreet is null) return true;
+        return TryString(address, "roadName", out var road) &&
+               TryString(address, "houseNumber", out var houseNumber) &&
+               ComparableAddress($"{road} {houseNumber}") == expectedStreet &&
+               (string.IsNullOrEmpty(expectedCity) ||
+                (TryString(address, "cityName", out var city) && ComparableCity(city) == expectedCity));
+    }
+
+    private static string AddressCity(string value) =>
+        value.Split(',', 2) is [_, var city] ? city : string.Empty;
+
+    private static string ComparableCity(string? value) =>
+        ComparableAddress(Regex.Replace(value ?? string.Empty, @"^\s*\d{4}\s+", string.Empty));
+
+    private static bool AddressAppearsInPath(string candidateAddress, string sourcePath)
+    {
+        var required = ComparablePath(candidateAddress).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var present = ComparablePath(sourcePath).Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .ToHashSet(StringComparer.Ordinal);
+        return required.Length > 1 && required.All(present.Contains);
+    }
+
+    private static string ComparablePath(string value) =>
+        ComparableAddress(value).Replace("æ", "ae", StringComparison.Ordinal)
+            .Replace("ø", "oe", StringComparison.Ordinal)
+            .Replace("å", "aa", StringComparison.Ordinal);
+
+    private static string ComparableAddress(string value) =>
+        string.Join(' ', Regex.Replace(value.Trim().ToLowerInvariant(), @"[^\p{L}\p{N}]+", " ")
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries));
 
     private static string? AddressSlug(string? sourceUrl)
     {

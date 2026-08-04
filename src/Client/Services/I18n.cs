@@ -157,6 +157,7 @@ public sealed class I18n
         ["AirNoise"] = ("Air", "Fly"),
         ["NoMappedData"] = ("Not mapped", "Ikke kortlagt"),
         ["Unavailable"] = ("Unavailable", "Ikke tilgængelig"),
+        ["UnavailableShort"] = ("N/A", "—"),
         ["NoiseLookupFailed"] = ("Lookup failed", "Opslag mislykkedes"),
         ["Stale"] = ("Stale", "Forældet"),
         ["Garden"] = ("Garden", "Have"),

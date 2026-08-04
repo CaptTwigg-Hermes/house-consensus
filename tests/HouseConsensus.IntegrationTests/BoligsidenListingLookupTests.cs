@@ -18,14 +18,14 @@ public sealed class BoligsidenListingLookupTests
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         await using var app = builder.Build();
         app.MapGet("/adresser", () => Results.Json(new[] { new { id = "address-1", betegnelse = "Åvendingen 48, 2700 Brønshøj" } }));
-        app.MapGet("/addresses/address-1", () => Results.Json(new { slugAddress = "aavendingen-48-2700-broenshoej", cases = new[] { new { caseID = "case-1", status = "open" } } }));
+        app.MapGet("/addresses/address-1", () => Results.Json(new { addressID = "address-1", slugAddress = "aavendingen-48-2700-broenshoej", cases = new[] { new { caseID = "case-1", status = "open" } } }));
         app.MapGet("/cases/case-1", () => Results.Json(new
         {
             caseID = "case-1", status = "open", priceCash = 7_495_000, housingArea = 199, lotArea = 720,
             numberOfRooms = 7, numberOfFloors = 2, numberOfBathrooms = 2, yearBuilt = 1952,
             energyLabel = "d", monthlyExpense = 5_432, daysOnMarket = 17,
             slugAddress = "aavendingen-48-2700-broenshoej", coordinates = new { lat = 55.70537, lon = 12.464963 },
-            address = new { roadName = "Åvendingen", houseNumber = "48", cityName = "Brønshøj", zipCode = 2700 },
+            address = new { addressID = "address-1", roadName = "Åvendingen", houseNumber = "48", cityName = "Brønshøj", zipCode = 2700 },
             defaultImage = new { imageSources = new object?[] { null, "malformed", new { url = "https://images.boligsiden.dk/images/case/case-1/1440x960/photo.webp", size = new { width = 1440, height = 960 } } } }
         }));
         await app.StartAsync(TestContext.Current.CancellationToken);
@@ -35,7 +35,7 @@ public sealed class BoligsidenListingLookupTests
             var lookup = new BoligsidenListingLookup(new HttpClient(), endpoint, endpoint);
             var result = await lookup.ResolveAsync("https://www.boligsiden.dk/adresse/aavendingen-48-2700-broenshoej-01018704__48_______", TestContext.Current.CancellationToken);
             Assert.NotNull(result);
-            Assert.Equal("Åvendingen 48", result.Address);
+            Assert.Equal("Åvendingen 48, 2700 Brønshøj", result.Address);
             Assert.Equal("Brønshøj", result.City);
             Assert.Equal("2700", result.PostalCode);
             Assert.Equal(7_495_000m, result.AskingPrice);
@@ -53,6 +53,77 @@ public sealed class BoligsidenListingLookupTests
     }
 
     [Fact]
+    public async Task Realtor_url_can_resolve_listing_from_the_submitted_address()
+    {
+        var handler = new SequenceHandler(
+            "[{\"id\":\"address-1\",\"betegnelse\":\"Bistrupvej 135, 3460 Birkerød\"}]",
+            "{\"addressID\":\"address-1\",\"roadName\":\"Bistrupvej\",\"houseNumber\":\"135\",\"cityName\":\"Birkerød\",\"slugAddress\":\"bistrupvej-135-3460-birkeroed\",\"cases\":[{\"caseID\":\"case-1\",\"status\":\"open\"}]}",
+            "{\"status\":\"open\",\"slugAddress\":\"bistrupvej-135-3460-birkeroed\",\"priceCash\":7995000,\"housingArea\":238,\"lotArea\":1369,\"numberOfRooms\":9,\"numberOfBathrooms\":2,\"coordinates\":{\"lat\":55.825317,\"lon\":12.428044},\"address\":{\"addressID\":\"address-1\",\"roadName\":\"Bistrupvej\",\"houseNumber\":\"135\",\"cityName\":\"Birkerød\",\"zipCode\":3460}}"
+        );
+        var lookup = new BoligsidenListingLookup(
+            new HttpClient(handler), new Uri("https://dawa.test/"), new Uri("https://boligsiden.test/"));
+
+        var result = await lookup.ResolveAddressAsync(
+            "https://www.estate.dk/villa/3460/birkeroed/bistrupvej-135/270140/4908",
+            "Bistrupvej 135",
+            "Birkerød",
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result);
+        Assert.Equal("Bistrupvej 135, 3460 Birkerød", result.Address);
+        Assert.Equal(238, result.LivingArea);
+        Assert.Equal(1369, result.LotArea);
+        Assert.Equal(3, handler.Calls);
+    }
+
+    [Fact]
+    public async Task Realtor_address_fallback_rejects_same_street_in_a_different_locality()
+    {
+        var handler = new SequenceHandler(
+            "[{\"id\":\"address-1\",\"betegnelse\":\"Bistrupvej 135, 3460 Birkerød\"}]"
+        );
+        var lookup = new BoligsidenListingLookup(
+            new HttpClient(handler), new Uri("https://dawa.test/"), new Uri("https://boligsiden.test/"));
+        var result = await lookup.ResolveAddressAsync(
+            "https://www.estate.dk/villa/4000/roskilde/bistrupvej-135/270140/4908",
+            "Bistrupvej 135", "Birkerød", TestContext.Current.CancellationToken);
+        Assert.Null(result);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
+    public async Task Realtor_address_fallback_rejects_mismatched_case_identity()
+    {
+        var handler = new SequenceHandler(
+            "[{\"id\":\"address-1\",\"betegnelse\":\"Bistrupvej 135, 3460 Birkerød\"}]",
+            "{\"addressID\":\"address-1\",\"roadName\":\"Bistrupvej\",\"houseNumber\":\"135\",\"cityName\":\"Birkerød\",\"slugAddress\":\"bistrupvej-135-3460-birkeroed\",\"cases\":[{\"caseID\":\"case-1\",\"status\":\"open\"}]}",
+            "{\"status\":\"open\",\"slugAddress\":\"another-road-9-3460-birkeroed\",\"address\":{\"addressID\":\"address-2\",\"roadName\":\"Another Road\",\"houseNumber\":\"9\",\"cityName\":\"Birkerød\"}}"
+        );
+        var lookup = new BoligsidenListingLookup(
+            new HttpClient(handler), new Uri("https://dawa.test/"), new Uri("https://boligsiden.test/"));
+        var result = await lookup.ResolveAddressAsync(
+            "https://www.estate.dk/villa/3460/birkeroed/bistrupvej-135/270140/4908",
+            "Bistrupvej 135", "Birkerød", TestContext.Current.CancellationToken);
+        Assert.Null(result);
+        Assert.Equal(3, handler.Calls);
+    }
+
+    [Fact]
+    public async Task Realtor_address_fallback_rejects_a_source_url_for_a_different_property()
+    {
+        var handler = new SequenceHandler(
+            "[{\"id\":\"address-1\",\"betegnelse\":\"Bistrupvej 135, 3460 Birkerød\"}]"
+        );
+        var lookup = new BoligsidenListingLookup(
+            new HttpClient(handler), new Uri("https://dawa.test/"), new Uri("https://boligsiden.test/"));
+        var result = await lookup.ResolveAddressAsync(
+            "https://www.estate.dk/villa/3460/birkeroed/another-road-9/123/456",
+            "Bistrupvej 135 3460 Birkerød", TestContext.Current.CancellationToken);
+        Assert.Null(result);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
     public void Typed_http_client_resolves_the_production_constructor()
     {
         var services = new ServiceCollection();
@@ -66,8 +137,8 @@ public sealed class BoligsidenListingLookupTests
     {
         var handler = new SequenceHandler(
             "[{\"id\":\"address-1\"}]",
-            "{\"slugAddress\":\"aavendingen-48-2700-broenshoej\",\"cases\":[{\"caseID\":\"case-1\",\"status\":\"open\"}]}",
-            "{\"status\":\"open\",\"priceCash\":-1,\"housingArea\":\"bad\",\"lotArea\":-5,\"numberOfRooms\":0,\"numberOfFloors\":{},\"numberOfBathrooms\":-1,\"yearBuilt\":9999,\"energyLabel\":\"invalid\",\"monthlyExpense\":-1,\"daysOnMarket\":-1,\"coordinates\":{\"lat\":100,\"lon\":12},\"address\":{\"roadName\":\"Åvendingen\",\"houseNumber\":\"48\"},\"defaultImage\":null}");
+            "{\"addressID\":\"address-1\",\"slugAddress\":\"aavendingen-48-2700-broenshoej\",\"cases\":[{\"caseID\":\"case-1\",\"status\":\"open\"}]}",
+            "{\"status\":\"open\",\"slugAddress\":\"aavendingen-48-2700-broenshoej\",\"priceCash\":-1,\"housingArea\":\"bad\",\"lotArea\":-5,\"numberOfRooms\":0,\"numberOfFloors\":{},\"numberOfBathrooms\":-1,\"yearBuilt\":9999,\"energyLabel\":\"invalid\",\"monthlyExpense\":-1,\"daysOnMarket\":-1,\"coordinates\":{\"lat\":100,\"lon\":12},\"address\":{\"addressID\":\"address-1\",\"roadName\":\"Åvendingen\",\"houseNumber\":\"48\"},\"defaultImage\":null}");
         var lookup = new BoligsidenListingLookup(new HttpClient(handler), new Uri("https://dawa.test/"), new Uri("https://boligsiden.test/"));
         var result = await lookup.ResolveAsync("https://www.boligsiden.dk/adresse/aavendingen-48-2700-broenshoej", TestContext.Current.CancellationToken);
         Assert.NotNull(result);

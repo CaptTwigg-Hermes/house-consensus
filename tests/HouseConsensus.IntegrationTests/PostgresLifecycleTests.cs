@@ -813,6 +813,12 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
 
         var createdResponse = await client.PostAsJsonAsync("/api/listings", new CreateManualListing("https://Example.dk/home/?utm_source=test#photos", "  Testvej  1 ", "Roskilde", 7_500_000m), ct);
         var created = await createdResponse.Content.ReadFromJsonAsync<ManualListingResult>(ct);
+        await using (var clearRequest = Db())
+        {
+            var pending = await clearRequest.Listings.SingleAsync(x => x.Id == created!.ListingId, ct);
+            pending.ManualScoringRequestedAt = null;
+            await clearRequest.SaveChangesAsync(ct);
+        }
         var duplicateResponse = await client.PostAsJsonAsync("/api/listings", new CreateManualListing("https://example.dk/home", "testvej 1"), ct);
         var duplicate = await duplicateResponse.Content.ReadFromJsonAsync<ManualListingResult>(ct);
         Assert.Equal(HttpStatusCode.Created, createdResponse.StatusCode); Assert.NotNull(created); Assert.False(created.Existing);
@@ -834,7 +840,7 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
 
         await using var verify = Db();
         var listing = await verify.Listings.SingleAsync(x => x.Id == created.ListingId, ct);
-        Assert.True(listing.IsManuallyAdded); Assert.True(listing.ManualLifecycleProtected); Assert.Equal("Roskilde", listing.City); Assert.Equal(7_500_000m, listing.Price); Assert.Null(listing.FamilyFitScore);
+        Assert.True(listing.IsManuallyAdded); Assert.True(listing.ManualLifecycleProtected); Assert.Equal("Roskilde", listing.City); Assert.Equal(7_500_000m, listing.Price); Assert.Null(listing.FamilyFitScore); Assert.NotNull(listing.ManualScoringRequestedAt); Assert.Null(listing.ManualScoringCompletedAt);
         var votes = await verify.Votes.Include(x => x.Ratings).Where(x => x.ListingId == created.ListingId).OrderBy(x => x.Id).ToArrayAsync(ct);
         Assert.Equal(2, votes.Length); Assert.Equal(VoteChoice.Like, votes[0].Choice); Assert.Equal(VoteChoice.Dislike, votes[1].Choice); Assert.All(votes, x => Assert.Equal(10, x.Ratings.Count)); Assert.Equal(4, votes[0].OverallScore); Assert.Equal(2, votes[1].OverallScore);
     }

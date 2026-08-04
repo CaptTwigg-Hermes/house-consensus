@@ -97,7 +97,8 @@ listings.MapPost("/", async (CreateManualListing request, ClaimsPrincipal user, 
     if (!await db.Members.AnyAsync(x => x.Id == memberId && x.IsActive, ct)) return Results.Forbid();
     try
     {
-        var fetched = await lookup.ResolveAsync(request.Url, ct);
+        var fetched = await lookup.ResolveAsync(request.Url, ct)
+            ?? await lookup.ResolveAddressAsync(request.Url, request.Address, request.City, ct);
         var submittedAddress = fetched?.Address ?? request.Address;
         var submittedCity = fetched?.City ?? request.City;
         var submittedPrice = fetched?.AskingPrice ?? request.AskingPrice;
@@ -107,8 +108,19 @@ listings.MapPost("/", async (CreateManualListing request, ClaimsPrincipal user, 
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await db.Database.ExecuteSqlRawAsync("LOCK TABLE listings IN SHARE ROW EXCLUSIVE MODE", ct);
         var existing = await FindManualDuplicate(url, address, db, ct);
-        if (existing is not null) { await transaction.CommitAsync(ct); return Results.Ok(new ManualListingResult(existing.Id, true)); }
+        if (existing is not null)
+        {
+            if (existing.IsManuallyAdded && existing.ManualScoringCompletedAt is null)
+            {
+                existing.ManualScoringRequestedAt ??= clock.GetUtcNow();
+                existing.ManualScoringError = null;
+                await db.SaveChangesAsync(ct);
+            }
+            await transaction.CommitAsync(ct);
+            return Results.Ok(new ManualListingResult(existing.Id, true));
+        }
         var listing = Listing.CreateManual(url, submittedAddress, memberId, clock.GetUtcNow());
+        listing.ManualScoringRequestedAt = clock.GetUtcNow();
         listing.City = string.IsNullOrWhiteSpace(submittedCity) ? null : submittedCity.Trim();
         listing.Price = submittedPrice;
         if (fetched is not null)
@@ -291,8 +303,8 @@ static AiRuleProposalDto ToAiRuleProposalDto(AiRuleProposal x) { var options = n
 static async Task<List<ListingDto>> ListingDtos(IQueryable<Listing> query, AppDbContext db, ClaimsPrincipal user, CancellationToken ct) { var items = await query.AsNoTracking().ToListAsync(ct); var ids = items.Select(x => x.Id).ToArray(); var votes = await db.Votes.AsNoTracking().Include(x => x.Ratings).Where(x => ids.Contains(x.ListingId)).ToListAsync(ct); var members = await db.Members.AsNoTracking().Select(x => new { x.Id, x.Email, x.DisplayName, x.AvatarColor, x.IsActive }).ToListAsync(ct); var active = members.Where(x => x.IsActive).Select(x => x.Id).ToList(); var initials = members.ToDictionary(x => x.Id, x => AvatarInitials.From(x.DisplayName, x.Email)); var colors = members.ToDictionary(x => x.Id, x => AvatarColor.Resolve(x.AvatarColor, x.Id)); var commentIds = await db.Comments.IgnoreQueryFilters().AsNoTracking().Where(x => ids.Contains(x.ListingId)).Select(x => x.ListingId).Distinct().ToListAsync(ct); var feedbackIds = await db.Feedback.AsNoTracking().Where(x => x.ListingId.HasValue && ids.Contains(x.ListingId.Value)).Select(x => x.ListingId!.Value).Distinct().ToListAsync(ct); var overrideIds = await db.ListingOverrides.AsNoTracking().Where(x => ids.Contains(x.ListingId)).Select(x => x.ListingId).Distinct().ToListAsync(ct); return items.Select(x => { var vs = votes.Where(v => v.ListingId == x.Id).ToList(); var hasActivity = vs.Count != 0 || commentIds.Contains(x.Id) || feedbackIds.Contains(x.Id) || overrideIds.Contains(x.Id); return new ListingDto(x.Id, x.ExternalId, x.Address, x.City, x.Price, x.FamilyFitScore, x.State, x.AiAssessed, x.AiConfidence, x.AiEvidence, x.ModelVersion, x.RuleVersion, x.SourceUrl, ConsensusRules.HasConsensus(active, vs), ConsensusRules.LatestVotes(vs).Values.Select(v => ToVoteDto(v, initials.GetValueOrDefault(v.MemberId, ""), colors.GetValueOrDefault(v.MemberId, ""))).ToArray(), x.PreviewImageUrl, x.LivingArea, x.LotArea, x.Rooms, x.YearBuilt, x.Bathrooms, x.Bedrooms, x.Floors, x.EnergyLabel, x.Quiet, x.BuildableHeadroom, x.GroundFloorBedroom, x.SeparateEntrance, x.SecondKitchen, x.PrivacyScore, x.FamilyPrivacyScore, x.KidsSpaceScore, x.GardenScore, x.SharedLivingScore, x.PracticalScore, x.FamilyPrivacyWeight, x.KidsSpaceWeight, x.GardenWeight, x.SharedLivingWeight, x.PracticalWeight, x.Latitude, x.Longitude, x.MonthlyExpense, x.DaysOnMarket, x.CommuteMinutes, x.BuildableStatus, x.Condition, x.GardenOrientation, x.MultigenFit, x.ImportedAt, x.PostalCode, x.Preferred, x.IsNew, x.FamilyUnits, x.CommuteJson, x.FirstSeenAt, x.RoadNoiseDb, x.RailNoiseDb, x.AirNoiseDb, x.IsManuallyAdded, x.ManuallyAddedById, x.ManuallyAddedById.HasValue ? members.Where(m => m.Id == x.ManuallyAddedById.Value).Select(m => string.IsNullOrWhiteSpace(m.DisplayName) ? m.Email : m.DisplayName).FirstOrDefault() : null, x.ManuallyAddedAt, x.IsManuallyAdded && x.State != ListingState.Archived && !user.IsInRole(MemberRole.Owner.ToString()) && !hasActivity && x.ManuallyAddedById == user.MemberId(), x.IsManuallyAdded && x.State != ListingState.Archived && user.IsInRole(MemberRole.Owner.ToString()), x.RoadNoiseStatus, x.RoadNoiseLnightDb, x.RoadNoiseLnightStatus, x.RailNoiseStatus, x.RailNoiseLnightDb, x.RailNoiseLnightStatus, x.AirNoiseStatus, x.AirNoiseLnightDb, x.AirNoiseLnightStatus); }).ToList(); }
 static async Task<Listing?> FindManualDuplicate(string canonicalUrl, string normalizedAddress, AppDbContext db, CancellationToken ct)
 {
-    var matches = await db.Listings.AsNoTracking().Where(x => x.CanonicalUrl == canonicalUrl || x.NormalizedAddress == normalizedAddress).ToListAsync(ct);
-    var legacy = await db.Listings.AsNoTracking().Where(x => x.CanonicalUrl == null && x.SourceUrl != null).ToListAsync(ct);
+    var matches = await db.Listings.Where(x => x.CanonicalUrl == canonicalUrl || x.NormalizedAddress == normalizedAddress).ToListAsync(ct);
+    var legacy = await db.Listings.Where(x => x.CanonicalUrl == null && x.SourceUrl != null).ToListAsync(ct);
     foreach (var candidate in legacy)
     {
         try { if (ManualListing.NormalizeUrl(candidate.SourceUrl!) == canonicalUrl && matches.All(x => x.Id != candidate.Id)) matches.Add(candidate); }

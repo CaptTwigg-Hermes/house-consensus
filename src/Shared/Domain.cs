@@ -62,6 +62,10 @@ public sealed class Listing
     public Guid? ManuallyAddedById { get; private set; }
     public DateTimeOffset? ManuallyAddedAt { get; private set; }
     public bool ManualLifecycleProtected { get; private set; }
+    public DateTimeOffset? ManualScoringRequestedAt { get; set; }
+    public DateTimeOffset? ManualScoringAttemptedAt { get; set; }
+    public DateTimeOffset? ManualScoringCompletedAt { get; set; }
+    public string? ManualScoringError { get; set; }
     public string? PreviewImageUrl { get; set; }
     public int? LivingArea { get; set; }
     public int? LotArea { get; set; }

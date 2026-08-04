@@ -28,8 +28,8 @@
         builder.AddAttribute(4, "data-status-lden", normalizedLden);
         builder.AddAttribute(5, "data-status-lnight", normalizedLnight);
         builder.OpenElement(6, "strong"); builder.AddContent(7, label); builder.CloseElement();
-        Indicator(builder, 10, "Lden", Value(ldenDb, normalizedLden));
-        Indicator(builder, 20, "Lnight", Value(lnightDb, normalizedLnight));
+        Indicator(builder, 10, "Lden", DisplayValue(ldenDb, normalizedLden));
+        Indicator(builder, 20, "Lnight", DisplayValue(lnightDb, normalizedLnight));
         builder.CloseElement();
     };
 
@@ -56,6 +56,9 @@
         _ when db.HasValue => "covered",
         _ => "unavailable",
     };
+
+    private string DisplayValue(double? db, string status) =>
+        status == "unavailable" ? L["UnavailableShort"] : Value(db, status);
 
     private string Value(double? db, string status) => status switch
     {

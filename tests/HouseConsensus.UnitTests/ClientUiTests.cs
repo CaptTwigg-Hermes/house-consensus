@@ -606,6 +606,19 @@ public sealed class ClientUiTests
     }
 
     [Fact]
+    public void Manual_create_resolves_supported_realtor_addresses_and_requests_background_scoring()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var program = File.ReadAllText(Path.Combine(root, "src/Server/Program.cs"));
+        var domain = File.ReadAllText(Path.Combine(root, "src/Shared/Domain.cs"));
+
+        Assert.Contains("ResolveAddressAsync(request.Url, request.Address", program, StringComparison.Ordinal);
+        Assert.Contains("ManualScoringRequestedAt", program, StringComparison.Ordinal);
+        Assert.Contains("ManualScoringRequestedAt", domain, StringComparison.Ordinal);
+        Assert.Contains("OrderByDescending(x => x.IsManuallyAdded)", program, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void E2e_routes_and_seed_data_are_disabled_in_production()
     {
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
@@ -690,6 +703,7 @@ public sealed class ClientUiTests
         Assert.Contains("Road", html, StringComparison.Ordinal);
         Assert.Contains("Not mapped", html, StringComparison.Ordinal);
         Assert.Contains("Unavailable", html, StringComparison.Ordinal);
+        Assert.Contains("N/A", html, StringComparison.Ordinal);
         Assert.Contains("Lookup failed", html, StringComparison.Ordinal);
         Assert.Contains("67 dB", html, StringComparison.Ordinal);
         Assert.Contains("57 dB", html, StringComparison.Ordinal);
@@ -701,6 +715,8 @@ public sealed class ClientUiTests
         Assert.Contains(
             "[\"NoiseLookupFailed\"] = (\"Lookup failed\", \"Opslag mislykkedes\")",
             i18nSource, StringComparison.Ordinal);
+        var css = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/css/app.css"));
+        Assert.Matches(@"\.noise-level small > span:last-child\s*\{[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap", css);
     }
 
     private sealed class CloudflareUnauthenticatedHandler : HttpMessageHandler

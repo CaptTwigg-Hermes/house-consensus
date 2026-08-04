@@ -1828,6 +1828,7 @@ textarea:focus-visible {
 .noise-level strong { font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .noise-level small { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 4px; align-items: baseline; font-size: .72rem; font-weight: 700; min-width: 0; }
 .noise-indicator { color: var(--muted); font-size: .62rem; font-weight: 600; text-transform: uppercase; }
+.noise-level small > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .noise-level.status-no_contour small,
 .noise-level.status-unavailable small { color: var(--muted); font-weight: 500; }
 .noise-level.status-covered small { color: var(--forest); }
