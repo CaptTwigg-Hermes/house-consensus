@@ -138,3 +138,16 @@ def test_production_compose_uses_existing_cloudflare_tunnel_and_requires_access_
     assert "CLOUDFLARE_ACCESS_AUDIENCE=" in env_example
     assert "mailpit:" not in compose
     assert "Email__SmtpHost" not in compose
+
+
+def test_source_config_identity_schema_and_additive_migration_agree():
+    schema = Path("exporter/src/consensus_exporter/schema.sql").read_text()
+    migration_path = Path("src/Server/Data/Migrations/202608030002_AddSourceConfigIdentity.cs")
+    assert migration_path.exists()
+    migration = migration_path.read_text()
+
+    for text in (schema, migration):
+        assert "source_config_sha256" in text
+        assert "^[0-9a-f]{64}$" in text
+        assert "conrelid = 'export_runs'::regclass" in text
+    assert "ADD COLUMN IF NOT EXISTS source_config_sha256 text" in migration

@@ -630,9 +630,14 @@ class PostgresExporter:
         *,
         run_id: str,
         fetched_at: datetime | None = None,
+        source_config_sha256: str | None = None,
         dry_run: bool = False,
     ) -> ExportResult:
         fetched_at = fetched_at or datetime.now(timezone.utc)
+        if source_config_sha256 is not None and re.fullmatch(r"[0-9a-f]{64}", source_config_sha256) is None:
+            raise ValueError("source_config_sha256 must be a canonical lowercase SHA-256")
+        if self.source_scope == "tofamiliehus" and source_config_sha256 is None:
+            raise ValueError("tofamiliehus exports require source_config_sha256")
         all_cases = list(cases)
         source_ids = [case.source_id for case in all_cases]
         if any(not source_id for source_id in source_ids) or len(
@@ -662,8 +667,35 @@ class PostgresExporter:
             # is an explicit deployment/test operation, not a per-run side effect.
             if self.ensure_schema_on_export:
                 ensure_schema(conn)
-            # Serialize every listings mutation before any DML, avoiding lock upgrades
-            # and keeping importer/manual deduplication checks atomic.
+            conn.execute(
+                "select pg_advisory_xact_lock(hashtextextended(%s, 1))", (run_id,)
+            )
+            existing_run = conn.execute(
+                "select source_scope,fetched_at,snapshot_count,manifest_sha256,source_config_sha256 "
+                "from export_runs where run_id=%s",
+                (run_id,),
+            ).fetchone()
+            run_identity = (
+                self.source_scope,
+                fetched_at,
+                snapshot_count,
+                manifest_sha256,
+                source_config_sha256,
+            )
+            if existing_run is not None and tuple(existing_run) != run_identity:
+                raise RuntimeError(
+                    f"run ID {run_id!r} already belongs to a different immutable snapshot"
+                )
+            if existing_run is None:
+                conn.execute(
+                    "INSERT INTO export_runs"
+                    "(run_id,source_scope,fetched_at,snapshot_count,manifest_sha256,source_config_sha256) "
+                    "VALUES (%s,%s,%s,%s,%s,%s)",
+                    (run_id, *run_identity),
+                )
+            # Validate immutable run identity before touching listings. Then serialize
+            # every listings mutation to avoid lock upgrades and keep importer/manual
+            # deduplication checks atomic.
             conn.execute("LOCK TABLE listings IN SHARE ROW EXCLUSIVE MODE")
             _purge_legacy_hard_rejects(conn, hard_rejected_ids)
             learning_rule = _active_learning_rule(conn)
@@ -677,31 +709,6 @@ class PostgresExporter:
                     ).fetchall()
                 }
                 cases = [case for case in cases if case.source_id not in delisted_ids]
-            conn.execute(
-                "select pg_advisory_xact_lock(hashtextextended(%s, 1))", (run_id,)
-            )
-            existing_run = conn.execute(
-                "select source_scope,fetched_at,snapshot_count,manifest_sha256 "
-                "from export_runs where run_id=%s",
-                (run_id,),
-            ).fetchone()
-            run_identity = (
-                self.source_scope,
-                fetched_at,
-                snapshot_count,
-                manifest_sha256,
-            )
-            if existing_run is not None and tuple(existing_run) != run_identity:
-                raise RuntimeError(
-                    f"run ID {run_id!r} already belongs to a different immutable snapshot"
-                )
-            if existing_run is None:
-                conn.execute(
-                    "INSERT INTO export_runs"
-                    "(run_id,source_scope,fetched_at,snapshot_count,manifest_sha256) "
-                    "VALUES (%s,%s,%s,%s,%s)",
-                    (run_id, *run_identity),
-                )
             exported = 0
             inserted = updated = reactivated = 0
             for case in cases:

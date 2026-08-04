@@ -58,7 +58,7 @@ def main() -> int:
         )
         print(f"tombstoned={args.tombstone_external_id}")
         return 0
-    cases, snapshot_run_id, snapshot_completed_at = load_sqlite_snapshot(
+    cases, snapshot_run_id, snapshot_completed_at, source_config_sha256 = load_sqlite_snapshot(
         args.sqlite, source_scope=args.scope
     )
     now = datetime.now(timezone.utc)
@@ -81,6 +81,7 @@ def main() -> int:
     export_kwargs = {
         "run_id": snapshot_run_id,
         "fetched_at": snapshot_completed_at,
+        "source_config_sha256": source_config_sha256,
     }
     if args.dry_run:
         export_kwargs["dry_run"] = True

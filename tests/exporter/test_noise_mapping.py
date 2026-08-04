@@ -1,5 +1,7 @@
 import math
 
+import pytest
+
 import consensus_exporter.postgres as postgres
 
 
@@ -112,3 +114,18 @@ def test_noise_boolean_values_are_malformed_not_measurements():
         assert facts.road_lden_db is None
         assert facts.road_lden_status == "unavailable"
         assert facts.quiet is None
+
+
+def test_tofamiliehus_missing_source_config_fails_before_database_connect(monkeypatch):
+    monkeypatch.setattr(
+        postgres.psycopg,
+        "connect",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("database connection attempted")
+        ),
+    )
+    exporter = postgres.PostgresExporter(
+        "postgresql://unused", source_scope="tofamiliehus"
+    )
+    with pytest.raises(ValueError, match="require source_config_sha256"):
+        exporter.export([], run_id="missing-source-config")

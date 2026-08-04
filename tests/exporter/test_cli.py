@@ -4,6 +4,8 @@ from types import SimpleNamespace
 import pytest
 from consensus_exporter import cli
 
+CONFIG_HASH = "a" * 64
+
 
 def test_cli_explicitly_enables_schema_bootstrap(monkeypatch, tmp_path):
     captured = {}
@@ -13,7 +15,8 @@ def test_cli_explicitly_enables_schema_bootstrap(monkeypatch, tmp_path):
             captured["database_url"] = database_url
             captured.update(kwargs)
 
-        def export(self, cases, *, run_id, fetched_at):
+        def export(self, cases, *, run_id, fetched_at, source_config_sha256):
+            captured["source_config_sha256"] = source_config_sha256
             return SimpleNamespace(
                 exported=0, archived=0, media_cached=0, media_errors=0
             )
@@ -22,7 +25,7 @@ def test_cli_explicitly_enables_schema_bootstrap(monkeypatch, tmp_path):
     monkeypatch.setattr(
         cli,
         "load_sqlite_snapshot",
-        lambda _, **__: ([], "snapshot-1", datetime.now(timezone.utc)),
+        lambda _, **__: ([], "snapshot-1", datetime.now(timezone.utc), CONFIG_HASH),
     )
     monkeypatch.setattr(
         "sys.argv",
@@ -38,6 +41,7 @@ def test_cli_explicitly_enables_schema_bootstrap(monkeypatch, tmp_path):
 
     assert cli.main() == 0
     assert captured["ensure_schema_on_export"] is True
+    assert captured["source_config_sha256"] == CONFIG_HASH
 
 
 def test_cli_can_skip_unused_media_downloads(monkeypatch):
@@ -47,7 +51,7 @@ def test_cli_can_skip_unused_media_downloads(monkeypatch):
         def __init__(self, database_url, **kwargs):
             captured.update(kwargs)
 
-        def export(self, cases, *, run_id, fetched_at):
+        def export(self, cases, *, run_id, fetched_at, source_config_sha256):
             return SimpleNamespace(
                 exported=0, archived=0, media_cached=0, media_errors=0
             )
@@ -56,7 +60,7 @@ def test_cli_can_skip_unused_media_downloads(monkeypatch):
     monkeypatch.setattr(
         cli,
         "load_sqlite_snapshot",
-        lambda _, **__: ([], "snapshot-1", datetime.now(timezone.utc)),
+        lambda _, **__: ([], "snapshot-1", datetime.now(timezone.utc), CONFIG_HASH),
     )
     monkeypatch.setattr(
         cli,
@@ -118,7 +122,7 @@ def test_cli_rejects_stale_completed_snapshot(monkeypatch):
     monkeypatch.setattr(
         cli,
         "load_sqlite_snapshot",
-        lambda _, **__: ([], "stale", datetime.now(timezone.utc) - timedelta(hours=37)),
+        lambda _, **__: ([], "stale", datetime.now(timezone.utc) - timedelta(hours=37), CONFIG_HASH),
     )
     monkeypatch.setattr(
         cli,
@@ -149,6 +153,7 @@ def test_cli_rejects_run_id_that_differs_from_snapshot(monkeypatch):
             [object()],
             "immutable-snapshot",
             datetime.now(timezone.utc),
+            CONFIG_HASH,
         ),
     )
     monkeypatch.setattr(

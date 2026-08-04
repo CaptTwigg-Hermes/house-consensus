@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,16 +30,16 @@ def load_sqlite_snapshot(
     *,
     snapshot_run_id: str | None = None,
     source_scope: str = "tofamiliehus",
-) -> tuple[list[ExportCase], str, datetime]:
+) -> tuple[list[ExportCase], str, datetime, str]:
     with sqlite3.connect(str(path)) as conn:
         if not _REQUIRED_TABLES.issubset(_tables(conn)):
             raise RuntimeError("explicit completed snapshot tables are required")
         run_columns = _columns(conn, "pipeline_runs")
-        required_run_columns = {"source_scope", "case_count"}
+        required_run_columns = {"source_scope", "case_count", "source_config_sha256"}
         if not required_run_columns.issubset(run_columns):
-            raise RuntimeError("completed snapshot scope and counts are required")
+            raise RuntimeError("completed snapshot scope, counts, and source configuration identity are required")
         latest = conn.execute(
-            """select run_id,completed_at,case_count from pipeline_runs
+            """select run_id,completed_at,case_count,source_config_sha256 from pipeline_runs
             where status='complete' and source_scope=?
             order by completed_at desc,run_id desc limit 1""",
             (source_scope,),
@@ -55,6 +56,10 @@ def load_sqlite_snapshot(
             )
         if not latest[1]:
             raise RuntimeError(f"completed snapshot {run_id!r} has no completion time")
+        if not isinstance(latest[3], str) or re.fullmatch(r"[0-9a-f]{64}", latest[3]) is None:
+            raise RuntimeError(
+                f"completed snapshot {run_id!r} has no valid source configuration identity"
+            )
         completed_at = datetime.fromisoformat(str(latest[1]).replace("Z", "+00:00"))
         if completed_at.tzinfo is None:
             completed_at = completed_at.replace(tzinfo=timezone.utc)
@@ -92,7 +97,7 @@ def load_sqlite_snapshot(
         raise RuntimeError(
             f"completed snapshot {run_id!r} normalizes to duplicate source IDs"
         )
-    return result, run_id, completed_at.astimezone(timezone.utc)
+    return result, run_id, completed_at.astimezone(timezone.utc), latest[3]
 
 
 def load_sqlite_cases(

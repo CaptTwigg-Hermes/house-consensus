@@ -163,10 +163,26 @@ CREATE TABLE IF NOT EXISTS delisted_listings (
 CREATE TABLE IF NOT EXISTS export_runs (
     run_id text PRIMARY KEY, source_scope text NOT NULL,
     fetched_at timestamptz NOT NULL, completed_at timestamptz,
-    snapshot_count integer NOT NULL, manifest_sha256 text NOT NULL
+    snapshot_count integer NOT NULL, manifest_sha256 text NOT NULL,
+    source_config_sha256 text
 );
 ALTER TABLE export_runs ADD COLUMN IF NOT EXISTS snapshot_count integer;
 ALTER TABLE export_runs ADD COLUMN IF NOT EXISTS manifest_sha256 text;
+ALTER TABLE export_runs ADD COLUMN IF NOT EXISTS source_config_sha256 text;
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname='ck_export_runs_source_config_sha256'
+        AND conrelid = 'export_runs'::regclass
+    ) THEN
+        ALTER TABLE export_runs
+            ADD CONSTRAINT ck_export_runs_source_config_sha256
+            CHECK (
+                source_config_sha256 IS NULL
+                OR source_config_sha256 ~ '^[0-9a-f]{64}$'
+            );
+    END IF;
+END $$;
 CREATE TABLE IF NOT EXISTS listing_export_state (
     listing_id uuid PRIMARY KEY REFERENCES listings("Id") ON DELETE RESTRICT,
     source_scope text NOT NULL, first_seen_at timestamptz NOT NULL,

@@ -1021,3 +1021,48 @@ def test_export_rejects_boolean_noise_measurements(database_url):
             ("boolean-noise",),
         ).fetchone()
     assert row == (None, "unavailable", None, "unavailable", None)
+
+
+def test_export_run_persists_source_config_identity(database_url):
+    source_config_sha256 = "b" * 64
+    fetched_at = datetime(2026, 8, 3, 20, tzinfo=timezone.utc)
+    rejected_case = _case(
+        "source-config-bound", non_ai_passed=False
+    )
+    exporter = PostgresExporter(database_url, source_scope="tofamiliehus")
+    exporter.export(
+        [rejected_case],
+        run_id="source-config-bound",
+        fetched_at=fetched_at,
+        source_config_sha256=source_config_sha256,
+    )
+
+    with psycopg.connect(database_url) as conn:
+        actual = conn.execute(
+            "select source_config_sha256 from export_runs where run_id=%s",
+            ("source-config-bound",),
+        ).fetchone()
+        conn.execute(
+            '''insert into listings
+               ("Id","ExternalId","Address","FamilyFitScore","State","AiAssessed","ImportedAt")
+               values (%s,%s,%s,50,'active',false,%s)''',
+            (uuid.uuid4(), "source-config-bound", "Bound address", fetched_at),
+        )
+        conn.execute(
+            """create function reject_listing_dml() returns trigger language plpgsql as $$
+               begin raise exception 'listing DML happened before run identity validation'; end $$"""
+        )
+        conn.execute(
+            """create trigger reject_listing_dml before update or delete on listings
+               for each row execute function reject_listing_dml()"""
+        )
+        conn.commit()
+    assert actual == (source_config_sha256,)
+
+    with pytest.raises(RuntimeError, match="different immutable snapshot"):
+        exporter.export(
+            [rejected_case],
+            run_id="source-config-bound",
+            fetched_at=fetched_at,
+            source_config_sha256="c" * 64,
+        )
