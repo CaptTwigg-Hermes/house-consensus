@@ -82,6 +82,26 @@ public sealed class AiLearningRuleTests
     public void Invalid_rule_shape_or_types_are_rejected(string rule) => Assert.Throws<DomainException>(() => AiLearningRules.Validate(rule));
 
     [Fact]
+    public void Family_score_rules_ignore_numeric_scores_without_complete_provenance()
+    {
+        const string scoreRule = """{"combinator":"all","conditions":[{"field":"family_score","operator":"gte","value":80}]}""";
+        var listing = new Listing { ExternalId = "legacy", Address = "A", FamilyFitScore = 99 };
+
+        Assert.False(AiLearningRules.Matches(listing, scoreRule));
+
+        listing.FamilyPrivacyScore = listing.KidsSpaceScore = listing.GardenScore = 99;
+        listing.SharedLivingScore = listing.PracticalScore = 99;
+        listing.FamilyPrivacyWeight = 30;
+        listing.KidsSpaceWeight = listing.GardenWeight = 20;
+        listing.SharedLivingWeight = listing.PracticalWeight = 15;
+        listing.ScoreCoveragePct = 100;
+        listing.FamilyPrivacyAvailable = true;
+        listing.ScoreRuleVersion = "family-v1";
+
+        Assert.True(AiLearningRules.Matches(listing, scoreRule));
+    }
+
+    [Fact]
     public void Approved_rule_rejects_only_high_confidence_unvoted_unoverridden_match()
     {
         var match = new Listing { ExternalId = "match", Address = "A", Condition = "poor", AiConfidence = 1.0 };

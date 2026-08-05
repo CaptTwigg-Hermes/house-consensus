@@ -118,6 +118,10 @@ public sealed class Listing
     public double? GardenWeight { get; set; }
     public double? SharedLivingWeight { get; set; }
     public double? PracticalWeight { get; set; }
+    public string? ScoreRuleVersion { get; set; }
+    public double? ScoreCoveragePct { get; set; }
+    public bool? FamilyPrivacyAvailable { get; set; }
+    public string? ScoreNotesJson { get; set; }
     public DateTimeOffset ImportedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? ArchivedAt { get; private set; }
     public List<ListingOverride> Overrides { get; } = [];
@@ -388,6 +392,22 @@ public static class AiLearningRules
         return string.Equals(combinator, "any", StringComparison.OrdinalIgnoreCase) ? matches.Any(x => x) : matches.All(x => x);
     }
 
+    private static double? TrustedFamilyScore(Listing listing)
+    {
+        var status = ScoreStatusRules.Resolve(
+            listing.FamilyFitScore,
+            listing.AiAssessed,
+            listing.ScoreCoveragePct,
+            listing.FamilyPrivacyAvailable,
+            listing.FamilyPrivacyScore.HasValue && listing.KidsSpaceScore.HasValue
+                && listing.GardenScore.HasValue && listing.SharedLivingScore.HasValue
+                && listing.PracticalScore.HasValue && listing.FamilyPrivacyWeight.HasValue
+                && listing.KidsSpaceWeight.HasValue && listing.GardenWeight.HasValue
+                && listing.SharedLivingWeight.HasValue && listing.PracticalWeight.HasValue,
+            listing.ScoreRuleVersion);
+        return status == ScoreStatus.Complete ? listing.FamilyFitScore : null;
+    }
+
     private static bool MatchesCondition(Listing listing, JsonElement condition)
     {
         var field = condition.GetProperty("field").GetString()?.ToLowerInvariant();
@@ -400,7 +420,7 @@ public static class AiLearningRules
             "gardenorientation" or "garden_orientation" => listing.GardenOrientation,
             "energylabel" or "energy_label" => listing.EnergyLabel,
             "privacyscore" or "privacy_score" => listing.PrivacyScore,
-            "familyscore" or "family_score" => listing.FamilyFitScore,
+            "familyscore" or "family_score" => TrustedFamilyScore(listing),
             "separateentrance" or "separate_entrance" => listing.SeparateEntrance,
             "secondkitchen" or "second_kitchen" => listing.SecondKitchen,
             "groundfloorbedroom" or "ground_floor_bedroom" => listing.GroundFloorBedroom,

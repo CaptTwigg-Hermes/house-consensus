@@ -25,6 +25,17 @@ public sealed class HouseholdVoteSortingTests
     }
 
     [Fact]
+    public void Family_fit_sort_places_untrusted_numeric_scores_last()
+    {
+        var timestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var trusted = Listing("Trusted", 1, 70, VoteChoice.Like, timestamp);
+        var untrusted = Listing("Untrusted", 1, 99, VoteChoice.Like, timestamp) with { ScoreRuleVersion = null };
+
+        Assert.Equal(["Trusted", "Untrusted"],
+            Addresses(HouseholdVoteSorting.Sort([untrusted, trusted], Viewer, HouseholdVoteSort.FamilyFit)));
+    }
+
+    [Fact]
     public void Uses_ordinal_address_and_listing_id_as_stable_tie_breakers()
     {
         var timestamp = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -70,6 +81,13 @@ public sealed class HouseholdVoteSortingTests
         var votes = new List<VoteDto> { new(1, id, Other, choice, [], created) };
         for (var index = 0; index < extraLikes; index++)
             votes.Add(new VoteDto(index + 2, id, Guid.NewGuid(), VoteChoice.Like, [], created.AddMinutes(index + 1)));
-        return new ListingDto(id, id.ToString(), address, "City", price, fit, ListingState.Active, true, 1, null, null, null, null, false, votes);
+        return new ListingDto(id, id.ToString(), address, "City", price, fit, ListingState.Active, true, 1, null, null, null, null, false, votes,
+            FamilyPrivacyScore: fit.HasValue ? fit : null, KidsSpaceScore: fit.HasValue ? fit : null,
+            GardenScore: fit.HasValue ? fit : null, SharedLivingScore: fit.HasValue ? fit : null,
+            PracticalScore: fit.HasValue ? fit : null, FamilyPrivacyWeight: fit.HasValue ? 30 : null,
+            KidsSpaceWeight: fit.HasValue ? 20 : null, GardenWeight: fit.HasValue ? 20 : null,
+            SharedLivingWeight: fit.HasValue ? 15 : null, PracticalWeight: fit.HasValue ? 15 : null,
+            ScoreCoveragePct: fit.HasValue ? 100 : null, FamilyPrivacyAvailable: fit.HasValue ? true : null,
+            ScoreRuleVersion: fit.HasValue ? "family-v1" : null);
     }
 }

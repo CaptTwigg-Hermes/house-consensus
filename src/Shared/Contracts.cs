@@ -50,7 +50,31 @@ public sealed record ListingDto(
     bool IsManuallyAdded = false, Guid? ManuallyAddedById = null, string? ManuallyAddedByName = null, DateTimeOffset? ManuallyAddedAt = null, bool CanWithdraw = false, bool CanArchive = false,
     string? RoadNoiseStatus = null, double? RoadNoiseLnightDb = null, string? RoadNoiseLnightStatus = null,
     string? RailNoiseStatus = null, double? RailNoiseLnightDb = null, string? RailNoiseLnightStatus = null,
-    string? AirNoiseStatus = null, double? AirNoiseLnightDb = null, string? AirNoiseLnightStatus = null);
+    string? AirNoiseStatus = null, double? AirNoiseLnightDb = null, string? AirNoiseLnightStatus = null,
+    double? ScoreCoveragePct = null, bool? FamilyPrivacyAvailable = null,
+    string? ScoreRuleVersion = null, string? ScoreNotesJson = null)
+{
+    public ScoreStatus ScoreStatus => ScoreStatusRules.Resolve(
+        FamilyFitScore,
+        AiAssessed,
+        ScoreCoveragePct,
+        FamilyPrivacyAvailable,
+        FamilyPrivacyScore.HasValue && KidsSpaceScore.HasValue && GardenScore.HasValue
+            && SharedLivingScore.HasValue && PracticalScore.HasValue
+            && FamilyPrivacyWeight.HasValue && KidsSpaceWeight.HasValue && GardenWeight.HasValue
+            && SharedLivingWeight.HasValue && PracticalWeight.HasValue,
+        ScoreRuleVersion);
+
+    public double? TrustedFamilyFitScore => ScoreStatus == ScoreStatus.Complete ? FamilyFitScore : null;
+
+    public string ScoreStatusLabelKey => ScoreStatus switch
+    {
+        ScoreStatus.Incomplete => "ScoreIncomplete",
+        ScoreStatus.NeedsReview => "ScoreNeedsReview",
+        ScoreStatus.NotScored => "ScoreNotScored",
+        _ => "FamilyFit"
+    };
+}
 
 
 public sealed record AiRuleImpactDto(int Eligible, int Evaluated, int WouldReject, int WouldRestore, int Changed, Guid[] ListingIds);

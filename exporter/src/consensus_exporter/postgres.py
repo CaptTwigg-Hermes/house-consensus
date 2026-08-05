@@ -358,6 +358,21 @@ def _active_learning_rule(conn) -> tuple[uuid.UUID, str, dict] | None:
     return row[0], f"feedback-v{row[1]}", rule
 
 
+def _trusted_family_score(case: ExportCase) -> float | None:
+    contract = _score_breakdown(case.raw, case.family_score)
+    scores_and_weights = contract[:10]
+    version, coverage, privacy_available = contract[10:13]
+    if (
+        case.family_score is None
+        or any(value is None for value in scores_and_weights)
+        or not isinstance(version, str)
+        or coverage != 100
+        or privacy_available is not True
+    ):
+        return None
+    return case.family_score
+
+
 def _learning_field(case: ExportCase, field: str):
     raw = case.raw
     return {
@@ -372,8 +387,8 @@ def _learning_field(case: ExportCase, field: str):
         "energy_label": _first(raw, "energy_label", "energyLabel"),
         "privacyscore": _integer(raw, "vision_privacy_score"),
         "privacy_score": _integer(raw, "vision_privacy_score"),
-        "familyscore": case.family_score,
-        "family_score": case.family_score,
+        "familyscore": _trusted_family_score(case),
+        "family_score": _trusted_family_score(case),
         "separateentrance": _boolean(raw, "vision_separate_entrance"),
         "separate_entrance": _boolean(raw, "vision_separate_entrance"),
         "secondkitchen": _boolean(raw, "vision_second_kitchen"),

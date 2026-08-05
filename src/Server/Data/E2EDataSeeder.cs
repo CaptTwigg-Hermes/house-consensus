@@ -33,7 +33,19 @@ public static class E2EDataSeeder
         }
         await db.SaveChangesAsync(ct);
 
-        if (await db.Listings.AnyAsync(x => x.ExternalId.StartsWith("e2e-"), ct)) return;
+        var existingListings = await db.Listings.Where(x => x.ExternalId.StartsWith("e2e-")).ToListAsync(ct);
+        if (existingListings.Count > 0)
+        {
+            foreach (var listing in existingListings)
+            {
+                if (listing.ExternalId == "e2e-active")
+                    SetCompleteScore(listing, 91, 95, 95, 90, 90, 80);
+                else if (listing.ExternalId == "e2e-rejected")
+                    SetCompleteScore(listing, 72, 72, 72, 72, 72, 72);
+            }
+            await db.SaveChangesAsync(ct);
+            return;
+        }
 
         var active = new Listing
         {
@@ -123,9 +135,37 @@ public static class E2EDataSeeder
             Condition = "poor",
             MultigenFit = "unlikely"
         };
+        SetCompleteScore(active, 91, 95, 95, 90, 90, 80);
+        SetCompleteScore(rejected, 72, 72, 72, 72, 72, 72);
         rejected.ApplyImportDecision(true);
         db.Listings.AddRange(active, rejected);
         await db.SaveChangesAsync(ct);
+    }
+
+    private static void SetCompleteScore(
+        Listing listing,
+        double total,
+        double privacy,
+        double kidsSpace,
+        double garden,
+        double sharedLiving,
+        double practical)
+    {
+        listing.FamilyFitScore = total;
+        listing.FamilyPrivacyScore = privacy;
+        listing.KidsSpaceScore = kidsSpace;
+        listing.GardenScore = garden;
+        listing.SharedLivingScore = sharedLiving;
+        listing.PracticalScore = practical;
+        listing.FamilyPrivacyWeight = 30;
+        listing.KidsSpaceWeight = 20;
+        listing.GardenWeight = 20;
+        listing.SharedLivingWeight = 15;
+        listing.PracticalWeight = 15;
+        listing.ScoreCoveragePct = 100;
+        listing.FamilyPrivacyAvailable = true;
+        listing.ScoreRuleVersion = "e2e-family-v1";
+        listing.ScoreNotesJson = "{}";
     }
 
     public static async Task ResetHouseholdVotesAsync(AppDbContext db, CancellationToken ct = default)

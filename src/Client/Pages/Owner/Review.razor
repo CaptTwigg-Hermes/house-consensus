@@ -11,7 +11,7 @@ else
     <section class="review-list">@foreach (var item in items)
     {
         <article class="review-card" data-testid="listing-card" data-listing-id="@item.Id">
-            <header><div><span class="badge reject">@L.Enum(item.State)</span><h2><NavLink href="@($"listing/{item.Id}")">@item.Address</NavLink></h2><p>@item.City · @(item.Price.HasValue ? $"{item.Price.Value:N0} kr." : L["PriceOnRequest"])</p></div><span class="score-chip">@(item.FamilyFitScore?.ToString("0") ?? L["Unscored"])</span></header>
+            <header><div><span class="badge reject">@L.Enum(item.State)</span><h2><NavLink href="@($"listing/{item.Id}")">@item.Address</NavLink></h2><p>@item.City · @(item.Price.HasValue ? $"{item.Price.Value:N0} kr." : L["PriceOnRequest"])</p></div><span class="score-chip">@(item.TrustedFamilyFitScore?.ToString("0") ?? L[item.ScoreStatusLabelKey])</span></header>
             @if (!string.IsNullOrWhiteSpace(item.PreviewImageUrl))
             {
                 <img class="review-image" src="@($"/api/listings/{item.Id}/image")" alt="@($"{L["PhotoOf"]} {item.Address}")" loading="lazy" />

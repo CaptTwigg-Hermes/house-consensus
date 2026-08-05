@@ -13,7 +13,27 @@
     {
         <div class="detail-cover"><img src="@listing.PreviewImageUrl" alt="@($"{L["PhotoOf"]} {listing.Address}")" referrerpolicy="no-referrer" /></div>
     }
-    <header class="detail-hero"><div><p class="eyebrow">@listing.City</p><h1>@listing.Address</h1><p class="detail-price">@(listing.Price?.ToString("N0") ?? L["PriceOnRequest"]) @(listing.Price.HasValue ? "kr." : "")</p>@if (listing.IsManuallyAdded) { <p class="manual-provenance"><span class="badge neutral">@L["ManuallyAdded"]</span> @L["AddedBy"] @listing.ManuallyAddedByName · @listing.ManuallyAddedAt?.ToLocalTime().ToString("d")</p> }</div><div class="hero-score"><strong>@(listing.FamilyFitScore.HasValue ? Math.Round(listing.FamilyFitScore.Value) : L["Unscored"])</strong>@if (listing.FamilyFitScore.HasValue) { <span>@L["FamilyFit"]</span> }</div></header>
+    <header class="detail-hero">
+        <div><p class="eyebrow">@listing.City</p><h1>@listing.Address</h1><p class="detail-price">@(listing.Price?.ToString("N0") ?? L["PriceOnRequest"]) @(listing.Price.HasValue ? "kr." : "")</p>@if (listing.IsManuallyAdded) { <p class="manual-provenance"><span class="badge neutral">@L["ManuallyAdded"]</span> @L["AddedBy"] @listing.ManuallyAddedByName · @listing.ManuallyAddedAt?.ToLocalTime().ToString("d")</p> }</div>
+        <div class="hero-score">
+            @if (listing.ScoreStatus == ScoreStatus.Complete)
+            {
+                <strong>@Math.Round(listing.FamilyFitScore!.Value)</strong><span>@L["FamilyFit"]</span>
+            }
+            else if (listing.ScoreStatus == ScoreStatus.Incomplete)
+            {
+                <strong>—</strong><span>@L["ScoreIncomplete"]</span>
+            }
+            else if (listing.ScoreStatus == ScoreStatus.NeedsReview)
+            {
+                <strong>—</strong><span>@L["ScoreNeedsReview"]</span>
+            }
+            else
+            {
+                <strong>—</strong><span>@L["ScoreNotScored"]</span>
+            }
+        </div>
+    </header>
     <PropertyFacts Listing="listing" />
     <NoiseLevels Listing="listing" />
     <CommuteTable Json="@listing.CommuteJson" />

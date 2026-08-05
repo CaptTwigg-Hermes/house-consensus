@@ -50,7 +50,7 @@ public sealed class ListingFilterState
         if (!Minimum(x.LotArea, MinGarden) || !Minimum(x.Rooms, MinRooms)) return false;
         if (!Range(x.YearBuilt, MinYear, MaxYear)) return false;
         if (!Maximum(x.CommuteMinutes, MaxCommute) || !Maximum(x.MonthlyExpense, MaxMonthlyExpense) || !Maximum(x.DaysOnMarket, MaxDaysOnMarket)) return false;
-        if (!Minimum(x.FamilyFitScore, MinFamilyScore) || !Range(x.PrivacyScore, MinPrivacy, MaxPrivacy)) return false;
+        if (!Minimum(x.TrustedFamilyFitScore, MinFamilyScore) || !Range(x.PrivacyScore, MinPrivacy, MaxPrivacy)) return false;
         return Category(x.City, Municipalities) && Category(x.MultigenFit, MultigenFits) && Category(x.BuildableStatus, BuildableStatuses) && Category(x.Condition, Conditions) && Category(x.EnergyLabel, EnergyLabels) && Category(x.GardenOrientation, GardenOrientations) && Category(x.FamilyUnits, FamilyUnits);
     }
 
@@ -67,9 +67,9 @@ public sealed class ListingFilterState
             ListingSort.GardenHigh => filtered.OrderByDescending(x => x.LotArea ?? int.MinValue).ToList(),
             ListingSort.YearNewest => filtered.OrderByDescending(x => x.YearBuilt ?? int.MinValue).ToList(),
             ListingSort.CommuteFastest => filtered.OrderBy(x => x.CommuteMinutes ?? int.MaxValue).ToList(),
-            ListingSort.NewFirst => filtered.OrderByDescending(x => x.IsNew is true).ThenByDescending(x => x.FamilyFitScore).ToList(),
+            ListingSort.NewFirst => filtered.OrderByDescending(x => x.IsNew is true).ThenByDescending(x => x.TrustedFamilyFitScore).ToList(),
             ListingSort.DaysOnMarket => filtered.OrderBy(x => x.DaysOnMarket ?? int.MaxValue).ToList(),
-            _ => filtered.OrderByDescending(x => x.FamilyFitScore).ToList(),
+            _ => filtered.OrderByDescending(x => x.TrustedFamilyFitScore).ToList(),
         };
     }
 

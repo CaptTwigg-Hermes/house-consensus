@@ -5,8 +5,14 @@ using Xunit;
 namespace HouseConsensus.UnitTests;
 public sealed class ListingFilterStateTests
 {
-    private static ListingDto Listing(string id, double score = 80, decimal? price = 8_000_000, int? area = 200, int? garden = 800, string? condition = "good") =>
-        new(Guid.Parse(id), id, "House " + id[^1], "Roskilde", price, score, ListingState.Active, true, .9, null, null, null, null, false, [], LivingArea: area, LotArea: garden, Rooms: 6, YearBuilt: 1980, PrivacyScore: 4, MonthlyExpense: 5000, DaysOnMarket: 20, CommuteMinutes: 30, BuildableStatus: "extra_house", Condition: condition, GardenOrientation: "southwest", MultigenFit: "likely", PostalCode: "4000", Preferred: true, IsNew: true, FamilyUnits: "two_family");
+    private static ListingDto Listing(string id, double score = 80, decimal? price = 8_000_000, int? area = 200, int? garden = 800, string? condition = "good", bool trusted = true) =>
+        new(Guid.Parse(id), id, "House " + id[^1], "Roskilde", price, score, ListingState.Active, true, .9, null, null, null, null, false, [], LivingArea: area, LotArea: garden, Rooms: 6, YearBuilt: 1980, PrivacyScore: 4,
+            FamilyPrivacyScore: trusted ? 80 : null, KidsSpaceScore: trusted ? 80 : null, GardenScore: trusted ? 80 : null,
+            SharedLivingScore: trusted ? 80 : null, PracticalScore: trusted ? 80 : null,
+            FamilyPrivacyWeight: trusted ? 30 : null, KidsSpaceWeight: trusted ? 20 : null, GardenWeight: trusted ? 20 : null,
+            SharedLivingWeight: trusted ? 15 : null, PracticalWeight: trusted ? 15 : null,
+            MonthlyExpense: 5000, DaysOnMarket: 20, CommuteMinutes: 30, BuildableStatus: "extra_house", Condition: condition, GardenOrientation: "southwest", MultigenFit: "likely", PostalCode: "4000", Preferred: true, IsNew: true, FamilyUnits: "two_family",
+            ScoreCoveragePct: trusted ? 100 : null, FamilyPrivacyAvailable: trusted ? true : null, ScoreRuleVersion: trusted ? "family-v1" : null);
 
     [Fact]
     public void Active_filters_exclude_unknown_values_and_match_all_selected_ranges()
@@ -25,6 +31,20 @@ public sealed class ListingFilterStateTests
         var cheap = Listing("22222222-2222-2222-2222-222222222222", price: 7_000_000);
         Assert.Equal([cheap.Id, expensive.Id], filter.Apply([expensive, cheap]).Select(x => x.Id));
     }
+
+    [Fact]
+    public void Score_filter_and_sort_ignore_untrusted_numeric_scores()
+    {
+        var trusted = Listing("11111111-1111-1111-1111-111111111111", score: 70);
+        var untrusted = Listing("22222222-2222-2222-2222-222222222222", score: 99, trusted: false);
+        var filter = new ListingFilterState { Sort = ListingSort.FamilyScore };
+
+        Assert.Equal([trusted.Id, untrusted.Id], filter.Apply([untrusted, trusted]).Select(x => x.Id));
+
+        filter.MinFamilyScore = 80;
+        Assert.Empty(filter.Apply([trusted, untrusted]));
+    }
+
     [Fact]
     public void Municipality_and_upstream_sort_options_match_houseshopping_parity()
     {
@@ -48,5 +68,4 @@ public sealed class ListingFilterStateTests
         Assert.True(filter.Matches(listing));
         Assert.False(filter.Matches(listing with { Preferred = null }));
     }
-
 }

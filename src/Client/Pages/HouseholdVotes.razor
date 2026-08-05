@@ -57,7 +57,7 @@ else
         @foreach (var listing in Items)
         {
             <article class="household-vote-card @Tone(listing)" data-testid="household-vote-card">
-                <NavLink class="household-vote-listing" href="@($"listing/{listing.Id}")" aria-label="@($"{listing.Address}, {Price(listing)}, {L["FamilyFit"]} {(listing.FamilyFitScore.HasValue ? Math.Round(listing.FamilyFitScore.Value).ToString() : L["Unscored"])} {L["OutOf100"]}, {VoteSummary(listing)}")">
+                <NavLink class="household-vote-listing" href="@($"listing/{listing.Id}")" aria-label="@($"{listing.Address}, {Price(listing)}, {L["FamilyFit"]} {ScoreText(listing)}, {VoteSummary(listing)}")">
                     <div class="household-vote-cover">
                         @if (!string.IsNullOrWhiteSpace(listing.PreviewImageUrl))
                         {
@@ -65,7 +65,7 @@ else
                         }
                         <div class="household-cover-placeholder" aria-hidden="true"><AppIcon Name="home" /></div>
                         <div class="household-cover-shade"></div>
-                        <span class="household-fit-score"><strong>@(listing.FamilyFitScore.HasValue ? Math.Round(listing.FamilyFitScore.Value) : L["Unscored"])</strong>@if (listing.FamilyFitScore.HasValue) { <small>/100</small> }</span>
+                        <span class="household-fit-score"><strong>@(listing.TrustedFamilyFitScore.HasValue ? Math.Round(listing.TrustedFamilyFitScore.Value) : L[listing.ScoreStatusLabelKey])</strong>@if (listing.TrustedFamilyFitScore.HasValue) { <small>/100</small> }</span>
                         <div class="household-cover-copy"><strong>@listing.Address</strong><span>@listing.City</span></div>
                     </div>
                     <div class="household-listing-summary">
@@ -132,6 +132,9 @@ else
     }
     private string Tone(ListingDto listing) => DislikeCountFor(listing) == 0 ? "vote-tone-like" : LikeCountFor(listing) == 0 ? "vote-tone-dislike" : "vote-tone-mixed";
     private string VoteSummary(ListingDto listing) => $"{LikeCountFor(listing)} {L["Positive"]}, {DislikeCountFor(listing)} {L["Concerns"]}";
+    private string ScoreText(ListingDto listing) => listing.TrustedFamilyFitScore.HasValue
+        ? $"{Math.Round(listing.TrustedFamilyFitScore.Value)} {L["OutOf100"]}"
+        : L[listing.ScoreStatusLabelKey];
     private string Price(ListingDto listing) => listing.Price.HasValue ? $"{listing.Price.Value:N0} kr." : L["PriceOnRequest"];
     private static string AvatarStyle(VoteDto vote) => $"--avatar-color: {AvatarColor.Resolve(vote.MemberColor, vote.MemberId)}; background-color: var(--avatar-color)";
 }

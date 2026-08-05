@@ -47,7 +47,7 @@ else { <div id="browse-map" data-testid="browse-map" class="map" aria-label="@L[
     private async Task SaveAndRender() { await JS.InvokeVoidAsync("hc.saveState", StateKey, applied); if (view == "map") await RenderMap(); }
     private Task ShowList() { view = "list"; return Task.CompletedTask; }
     private async Task ShowMap() { view = "map"; await Task.Delay(1); await RenderMap(); }
-    private async Task RenderMap() => await JS.InvokeVoidAsync("hc.renderMap", "browse-map", Visible.Where(x => x.Latitude.HasValue && x.Longitude.HasValue).Select(x => new { x.Id, x.Address, x.City, x.Latitude, x.Longitude, title = x.Address, price = x.Price, score = x.FamilyFitScore, image = $"/api/listings/{x.Id}/image", url = $"listing/{x.Id}" }));
+    private async Task RenderMap() => await JS.InvokeVoidAsync("hc.renderMap", "browse-map", Visible.Where(x => x.Latitude.HasValue && x.Longitude.HasValue).Select(x => new { x.Id, x.Address, x.City, x.Latitude, x.Longitude, title = x.Address, price = x.Price, score = x.TrustedFamilyFitScore, image = $"/api/listings/{x.Id}/image", url = $"listing/{x.Id}" }));
     private async Task Reload() => allItems = await Api.GetAsync<List<ListingDto>>("api/listings/browse") ?? [];
     private void LiveChanged() => _ = InvokeAsync(async () => { await Reload(); StateHasChanged(); if (view == "map") { await Task.Delay(1); await RenderMap(); } });
     public void Dispose() => Live.Changed -= LiveChanged;

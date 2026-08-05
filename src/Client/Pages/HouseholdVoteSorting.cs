@@ -23,8 +23,8 @@ public static class HouseholdVoteSorting
                 .ThenBy(listing => OtherVotes(listing, viewerId).Count(vote => vote.Choice == VoteChoice.Dislike))
                 .ThenByDescending(listing => LatestActivity(listing, viewerId)),
             HouseholdVoteSort.FamilyFit => visible
-                .OrderByDescending(listing => listing.FamilyFitScore.HasValue)
-                .ThenByDescending(listing => listing.FamilyFitScore),
+                .OrderByDescending(listing => listing.TrustedFamilyFitScore.HasValue)
+                .ThenByDescending(listing => listing.TrustedFamilyFitScore),
             HouseholdVoteSort.PriceLow => visible
                 .OrderByDescending(listing => listing.Price.HasValue)
                 .ThenBy(listing => listing.Price),
