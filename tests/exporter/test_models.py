@@ -47,14 +47,15 @@ def test_raw_case_not_in_matches_is_still_exported_as_non_ai_rejected():
     assert case.pipeline_decision == "filter_rejected"
 
 
-def test_real_vision_fields_and_string_booleans_are_interpreted_semantically():
-    rejected = ExportCase.from_records(
+def test_vision_unlikely_is_reviewable_not_an_implicit_rejection():
+    reviewable = ExportCase.from_records(
         {"caseID": "real-1"},
         {"id": "real-1", "non_ai_passed": "true", "vision_multigen_layout": "unlikely", "vision_confidence": "HIGH"},
     )
-    assert rejected.non_ai_passed is True
-    assert rejected.ai_status == "rejected"
-    assert rejected.pipeline_decision == "ai_rejected"
+    assert reviewable.non_ai_passed is True
+    assert reviewable.ai_status == "assessed"
+    assert reviewable.pipeline_decision == "passed"
+    assert reviewable.ai_evidence["decision"] == "needs_review"
 
     filtered = ExportCase.from_records(
         {"caseID": "real-2"},

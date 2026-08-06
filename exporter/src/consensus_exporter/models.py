@@ -107,14 +107,14 @@ class ExportCase:
         ).lower()
         confidence = _first(merged, "ai_confidence", "vision_confidence")
         confidence = str(confidence).lower() if confidence is not None else None
-        # Houseshopping emits strong|possible|unlikely. Keep legacy booleans
-        # for backwards compatibility, but only high-confidence "unlikely"
-        # is an AI rejection.
+        # Houseshopping emits strong|possible|unlikely. An unlikely layout
+        # lowers upstream confidence, but is not an explicit rejection: it
+        # remains reviewable unless an independent AI decision rejects it.
         multigen_value = merged.get("vision_multigen_layout")
         if not ai_decision and isinstance(multigen_value, str):
             normalized_layout = multigen_value.strip().lower()
             if normalized_layout == "unlikely":
-                ai_decision = "reject"
+                ai_decision = "needs_review"
             elif normalized_layout in {"strong", "possible"}:
                 ai_decision = "pass"
         if not ai_decision:
@@ -125,6 +125,7 @@ class ExportCase:
         assessed = not failed and bool(
             ai_decision
             or ai_raw_status in {"passed", "rejected", "assessed", "complete", "ok"}
+            or ai_decision == "needs_review"
         )
         rejected = (
             assessed

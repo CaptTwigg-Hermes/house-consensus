@@ -1345,8 +1345,8 @@ def test_active_owner_approved_learning_rule_applies_to_future_unvoted_imports(
     ]
     assert sorted(applications) == [
         ("active", "active"),
+        ("active", "active"),
         ("active", "ai_rejected"),
-        ("ai_rejected", "active"),
     ]
 
 
