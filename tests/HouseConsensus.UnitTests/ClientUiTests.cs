@@ -321,6 +321,16 @@ public sealed class ClientUiTests
     }
 
     [Fact]
+    public void Browse_api_exposes_only_screened_active_or_restored_listings()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var program = File.ReadAllText(Path.Combine(root, "src/Server/Program.cs"));
+        var browse = program[program.IndexOf("listings.MapGet(\"/browse\"", StringComparison.Ordinal)..program.IndexOf("listings.MapGet(\"/consensus\"", StringComparison.Ordinal)];
+        Assert.Contains("x.State == ListingState.Active || x.State == ListingState.Restored", browse, StringComparison.Ordinal);
+        Assert.DoesNotContain("x.State != ListingState.Archived", browse, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Owner_review_queries_only_unresolved_ai_rejections()
     {
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
