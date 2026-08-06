@@ -568,6 +568,17 @@ public sealed class ClientUiTests
     }
 
     [Fact]
+    public void Property_facts_surface_imported_floor_count_with_a_localized_label()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var facts = File.ReadAllText(Path.Combine(root, "src/Client/Components/PropertyFacts.razor"));
+        var i18n = File.ReadAllText(Path.Combine(root, "src/Client/Services/I18n.cs"));
+        Assert.Contains("Listing.Floors.HasValue", facts, StringComparison.Ordinal);
+        Assert.Contains("L[\"Floors\"]", facts, StringComparison.Ordinal);
+        Assert.Contains("[\"Floors\"]", i18n, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Detail_and_vote_cards_surface_commute_readable_evidence_and_unclipped_notes()
     {
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);

@@ -170,6 +170,7 @@ public sealed class I18n
         ["LivingArea"] = ("living", "bolig"),
         ["LotArea"] = ("lot", "grund"),
         ["Rooms"] = ("rooms", "rum"),
+        ["Floors"] = ("floors", "etager"),
         ["YearBuilt"] = ("built", "bygget"),
         ["Bathrooms"] = ("baths", "bad"),
         ["Energy"] = ("energy", "energi"),

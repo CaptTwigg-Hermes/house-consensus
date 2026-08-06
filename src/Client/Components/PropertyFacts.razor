@@ -4,6 +4,7 @@
     @if (Listing.LivingArea.HasValue) { <span><strong>@Listing.LivingArea</strong><small>m² @L["LivingArea"]</small></span> }
     @if (Listing.LotArea.HasValue) { <span><strong>@Listing.LotArea.Value.ToString("N0")</strong><small>m² @L["LotArea"]</small></span> }
     @if (Listing.Rooms.HasValue) { <span><strong>@Listing.Rooms</strong><small>@L["Rooms"]</small></span> }
+    @if (Listing.Floors.HasValue) { <span><strong>@Listing.Floors</strong><small>@L["Floors"]</small></span> }
     @if (Listing.YearBuilt.HasValue) { <span><strong>@Listing.YearBuilt</strong><small>@L["YearBuilt"]</small></span> }
     @if (Listing.Bathrooms.HasValue) { <span><strong>@Listing.Bathrooms</strong><small>@L["Bathrooms"]</small></span> }
     @if (Listing.EnergyLabel is not null) { <span class="energy-fact"><strong>@Listing.EnergyLabel</strong><small>@L["Energy"]</small></span> }
