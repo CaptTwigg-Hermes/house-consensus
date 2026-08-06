@@ -351,6 +351,21 @@ public sealed class ClientUiTests
     }
 
     [Fact]
+    public void Browse_filter_drawer_has_pressed_state_and_complete_dialog_keyboard_lifecycle()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var drawer = File.ReadAllText(Path.Combine(root, "src/Client/Components/ListingFilterDrawer.razor"));
+        var browse = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Browse.razor"));
+        Assert.Contains("aria-pressed", drawer, StringComparison.Ordinal);
+        Assert.Contains("browse-filter-dialog", drawer, StringComparison.Ordinal);
+        Assert.Contains("@onkeydown", drawer, StringComparison.Ordinal);
+        Assert.Contains("focusFiltersOnRender", browse, StringComparison.Ordinal);
+        Assert.Contains("hc.dialogOpen", browse, StringComparison.Ordinal);
+        Assert.Contains("hc.dialogClose", browse, StringComparison.Ordinal);
+        Assert.Contains("filterTrigger.FocusAsync", browse, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Map_uses_imported_coordinates_and_rich_popups_without_browser_geocoding()
     {
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);

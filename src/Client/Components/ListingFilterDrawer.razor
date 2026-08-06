@@ -1,13 +1,13 @@
 @inject I18n L
-<section class="filter-drawer" role="dialog" aria-modal="true" aria-label="@L["Filters"]" @onclick:stopPropagation>
+<section id="browse-filter-dialog" class="filter-drawer" role="dialog" aria-modal="true" aria-label="@L["Filters"]" @onclick:stopPropagation @onkeydown="KeyDown">
     <div class="drawer-handle" aria-hidden="true"></div>
     <div class="filter-title"><div><p class="eyebrow">@L["Browse"]</p><strong>@L["Filters"]</strong></div><button type="button" class="drawer-close" aria-label="@L["Close"]" @onclick="OnClose">×</button></div>
     <label class="filter-search">@L["Search"]<input placeholder="@L["SearchHomes"]" @bind="State.Search" /></label>
     <div class="quick-filters" aria-label="@L["QuickFilters"]">
-        <button type="button" data-testid="filter-preferred" class="tag @(State.OnlyPreferred ? "selected" : "")" @onclick="() => State.OnlyPreferred = !State.OnlyPreferred">@L["Preferred"]</button>
-        <button type="button" data-testid="filter-quiet" class="tag @(State.OnlyQuiet ? "selected" : "")" @onclick="() => State.OnlyQuiet = !State.OnlyQuiet">@L["Quiet"]</button>
-        <button type="button" data-testid="filter-new" class="tag @(State.OnlyNew ? "selected" : "")" @onclick="() => State.OnlyNew = !State.OnlyNew">@L["New"]</button>
-        <button type="button" data-testid="filter-ai-plan" class="tag @(State.OnlyAiAssessed ? "selected" : "")" @onclick="() => State.OnlyAiAssessed = !State.OnlyAiAssessed">@L["AiPlan"]</button>
+        <button type="button" data-testid="filter-preferred" class="tag @(State.OnlyPreferred ? "selected" : "")" aria-pressed="@(State.OnlyPreferred ? "true" : "false")" @onclick="() => State.OnlyPreferred = !State.OnlyPreferred">@L["Preferred"]</button>
+        <button type="button" data-testid="filter-quiet" class="tag @(State.OnlyQuiet ? "selected" : "")" aria-pressed="@(State.OnlyQuiet ? "true" : "false")" @onclick="() => State.OnlyQuiet = !State.OnlyQuiet">@L["Quiet"]</button>
+        <button type="button" data-testid="filter-new" class="tag @(State.OnlyNew ? "selected" : "")" aria-pressed="@(State.OnlyNew ? "true" : "false")" @onclick="() => State.OnlyNew = !State.OnlyNew">@L["New"]</button>
+        <button type="button" data-testid="filter-ai-plan" class="tag @(State.OnlyAiAssessed ? "selected" : "")" aria-pressed="@(State.OnlyAiAssessed ? "true" : "false")" @onclick="() => State.OnlyAiAssessed = !State.OnlyAiAssessed">@L["AiPlan"]</button>
     </div>
     <label>@L["Sort"]<select @bind="State.Sort">@foreach (var value in Enum.GetValues<ListingSort>()) { <option value="@value">@L[value.ToString()]</option> }</select></label>
     <div class="filter-sections">
@@ -49,6 +49,7 @@
     [Parameter] public EventCallback OnClear { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
     private IReadOnlyList<string> Options(Func<ListingDto, string?> selector) => Items.Select(selector).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToList();
+    private async Task KeyDown(KeyboardEventArgs e) { if (e.Key == "Escape") await OnClose.InvokeAsync(); }
     private void Toggle(List<string> selected, string value) { var found = selected.FirstOrDefault(x => x.Equals(value, StringComparison.OrdinalIgnoreCase)); if (found is null) selected.Add(value); else selected.Remove(found); }
     private RenderFragment Category(string label, string name, List<string> selected, IReadOnlyList<string> values) => builder =>
     {
@@ -57,7 +58,7 @@
         builder.OpenElement(2, "legend"); builder.AddContent(3, label); builder.CloseElement();
         builder.OpenElement(4, "div"); builder.AddAttribute(5, "class", "filter-chips");
         var seq = 6;
-        foreach (var value in values) { builder.OpenElement(seq++, "button"); builder.AddAttribute(seq++, "type", "button"); builder.AddAttribute(seq++, "class", selected.Contains(value, StringComparer.OrdinalIgnoreCase) ? "tag selected" : "tag"); builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => Toggle(selected, value))); builder.AddContent(seq++, value); builder.CloseElement(); }
+        foreach (var value in values) { builder.OpenElement(seq++, "button"); builder.AddAttribute(seq++, "type", "button"); builder.AddAttribute(seq++, "class", selected.Contains(value, StringComparer.OrdinalIgnoreCase) ? "tag selected" : "tag"); builder.AddAttribute(seq++, "aria-pressed", selected.Contains(value, StringComparer.OrdinalIgnoreCase) ? "true" : "false"); builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => Toggle(selected, value))); builder.AddContent(seq++, value); builder.CloseElement(); }
         builder.CloseElement(); builder.CloseElement();
     };
 }
