@@ -20,7 +20,7 @@ class Fetcher(Protocol):
 
 
 class RunWriter(Protocol):
-    def write_started_run(self, *, snapshot: RunSnapshot, requested_at: datetime) -> None: ...
+    def write_started_run(self, *, snapshot: RunSnapshot, requested_at: datetime) -> str: ...
     def write_source_snapshot(self, *, snapshot: RunSnapshot, source_name: str, payload: Mapping[str, Any], captured_at: datetime) -> str: ...
     def write_stage_outcome(self, *, snapshot: RunSnapshot, stage_name: str, stage_status: str, outcome: Mapping[str, Any], started_at: datetime, completed_at: datetime) -> None: ...
     def complete_run(self, *, snapshot: RunSnapshot, run_status: str, completed_at: datetime) -> None: ...
@@ -37,6 +37,7 @@ class IngestionResult:
     manifest_sha256: str
     snapshot_count: int
     projected_count: int
+    run_status: str
 
 
 def boligsiden_projection_record(case: Mapping[str, Any]) -> dict[str, Any]:
@@ -69,7 +70,7 @@ class NativeIngestionOrchestrator:
         projection_records = [boligsiden_projection_record(case) for case in fetched.records]
         snapshot = fetched.run_snapshot
         if dry_run:
-            return IngestionResult(True, snapshot.run_id, snapshot.manifest_sha256, snapshot.snapshot_count, 0)
+            return IngestionResult(True, snapshot.run_id, snapshot.manifest_sha256, snapshot.snapshot_count, 0, "dry_run")
 
         payload = {
             "records": [dict(case) for case in fetched.records],
@@ -79,7 +80,11 @@ class NativeIngestionOrchestrator:
             "manifest_sha256": snapshot.manifest_sha256,
             "snapshot_count": snapshot.snapshot_count,
         }
-        self._run_writer.write_started_run(snapshot=snapshot, requested_at=requested_at)
+        run_status = self._run_writer.write_started_run(snapshot=snapshot, requested_at=requested_at)
+        if run_status != "running":
+            return IngestionResult(False, snapshot.run_id, snapshot.manifest_sha256, snapshot.snapshot_count, 0, run_status)
+
+        failed_stage = "fetch"
         try:
             source_snapshot_id = self._run_writer.write_source_snapshot(
                 snapshot=snapshot, source_name="boligsiden-search-cases", payload=payload, captured_at=requested_at,
@@ -89,20 +94,26 @@ class NativeIngestionOrchestrator:
                 outcome={"record_count": snapshot.snapshot_count, "source_snapshot_id": source_snapshot_id},
                 started_at=requested_at, completed_at=requested_at,
             )
+            failed_stage = "projection"
+            projected_count = self._projector.project_completed_snapshot(
+                source_snapshot_id=source_snapshot_id, projected_at=requested_at,
+            )
+            self._run_writer.write_stage_outcome(
+                snapshot=snapshot, stage_name="projection", stage_status="succeeded",
+                outcome={"projected_count": projected_count, "source_snapshot_id": source_snapshot_id},
+                started_at=requested_at, completed_at=requested_at,
+            )
             self._run_writer.complete_run(snapshot=snapshot, run_status="succeeded", completed_at=requested_at)
         except Exception as error:
             try:
                 self._run_writer.write_stage_outcome(
-                    snapshot=snapshot, stage_name="fetch", stage_status="failed", outcome={"error": str(error)},
+                    snapshot=snapshot, stage_name=failed_stage, stage_status="failed", outcome={"error": str(error)},
                     started_at=requested_at, completed_at=requested_at,
                 )
             finally:
                 self._run_writer.complete_run(snapshot=snapshot, run_status="failed", completed_at=requested_at)
             raise
-        projected_count = self._projector.project_completed_snapshot(
-            source_snapshot_id=source_snapshot_id, projected_at=requested_at,
-        )
-        return IngestionResult(False, snapshot.run_id, snapshot.manifest_sha256, snapshot.snapshot_count, projected_count)
+        return IngestionResult(False, snapshot.run_id, snapshot.manifest_sha256, snapshot.snapshot_count, projected_count, "succeeded")
 
 
 def _text(value: object, field: str) -> str:

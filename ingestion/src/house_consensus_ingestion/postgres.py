@@ -32,7 +32,7 @@ class PostgresRunWriter:
     def __init__(self, connection_factory: Callable[[], _Connection]) -> None:
         self._connection_factory = connection_factory
 
-    def write_started_run(self, *, snapshot: RunSnapshot, requested_at: datetime) -> None:
+    def write_started_run(self, *, snapshot: RunSnapshot, requested_at: datetime) -> str:
         with self._connection_factory() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -41,20 +41,24 @@ class PostgresRunWriter:
                         (run_id, source_system, source_scope, requested_at, started_at, run_status, manifest_sha256)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (run_id) DO NOTHING
-                    RETURNING source_system, source_scope, manifest_sha256
+                    RETURNING source_system, source_scope, manifest_sha256, run_status
                     """,
                     (snapshot.run_id, snapshot.source_system, snapshot.source_scope, requested_at, requested_at, "running", snapshot.manifest_sha256),
                 )
                 provenance = cursor.fetchone()
                 if provenance is None:
                     cursor.execute(
-                        """SELECT source_system, source_scope, manifest_sha256
+                        """SELECT source_system, source_scope, manifest_sha256, run_status
                         FROM ingestion_runs WHERE run_id = %s FOR KEY SHARE""", (snapshot.run_id,),
                     )
                     provenance = cursor.fetchone()
-                if provenance != (snapshot.source_system, snapshot.source_scope, snapshot.manifest_sha256):
+                if provenance is None or provenance[:3] != (
+                    snapshot.source_system, snapshot.source_scope, snapshot.manifest_sha256
+                ):
                     raise IngestionRunConflictError(f"run ID {snapshot.run_id} conflicts with immutable provenance")
+                run_status = str(provenance[3])
             connection.commit()
+        return run_status
 
     def write_source_snapshot(self, *, snapshot: RunSnapshot, source_name: str, payload: Mapping[str, Any], captured_at: datetime) -> str:
         canonical_payload = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)

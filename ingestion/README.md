@@ -32,9 +32,9 @@ The native run writer captures immutable source snapshots and fetch-stage outcom
 
 ## Native listing projection seam
 
-`PostgresListingProjectionWriter.project_completed_snapshot` reads an immutable `ingestion_source_snapshots.payload` only after its parent run is `succeeded`. Payloads may be a records array or an object containing a `records` array; every record must supply `external_id` (or `id`) and a non-empty `address`. It writes only the core listing fields from that source record and records the source identity in the application-owned `listing_ingestion_projections` table added by migration `202608070003_AddNativeListingProjection`.
+`PostgresListingProjectionWriter.project_completed_snapshot` reads an immutable `ingestion_source_snapshots.payload` while its parent run is running or succeeded. A failed run remains safely reconcilable only when its immutable fetch outcome succeeded, so a later projection retry cannot invent source data or rewrite its terminal source truth. Payloads may be a records array or an object containing a `records` array; every record must supply `external_id` (or `id`) and a non-empty `address`. It writes only the core listing fields from that source record and records the source identity in the application-owned `listing_ingestion_projections` table added by migration `202608070003_AddNativeListingProjection`.
 
-The source identity is `(source_system, source_scope, source_record_id)` and is unique. If an `ExternalId` is already held by a manually added listing, a listing with an owner override, an unprovenanced legacy row, or a different native source identity, the projection raises `ListingIdentityConflictError` instead of changing it. The native CLI invokes this seam only after its source run has reached succeeded; no scheduler or cron entrypoint is added.
+The source identity is `(source_system, source_scope, source_record_id)` and is unique. If an `ExternalId` is already held by a manually added listing, a listing with an owner override, an unprovenanced legacy row, or a different native source identity, the projection raises `ListingIdentityConflictError` instead of changing it. The native CLI projects before terminal success; a projection failure records a failed projection outcome and terminal failed source run, whose validated snapshot remains explicitly reconcilable. No scheduler or cron entrypoint is added.
 
 
 ## Native Boligsiden orchestration
@@ -43,7 +43,7 @@ The runnable native path is dry-run-first. It maps Boligsiden caseID, address, a
 
     uv run --project ingestion house-consensus-ingest --boligsiden --dry-run --municipality 101 --address-type villa --price-min 1000000 --price-max 3000000
 
-Use --execute instead of --dry-run only with an explicit DATABASE_URL. Execution fetches the complete sweep, creates a running native run, stores the raw source envelope plus validated projection_records, appends its fetch outcome, makes the run terminal succeeded, and only then projects listings. A persistence error after the run starts records a failed fetch outcome and terminal failed state; projection is deliberately not scheduled by cron.
+Use --execute instead of --dry-run only with an explicit DATABASE_URL. Execution fetches the complete sweep, creates a running native run, stores the raw source envelope plus validated projection_records, appends its fetch outcome, projects listings, appends the projection outcome, and only then makes the run terminal succeeded. A persistence or projection error after the run starts records the relevant failed stage and terminal failed state; a fetch-complete failed snapshot remains available for explicit projection reconciliation. Projection is deliberately not scheduled by cron.
 
 
 ## Read-only legacy shadow parity

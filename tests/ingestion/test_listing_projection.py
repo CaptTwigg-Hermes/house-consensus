@@ -65,7 +65,8 @@ def test_projects_a_completed_native_source_record_without_legacy_exporter_table
     statements = "\n".join(statement for statement, _ in connection.cursor_instance.executed)
     assert count == 1
     assert "ingestion_source_snapshots" in statements
-    assert "run_status = 'succeeded'" in statements
+    assert "run_status IN ('running', 'succeeded')" in statements
+    assert "stage_name = 'fetch'" in statements
     assert "INSERT INTO listings" in statements
     assert "INSERT INTO listing_ingestion_projections" in statements
     assert "export_runs" not in statements

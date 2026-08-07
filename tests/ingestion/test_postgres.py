@@ -51,13 +51,13 @@ def test_write_started_run_uses_injected_native_postgres_connection() -> None:
         records=[{"external_id": "1", "address": "One Street 1"}],
     )
     connection = Connection(
-        result=(snapshot.source_system, snapshot.source_scope, snapshot.manifest_sha256)
+        result=(snapshot.source_system, snapshot.source_scope, snapshot.manifest_sha256, "running")
     )
 
-    PostgresRunWriter(connection_factory=lambda: connection).write_started_run(
+    assert PostgresRunWriter(connection_factory=lambda: connection).write_started_run(
         snapshot=snapshot,
         requested_at=datetime(2026, 8, 7, tzinfo=UTC),
-    )
+    ) == "running"
 
     statement, parameters = connection.cursor_instance.executed[0]
     assert "INSERT INTO ingestion_runs" in statement
@@ -100,7 +100,7 @@ def test_write_started_run_rejects_a_conflicting_native_run_identity() -> None:
     statements = "\n".join(statement for statement, _ in connection.cursor_instance.executed)
     assert "ON CONFLICT (run_id) DO NOTHING" in statements
     assert "DO UPDATE" not in statements
-    assert "RETURNING source_system, source_scope, manifest_sha256" in statements
+    assert "RETURNING source_system, source_scope, manifest_sha256, run_status" in statements
     assert "FOR KEY SHARE" in statements
 
 

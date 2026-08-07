@@ -18,11 +18,13 @@ class Fetcher:
 
 
 class Writer:
-    def __init__(self) -> None:
+    def __init__(self, *, existing_run_status: str = "running") -> None:
         self.calls: list[tuple[str, object]] = []
+        self.existing_run_status = existing_run_status
 
-    def write_started_run(self, *, snapshot, requested_at) -> None:
+    def write_started_run(self, *, snapshot, requested_at) -> str:
         self.calls.append(("started", snapshot, requested_at))
+        return self.existing_run_status
 
     def write_source_snapshot(self, *, snapshot, source_name, payload, captured_at):
         self.calls.append(("snapshot", snapshot, source_name, payload, captured_at))
@@ -104,7 +106,7 @@ def test_dry_run_fetches_validates_and_reports_without_native_database_or_projec
     assert projector.calls == []
 
 
-def test_native_lifecycle_persists_raw_snapshot_and_terminal_success_before_projecting() -> None:
+def test_native_lifecycle_projects_before_terminal_success() -> None:
     from house_consensus_ingestion.orchestration import NativeIngestionOrchestrator
 
     writer = Writer()
@@ -116,14 +118,15 @@ def test_native_lifecycle_persists_raw_snapshot_and_terminal_success_before_proj
 
     assert result.dry_run is False
     assert result.projected_count == 1
-    assert [call[0] for call in writer.calls] == ["started", "snapshot", "stage", "terminal"]
+    assert [call[0] for call in writer.calls] == ["started", "snapshot", "stage", "stage", "terminal"]
     snapshot_payload = writer.calls[1][3]
     assert snapshot_payload["records"] == [dict(raw_fetch().records[0])]
     assert snapshot_payload["projection_records"] == [{
         "external_id": "case-42", "address": "Example Road 42, 2100 Copenhagen", "city": "Copenhagen", "price": 2_500_000,
     }]
     assert writer.calls[2][3] == "succeeded"
-    assert writer.calls[3][2] == "succeeded"
+    assert writer.calls[3][3] == "succeeded"
+    assert writer.calls[4][2] == "succeeded"
     assert projector.calls == [("00000000-0000-0000-0000-000000000011", datetime(2026, 8, 7, tzinfo=UTC))]
 
 
@@ -142,4 +145,40 @@ def test_terminal_failure_is_persisted_when_snapshot_write_fails() -> None:
         )
 
     assert [call[0] for call in writer.calls] == ["started", "stage", "terminal"]
+    assert writer.calls[-1][2] == "failed"
+
+
+@pytest.mark.parametrize("terminal_status", ["succeeded", "failed", "cancelled"])
+def test_exact_retry_of_a_terminal_run_is_a_no_op_after_provenance_is_verified(terminal_status: str) -> None:
+    from house_consensus_ingestion.orchestration import NativeIngestionOrchestrator
+
+    writer = Writer(existing_run_status=terminal_status)
+    projector = Projector()
+
+    result = NativeIngestionOrchestrator(fetcher=Fetcher(raw_fetch()), run_writer=writer, projector=projector).run(
+        dry_run=False,
+        requested_at=datetime(2026, 8, 7, tzinfo=UTC),
+    )
+
+    assert result.run_status == terminal_status
+    assert result.projected_count == 0
+    assert [call[0] for call in writer.calls] == ["started"]
+    assert projector.calls == []
+
+
+def test_projection_failure_marks_the_running_run_failed_before_it_can_succeed() -> None:
+    from house_consensus_ingestion.orchestration import NativeIngestionOrchestrator
+
+    class FailingProjector(Projector):
+        def project_completed_snapshot(self, **kwargs) -> int:
+            raise RuntimeError("listing lock timeout")
+
+    writer = Writer()
+    with pytest.raises(RuntimeError, match="listing lock timeout"):
+        NativeIngestionOrchestrator(
+            fetcher=Fetcher(raw_fetch()), run_writer=writer, projector=FailingProjector()
+        ).run(dry_run=False, requested_at=datetime(2026, 8, 7, tzinfo=UTC))
+
+    assert [call[0] for call in writer.calls] == ["started", "snapshot", "stage", "stage", "terminal"]
+    assert writer.calls[-2][3:5] == ("failed", {"error": "listing lock timeout"})
     assert writer.calls[-1][2] == "failed"
