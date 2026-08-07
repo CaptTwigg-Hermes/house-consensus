@@ -28,4 +28,10 @@ Run the House Consensus application migrations before using the writer. The pres
 | `run_status text` | initialized as `running` |
 | `manifest_sha256 text` | canonical snapshot SHA-256 and immutable provenance |
 
-The application contract also owns source snapshots and stage outcomes. This foundation does not yet capture those records, complete/reconcile a run, or migrate schema; those belong to later orchestration slices.
+The application contract also owns source snapshots and stage outcomes. This foundation does not capture those records or complete/reconcile a run; those belong to later orchestration slices.
+
+## Native listing projection seam
+
+`PostgresListingProjectionWriter.project_completed_snapshot` reads an immutable `ingestion_source_snapshots.payload` only after its parent run is `succeeded`. Payloads may be a records array or an object containing a `records` array; every record must supply `external_id` (or `id`) and a non-empty `address`. It writes only the core listing fields from that source record and records the source identity in the application-owned `listing_ingestion_projections` table added by migration `202608070002_AddNativeListingProjection`.
+
+The source identity is `(source_system, source_scope, source_record_id)` and is unique. If an `ExternalId` is already held by a manually added listing, a listing with an owner override, an unprovenanced legacy row, or a different native source identity, the projection raises `ListingIdentityConflictError` instead of changing it. No CLI, service registration, scheduler, or production call site invokes this seam yet.
