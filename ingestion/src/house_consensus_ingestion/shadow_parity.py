@@ -79,7 +79,7 @@ def _load_completed_legacy_scope(path: Path, source_scope: str) -> dict[str, Pro
             address=_address(merged.get("address")),
             city=_city(merged),
             price=_first(merged, "price_dkk", "cashPrice", "price"),
-            source_url=_first(merged, "maegler_url", "caseUrl", "link", "url"),
+            source_url=_canonical_url(_first(merged, "maegler_url", "caseUrl", "link", "url")),
         )
         if record.source_id in records:
             raise ShadowParityError(f"completed legacy snapshot {run_id!r} contains duplicate source ID {record.source_id!r}")
@@ -107,7 +107,7 @@ def _load_native_projection(connection_factory: Callable[[], _Connection], sourc
             raise ShadowParityError(f"native projection source ID {source_id!r} has mismatched listing ExternalId {external_id!r}")
         if source_id in records:
             raise ShadowParityError(f"native projection contains duplicate source ID {source_id!r}")
-        records[source_id] = ProjectionRecord(source_id, _text(address), _text(city), price, _text(source_url))
+        records[source_id] = ProjectionRecord(source_id, _text(address), _text(city), price, _canonical_url(source_url))
     return records
 
 
@@ -144,6 +144,11 @@ def _city(record: Mapping[str, Any]) -> str | None:
 
 def _first(record: Mapping[str, Any], *keys: str, default: object = None) -> object:
     return next((record[key] for key in keys if record.get(key) not in (None, "")), default)
+
+
+def _canonical_url(value: object) -> str | None:
+    """Normalize only irrelevant outer whitespace before comparing source URLs."""
+    return _text(value)
 
 
 def _text(value: object) -> str | None:
