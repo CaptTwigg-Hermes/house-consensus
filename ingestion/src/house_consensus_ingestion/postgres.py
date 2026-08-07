@@ -51,7 +51,7 @@ class PostgresRunWriter:
                     """,
                     (
                         snapshot.run_id,
-                        "house-consensus-ingestion",
+                        snapshot.source_system,
                         snapshot.source_scope,
                         requested_at,
                         requested_at,

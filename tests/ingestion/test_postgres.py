@@ -47,6 +47,7 @@ def test_write_started_run_uses_injected_native_postgres_connection() -> None:
 
     connection = Connection()
     snapshot = build_snapshot(
+        source_system="house-consensus-ingestion",
         source_scope="boliga.dk",
         records=[{"external_id": "1", "address": "One Street 1"}],
     )
@@ -67,7 +68,7 @@ def test_write_started_run_uses_injected_native_postgres_connection() -> None:
     assert "export_runs" not in statement
     assert parameters == (
         snapshot.run_id,
-        "house-consensus-ingestion",
+        snapshot.source_system,
         "boliga.dk",
         datetime(2026, 8, 7, tzinfo=UTC),
         datetime(2026, 8, 7, tzinfo=UTC),
@@ -83,6 +84,7 @@ def test_write_started_run_rejects_a_conflicting_native_run_identity() -> None:
 
     connection = Connection(result=None)
     snapshot = build_snapshot(
+        source_system="house-consensus-ingestion",
         source_scope="boliga.dk",
         records=[{"external_id": "1", "address": "One Street 1"}],
     )

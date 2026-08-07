@@ -8,6 +8,8 @@ def test_dry_run_prints_deterministic_snapshot_identity(capsys) -> None:
 
     exit_code = main([
         "--dry-run",
+        "--source-system",
+        "house-consensus-ingestion",
         "--source-scope",
         "boliga.dk",
         "--records-json",
@@ -17,8 +19,9 @@ def test_dry_run_prints_deterministic_snapshot_identity(capsys) -> None:
     assert exit_code == 0
     assert json.loads(capsys.readouterr().out) == {
         "dry_run": True,
-        "manifest_sha256": "08ad28ea97226e274874ee2c0a8332209f0a88e40d63d0e5e91de9a3ea48f345",
-        "run_id": "dc040e66-a265-5ada-8886-c2398b6b38de",
+        "manifest_sha256": "c2ac808b19c468877e52f130a9b7d279bcab845bd694c09dd13cc498808d5150",
+        "run_id": "47eaa5b9-e45c-500a-a0a6-910e84037a8e",
         "snapshot_count": 1,
         "source_scope": "boliga.dk",
+        "source_system": "house-consensus-ingestion",
     }

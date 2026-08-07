@@ -4,9 +4,9 @@ This package is the narrow foundation for a direct-PostgreSQL ingestion worker. 
 
 ## Dry run
 
-Run: uv run --project ingestion house-consensus-ingest --dry-run --source-scope boliga.dk --records-json JSON_ARRAY
+Run: uv run --project ingestion house-consensus-ingest --dry-run --source-system house-consensus-ingestion --source-scope boliga.dk --records-json JSON_ARRAY
 
-The records-json argument must be a JSON array of objects. The command emits one JSON object with source_scope, snapshot_count, manifest_sha256, and run_id. It performs no database work. The manifest is SHA-256 over newline-separated canonical JSON source records: object-key order and input-record order do not change the identity; duplicate records remain part of the snapshot. The run ID is a deterministic UUID derived from the complete manifest SHA-256 (not a scope-prefixed truncated digest), so it is accepted by the native PostgreSQL UUID column.
+The records-json argument must be a JSON array of objects. The command emits one JSON object with source_system, source_scope, snapshot_count, manifest_sha256, and run_id. It performs no database work. The manifest is SHA-256 over a canonical JSON source namespace header (`source_system` and `source_scope`) followed by newline-separated canonical JSON source records: object-key order and input-record order do not change the identity; duplicate records remain part of the snapshot. Therefore identical records from different source systems or scopes have different manifests and deterministic run IDs. The run ID is a deterministic UUID derived from the complete manifest SHA-256 (not a scope-prefixed truncated digest), so it is accepted by the native PostgreSQL UUID column.
 
 ## Native PostgreSQL seam
 
@@ -21,7 +21,7 @@ Run the House Consensus application migrations before using the writer. The pres
 | Column | Required behavior |
 | --- | --- |
 | `run_id uuid` primary key | deterministic worker identity and conflict target |
-| `source_system text` | fixed worker source identity (`house-consensus-ingestion`) |
+| `source_system text` | caller-supplied source-system namespace (defaults to `house-consensus-ingestion` in the CLI) |
 | `source_scope text` | caller-supplied source namespace |
 | `requested_at timestamptz` | injected request timestamp |
 | `started_at timestamptz` | initialized from the injected request timestamp |

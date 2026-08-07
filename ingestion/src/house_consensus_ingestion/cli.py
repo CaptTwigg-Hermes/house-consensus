@@ -11,6 +11,7 @@ from .identity import build_snapshot
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--source-system", default="house-consensus-ingestion")
     parser.add_argument("--source-scope", required=True)
     parser.add_argument("--records-json", required=True)
     arguments = parser.parse_args(argv)
@@ -21,10 +22,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not isinstance(records, list) or not all(isinstance(record, Mapping) for record in records):
         parser.error("--records-json must be a JSON array of objects")
 
-    snapshot = build_snapshot(source_scope=arguments.source_scope, records=records)
+    snapshot = build_snapshot(
+        source_system=arguments.source_system,
+        source_scope=arguments.source_scope,
+        records=records,
+    )
     print(json.dumps({
         "dry_run": True,
         "source_scope": snapshot.source_scope,
+        "source_system": snapshot.source_system,
         "snapshot_count": snapshot.snapshot_count,
         "manifest_sha256": snapshot.manifest_sha256,
         "run_id": snapshot.run_id,
