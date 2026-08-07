@@ -1,4 +1,10 @@
+import os
 from pathlib import Path
+
+import psycopg
+import pytest
+
+from consensus_exporter.postgres import ensure_schema
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,3 +29,106 @@ def test_native_ingestion_contract_persists_runs_snapshots_and_stage_outcomes_in
         assert "UNIQUE (run_id, stage_name, attempt)" in contract
         assert "stage_status IN ('succeeded','failed','skipped')" in contract
         assert "run_status IN ('running','succeeded','failed','cancelled')" in contract
+
+
+def test_native_ingestion_contract_copies_define_the_same_immutability_guards():
+    """The EF migration and exporter bootstrap must protect the same audit facts."""
+    migration = MIGRATION.read_text()
+    schema = SCHEMA.read_text()
+    required_guards = (
+        "CREATE OR REPLACE FUNCTION reject_ingestion_audit_fact_mutation()",
+        "CREATE TRIGGER ingestion_source_snapshots_immutable",
+        "CREATE TRIGGER ingestion_stage_outcomes_immutable",
+        "CREATE OR REPLACE FUNCTION enforce_ingestion_run_lifecycle()",
+        "CREATE TRIGGER ingestion_runs_lifecycle_guard",
+    )
+
+    for guard in required_guards:
+        assert guard in migration
+        assert guard in schema
+    for contract in (migration, schema):
+        assert "AS " + "$" * 2 in contract
+        assert "$" * 2 + ";" in contract
+
+    def normalized_guard_sql(contract: str) -> str:
+        start = contract.index(required_guards[0])
+        end = contract.index(
+            "FOR EACH ROW EXECUTE FUNCTION enforce_ingestion_run_lifecycle();",
+            start,
+        ) + len("FOR EACH ROW EXECUTE FUNCTION enforce_ingestion_run_lifecycle();")
+        return " ".join(contract[start:end].split())
+
+    assert normalized_guard_sql(migration) == normalized_guard_sql(schema)
+
+
+@pytest.fixture()
+def database_url():
+    url = os.environ.get("TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("TEST_DATABASE_URL is not configured")
+    with psycopg.connect(url, autocommit=True) as conn:
+        conn.execute("drop schema public cascade")
+        conn.execute("create schema public")
+        ensure_schema(conn)
+    return url
+
+
+def test_native_ingestion_contract_enforces_audit_immutability_and_run_lifecycle(database_url):
+    """PostgreSQL itself rejects audit rewrites while admitting only run completion."""
+    run_id = "00000000-0000-0000-0000-000000000001"
+    snapshot_id = "00000000-0000-0000-0000-000000000002"
+    requested_at = "2026-08-07T12:00:00Z"
+    completed_at = "2026-08-07T12:01:00Z"
+    digest = "a" * 64
+
+    with psycopg.connect(database_url, autocommit=True) as conn:
+        conn.execute(
+            """INSERT INTO ingestion_runs
+            (run_id, source_system, source_scope, requested_at, run_status, manifest_sha256)
+            VALUES (%s, 'native', 'all', %s, 'running', %s)""",
+            (run_id, requested_at, digest),
+        )
+        conn.execute(
+            """INSERT INTO ingestion_source_snapshots
+            (snapshot_id, run_id, source_name, snapshot_sha256, payload, captured_at)
+            VALUES (%s, %s, 'source', %s, '{}', %s)""",
+            (snapshot_id, run_id, digest, requested_at),
+        )
+        conn.execute(
+            """INSERT INTO ingestion_stage_outcomes
+            (run_id, stage_name, attempt, stage_status, started_at, completed_at)
+            VALUES (%s, 'fetch', 1, 'succeeded', %s, %s)""",
+            (run_id, requested_at, completed_at),
+        )
+
+        for statement in (
+            "UPDATE ingestion_source_snapshots SET source_name='rewritten'",
+            "DELETE FROM ingestion_source_snapshots",
+            "UPDATE ingestion_stage_outcomes SET stage_status='failed'",
+            "DELETE FROM ingestion_stage_outcomes",
+            "UPDATE ingestion_runs SET source_scope='rewritten'",
+            "DELETE FROM ingestion_runs",
+        ):
+            with pytest.raises(psycopg.errors.RaiseException):
+                conn.execute(statement)
+
+        with pytest.raises(psycopg.errors.RaiseException):
+            conn.execute(
+                """UPDATE ingestion_runs
+                SET run_status='succeeded', completed_at=%s, manifest_sha256=%s""",
+                (completed_at, "b" * 64),
+            )
+
+        conn.execute(
+            """UPDATE ingestion_runs
+            SET run_status='succeeded', completed_at=%s
+            WHERE run_id=%s""",
+            (completed_at, run_id),
+        )
+        assert conn.execute(
+            "SELECT run_status, completed_at IS NOT NULL FROM ingestion_runs WHERE run_id=%s",
+            (run_id,),
+        ).fetchone() == ("succeeded", True)
+
+        with pytest.raises(psycopg.errors.RaiseException):
+            conn.execute("UPDATE ingestion_runs SET completed_at=%s", (requested_at,))

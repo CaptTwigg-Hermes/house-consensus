@@ -315,3 +315,55 @@ CREATE TABLE IF NOT EXISTS ingestion_stage_outcomes (
 );
 CREATE INDEX IF NOT EXISTS ix_ingestion_stage_outcomes_run_stage
     ON ingestion_stage_outcomes(run_id, stage_name, attempt DESC);
+
+CREATE OR REPLACE FUNCTION reject_ingestion_audit_fact_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION '% records are immutable', TG_TABLE_NAME;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION enforce_ingestion_run_lifecycle()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'ingestion runs cannot be deleted';
+    END IF;
+
+    IF NEW.run_id IS DISTINCT FROM OLD.run_id
+       OR NEW.source_system IS DISTINCT FROM OLD.source_system
+       OR NEW.source_scope IS DISTINCT FROM OLD.source_scope
+       OR NEW.requested_at IS DISTINCT FROM OLD.requested_at
+       OR NEW.started_at IS DISTINCT FROM OLD.started_at
+       OR NEW.manifest_sha256 IS DISTINCT FROM OLD.manifest_sha256 THEN
+        RAISE EXCEPTION 'ingestion run identity and provenance are immutable';
+    END IF;
+
+    IF OLD.run_status <> 'running'
+       OR NEW.run_status NOT IN ('succeeded', 'failed', 'cancelled')
+       OR NEW.completed_at IS NULL THEN
+        RAISE EXCEPTION 'ingestion runs may only transition from running to a terminal status with a completion timestamp';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS ingestion_source_snapshots_immutable ON ingestion_source_snapshots;
+CREATE TRIGGER ingestion_source_snapshots_immutable
+BEFORE UPDATE OR DELETE ON ingestion_source_snapshots
+FOR EACH ROW EXECUTE FUNCTION reject_ingestion_audit_fact_mutation();
+
+DROP TRIGGER IF EXISTS ingestion_stage_outcomes_immutable ON ingestion_stage_outcomes;
+CREATE TRIGGER ingestion_stage_outcomes_immutable
+BEFORE UPDATE OR DELETE ON ingestion_stage_outcomes
+FOR EACH ROW EXECUTE FUNCTION reject_ingestion_audit_fact_mutation();
+
+DROP TRIGGER IF EXISTS ingestion_runs_lifecycle_guard ON ingestion_runs;
+CREATE TRIGGER ingestion_runs_lifecycle_guard
+BEFORE UPDATE OR DELETE ON ingestion_runs
+FOR EACH ROW EXECUTE FUNCTION enforce_ingestion_run_lifecycle();
