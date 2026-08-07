@@ -177,7 +177,71 @@ def test_failed_snapshot_without_a_successful_fetch_is_not_reconcilable(database
     )
     writer.complete_run(snapshot=snapshot, run_status="failed", completed_at=now)
 
-    with pytest.raises(CompletedSourceSnapshotRequiredError, match="fetch-complete failed"):
+    with pytest.raises(CompletedSourceSnapshotRequiredError, match="successful fetch"):
         PostgresListingProjectionWriter(lambda: psycopg.connect(database_url)).project_completed_snapshot(
             source_snapshot_id=source_snapshot_id, projected_at=now
         )
+
+
+@pytest.mark.parametrize("run_status", ["running", "succeeded", "failed"])
+def test_projection_requires_a_successful_fetch_for_every_eligible_run_status(database_url, run_status):
+    from house_consensus_ingestion.projection import (
+        CompletedSourceSnapshotRequiredError,
+        PostgresListingProjectionWriter,
+    )
+
+    snapshot = build_snapshot(
+        source_system="house-consensus-ingestion",
+        source_scope=f"boligsiden.dk/open-cases/{run_status}",
+        records=[{"external_id": "case-42", "address": "Example Road 42"}],
+    )
+    now = datetime(2026, 8, 7, tzinfo=UTC)
+    writer = PostgresRunWriter(lambda: psycopg.connect(database_url))
+    writer.write_started_run(snapshot=snapshot, requested_at=now)
+    source_snapshot_id = writer.write_source_snapshot(
+        snapshot=snapshot,
+        source_name="boligsiden-search-cases",
+        payload={"projection_records": [{"external_id": "case-42", "address": "Example Road 42"}]},
+        captured_at=now,
+    )
+    if run_status != "running":
+        writer.complete_run(snapshot=snapshot, run_status=run_status, completed_at=now)
+
+    with pytest.raises(CompletedSourceSnapshotRequiredError, match="successful fetch"):
+        PostgresListingProjectionWriter(lambda: psycopg.connect(database_url)).project_completed_snapshot(
+            source_snapshot_id=source_snapshot_id, projected_at=now
+        )
+
+
+@pytest.mark.parametrize("run_status", ["running", "succeeded", "failed"])
+def test_projection_accepts_a_successful_fetch_for_every_eligible_run_status(database_url, run_status):
+    from house_consensus_ingestion.projection import PostgresListingProjectionWriter
+
+    snapshot = build_snapshot(
+        source_system="house-consensus-ingestion",
+        source_scope=f"boligsiden.dk/open-cases/fetch-succeeded/{run_status}",
+        records=[{"external_id": "case-42", "address": "Example Road 42"}],
+    )
+    now = datetime(2026, 8, 7, tzinfo=UTC)
+    writer = PostgresRunWriter(lambda: psycopg.connect(database_url))
+    writer.write_started_run(snapshot=snapshot, requested_at=now)
+    source_snapshot_id = writer.write_source_snapshot(
+        snapshot=snapshot,
+        source_name="boligsiden-search-cases",
+        payload={"projection_records": [{"external_id": "case-42", "address": "Example Road 42"}]},
+        captured_at=now,
+    )
+    writer.write_stage_outcome(
+        snapshot=snapshot,
+        stage_name="fetch",
+        stage_status="succeeded",
+        outcome={"record_count": 1},
+        started_at=now,
+        completed_at=now,
+    )
+    if run_status != "running":
+        writer.complete_run(snapshot=snapshot, run_status=run_status, completed_at=now)
+
+    assert PostgresListingProjectionWriter(lambda: psycopg.connect(database_url)).project_completed_snapshot(
+        source_snapshot_id=source_snapshot_id, projected_at=now
+    ) == 1

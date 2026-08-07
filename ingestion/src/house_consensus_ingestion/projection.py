@@ -47,13 +47,13 @@ class PostgresListingProjectionWriter:
                     FROM ingestion_source_snapshots s
                     JOIN ingestion_runs r ON r.run_id = s.run_id
                     WHERE s.snapshot_id = %s
-                      AND (r.run_status IN ('running', 'succeeded')
-                           OR (r.run_status = 'failed' AND EXISTS (
-                               SELECT 1 FROM ingestion_stage_outcomes o
-                               WHERE o.run_id = r.run_id
-                                 AND o.stage_name = 'fetch'
-                                 AND o.stage_status = 'succeeded'
-                           )))
+                      AND r.run_status IN ('running', 'succeeded', 'failed')
+                      AND EXISTS (
+                          SELECT 1 FROM ingestion_stage_outcomes o
+                          WHERE o.run_id = r.run_id
+                            AND o.stage_name = 'fetch'
+                            AND o.stage_status = 'succeeded'
+                      )
                     FOR KEY SHARE OF s, r
                     """,
                     (source_snapshot_id,),
@@ -61,7 +61,7 @@ class PostgresListingProjectionWriter:
                 source = cursor.fetchone()
                 if source is None:
                     raise CompletedSourceSnapshotRequiredError(
-                        "a running, completed, or fetch-complete failed native source snapshot is required for projection"
+                        "an eligible native source snapshot with a successful fetch outcome is required for projection"
                     )
                 source_system, source_scope, payload = source
                 records = self._records(payload)

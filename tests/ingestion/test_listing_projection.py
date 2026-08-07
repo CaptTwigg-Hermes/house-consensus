@@ -65,7 +65,8 @@ def test_projects_a_completed_native_source_record_without_legacy_exporter_table
     statements = "\n".join(statement for statement, _ in connection.cursor_instance.executed)
     assert count == 1
     assert "ingestion_source_snapshots" in statements
-    assert "run_status IN ('running', 'succeeded')" in statements
+    assert "run_status IN ('running', 'succeeded', 'failed')" in statements
+    assert "AND EXISTS" in statements
     assert "stage_name = 'fetch'" in statements
     assert "INSERT INTO listings" in statements
     assert "INSERT INTO listing_ingestion_projections" in statements
@@ -82,7 +83,7 @@ def test_rejects_an_uncompleted_or_missing_native_source_snapshot() -> None:
 
     connection = Connection(results=[None])
 
-    with pytest.raises(CompletedSourceSnapshotRequiredError, match="completed"):
+    with pytest.raises(CompletedSourceSnapshotRequiredError, match="successful fetch"):
         PostgresListingProjectionWriter(lambda: connection).project_completed_snapshot(
             source_snapshot_id="00000000-0000-0000-0000-000000000010",
             projected_at=datetime(2026, 8, 7, tzinfo=UTC),
