@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import math
 from datetime import datetime, timedelta
 from typing import Any, Protocol
+from uuid import UUID
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,9 @@ class ManualScoringRequest:
     completed_at: datetime | None = None
     retry_at: datetime | None = None
     terminal_failure: bool = False
+    job_id: UUID | None = None
+    lease_fence: int | None = None
+    lease_expires_at: datetime | None = None
 
 
 def select_next_pending(
@@ -63,8 +67,8 @@ class WorkerResult:
 
 class ManualScoringStore(Protocol):
     def claim_next_pending(self, now: datetime) -> ManualScoringRequest | None: ...
-    def record_completion(self, request: ManualScoringRequest, output: ScoringOutput, completed_at: datetime) -> None: ...
-    def record_failure(self, request: ManualScoringRequest, failure: ScoringFailure, attempted_at: datetime) -> None: ...
+    def record_completion(self, request: ManualScoringRequest, output: ScoringOutput, completed_at: datetime) -> bool | None: ...
+    def record_failure(self, request: ManualScoringRequest, failure: ScoringFailure, attempted_at: datetime) -> bool | None: ...
 
 
 class ListingSource(Protocol):
@@ -107,14 +111,14 @@ class ManualScoringWorker:
         try:
             listing = self._source.resolve(request.source_identity)
         except AmbiguousSourceIdentity as error:
-            self._store.record_failure(
+            accepted = self._store.record_failure(
                 request,
                 ScoringFailure("source_identity_ambiguous", str(error), retry_at=None, terminal=True),
                 now,
             )
-            return WorkerResult(status="failed")
+            return WorkerResult(status="failed" if accepted is not False else "lost_lease")
         except Exception as error:
-            self._store.record_failure(
+            accepted = self._store.record_failure(
                 request,
                 ScoringFailure(
                     "source_resolution_error",
@@ -123,16 +127,16 @@ class ManualScoringWorker:
                 ),
                 now,
             )
-            return WorkerResult(status="failed")
+            return WorkerResult(status="failed" if accepted is not False else "lost_lease")
         try:
             output = self._pipeline.score(listing)
         except Exception as error:
-            self._store.record_failure(
+            accepted = self._store.record_failure(
                 request,
                 ScoringFailure("pipeline_error", str(error), retry_at=self._retry_policy.retry_at(now, "pipeline_error")),
                 now,
             )
-            return WorkerResult(status="failed")
+            return WorkerResult(status="failed" if accepted is not False else "lost_lease")
         missing = []
         score = output.family_fit_score
         if not isinstance(score, (int, float)) or isinstance(score, bool) or not math.isfinite(score) or not 0 <= score <= 100:
@@ -144,11 +148,11 @@ class ManualScoringWorker:
             if not isinstance(value, dict) or not value:
                 missing.append(name)
         if missing:
-            self._store.record_failure(
+            accepted = self._store.record_failure(
                 request,
                 ScoringFailure("incomplete_scoring_output", ", ".join(missing), retry_at=self._retry_policy.retry_at(now, "incomplete_scoring_output")),
                 now,
             )
-            return WorkerResult(status="failed")
-        self._store.record_completion(request, output, now)
-        return WorkerResult(status="completed")
+            return WorkerResult(status="failed" if accepted is not False else "lost_lease")
+        accepted = self._store.record_completion(request, output, now)
+        return WorkerResult(status="completed" if accepted is not False else "lost_lease")

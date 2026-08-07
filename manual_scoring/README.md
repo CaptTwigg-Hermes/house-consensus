@@ -1,16 +1,70 @@
-# House Consensus manual-scoring domain
+# House Consensus durable manual scorer
 
-This is a deliberately small, native House Consensus domain/orchestration slice for manually added listings. It has no Houseshopping imports, subprocesses, SQLite access, or database adapter.
+`house-consensus-manual-scorer` claims exactly one row from PostgreSQL
+`manual_scoring_jobs`, resolves its source, runs the scorer, then lease-fenced
+finalizes the row. It is an executable worker, not a scheduler or deployment
+configuration.
 
-## Contract
+## Run one job
 
-- `select_next_pending` selects the oldest uncompleted request whose retry time is due.
-- A `ManualScoringStore` adapter atomically claims that selected request and persists either a completion or a `ScoringFailure`. A future PostgreSQL adapter owns locking, attempt timestamps, error text/code, and retry scheduling.
-- A `ListingSource` adapter resolves both `external_id` and `canonical_url`. It must raise `AmbiguousSourceIdentity` rather than choose among multiple source listings.
-- A `ScoringPipeline` adapter returns all required outputs: `family_fit_score`, `commute_evidence`, and `ai_evidence`. Completion is withheld when any is absent.
-- Failures are explicit: pipeline errors and incomplete outputs are retryable (`retry_at`), while source ambiguity is terminal. This worker does not spin/retry in-process; the store determines later scheduling.
+```sh
+uv run --project manual_scoring --extra postgres \
+  house-consensus-manual-scorer \
+  --database-url "$CONSENSUS_DATABASE_URL" \
+  --source-resolver your_package.manual_source:build_resolver \
+  --scoring-pipeline your_package.manual_pipeline:build_pipeline
+```
 
-`ManualScoringWorker.run_once(now)` accepts its dependencies and clock as arguments, so an application runner can wire PostgreSQL and the actual scoring pipeline later without coupling this domain to the legacy exporter or Houseshopping database.
+`CONSENSUS_DATABASE_URL` can replace `--database-url`. `--lease-seconds`
+defaults to 300. The command prints one JSON status (`idle`, `completed`,
+`failed`, or `lost_lease`) and intentionally processes only one job; external
+orchestration decides when to invoke it again.
+
+## Component contracts
+
+Both arguments use strict `module:attribute` import syntax. The attribute can
+be an object or a zero-argument factory that returns one. This keeps deployment
+configuration explicit and avoids shelling out from the worker.
+
+### Source resolver
+
+The resolver must implement:
+
+```python
+class Resolver:
+    def resolve(self, identity: SourceIdentity) -> dict[str, Any]: ...
+```
+
+`identity.external_id` and `identity.canonical_url` come from the claimed
+PostgreSQL row. Resolve the *same* source identity; never select an arbitrary
+match. Raise `AmbiguousSourceIdentity` when more than one source could match
+(the worker records a terminal `source_identity_ambiguous` failure). Transient
+lookup failures are recorded as retryable `source_resolution_error` failures.
+
+### Scoring pipeline
+
+The pipeline must implement:
+
+```python
+class Pipeline:
+    def score(self, listing: dict[str, Any]) -> ScoringOutput: ...
+```
+
+It must persist any score/projection side effects idempotently before returning
+`ScoringOutput`: a finite `family_fit_score` in `[0, 100]`, and nonempty dicts
+for `commute_evidence` and `ai_evidence`. The durable store only owns job
+completion/failure state; it does not overwrite scoring projection data.
+
+## Lease and fencing guarantees
+
+- Claim uses PostgreSQL `CURRENT_TIMESTAMP`, `FOR UPDATE SKIP LOCKED`, the
+  oldest eligible job, and increments `LeaseFence` atomically.
+- Completion and failure update only when the row has the same job ID and
+  `LeaseFence`, and its database lease is still unexpired.
+- A stale/re-enqueued/reclaimed worker gets `lost_lease` instead of reporting a
+  false completion or failure.
+- The worker never retries in process. Retry timing and terminal markers are
+  durable fields in `manual_scoring_jobs`.
 
 ## Test
 

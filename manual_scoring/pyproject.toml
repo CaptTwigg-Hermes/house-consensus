@@ -5,7 +5,11 @@ description = "Native manual-scoring worker domain for House Consensus"
 requires-python = ">=3.11"
 dependencies = []
 
+[project.scripts]
+house-consensus-manual-scorer = "house_consensus_manual_scoring.cli:main"
+
 [project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.2,<4"]
 test = ["pytest>=8,<10"]
 
 [build-system]

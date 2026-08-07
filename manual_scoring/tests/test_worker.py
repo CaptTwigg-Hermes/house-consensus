@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from uuid import UUID
 
 from house_consensus_manual_scoring.worker import (
     ManualScoringRequest,
@@ -246,3 +247,25 @@ def test_worker_defers_pipeline_failure_so_later_queue_item_remains_selectable()
         request.listing_id, request.source_identity, request.requested_at, retry_at=store.failures[0][1].retry_at
     )
     assert select_next_pending([failed_request, later_request], now) == later_request
+
+
+def test_worker_reports_lost_lease_when_fenced_completion_is_rejected():
+    now = datetime(2026, 8, 7, 12, tzinfo=timezone.utc)
+    request = ManualScoringRequest(
+        "listing-1",
+        SourceIdentity("manual:1", "https://example.test/1"),
+        now,
+        job_id=UUID("00000000-0000-0000-0000-000000000001"),
+        lease_fence=1,
+    )
+
+    class FencedStore(Store):
+        def record_completion(self, request, output, completed_at):
+            super().record_completion(request, output, completed_at)
+            return False
+
+    store = FencedStore(request)
+
+    result = ManualScoringWorker(store, Source(), Pipeline()).run_once(now)
+
+    assert result.status == "lost_lease"
