@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 
 def test_build_snapshot_is_stable_across_record_and_key_order() -> None:
     from house_consensus_ingestion.identity import build_snapshot
@@ -22,4 +24,5 @@ def test_build_snapshot_is_stable_across_record_and_key_order() -> None:
     assert first == second
     assert first.snapshot_count == 2
     assert first.manifest_sha256 == "807980f5562cfa681e160fdeaacfc7e19bfa12b08d3397b95876703856bf45b3"
-    assert first.run_id == "ingest-boliga.dk-807980f5562cfa68"
+    assert first.run_id == second.run_id
+    assert UUID(first.run_id).version == 5

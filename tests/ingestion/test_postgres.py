@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 
 class Cursor:
-    def __init__(self) -> None:
+    def __init__(self, result: tuple[str] | None = ("persisted",)) -> None:
         self.executed: list[tuple[str, tuple[object, ...]]] = []
+        self.result = result
 
     def __enter__(self) -> Cursor:
         return self
@@ -16,10 +19,13 @@ class Cursor:
     def execute(self, statement: str, parameters: tuple[object, ...]) -> None:
         self.executed.append((statement, parameters))
 
+    def fetchone(self) -> tuple[str] | None:
+        return self.result
+
 
 class Connection:
-    def __init__(self) -> None:
-        self.cursor_instance = Cursor()
+    def __init__(self, result: tuple[str] | None = ("persisted",)) -> None:
+        self.cursor_instance = Cursor(result)
         self.committed = False
 
     def __enter__(self) -> Connection:
@@ -47,18 +53,49 @@ def test_write_started_run_uses_injected_native_postgres_connection() -> None:
 
     PostgresRunWriter(connection_factory=lambda: connection).write_started_run(
         snapshot=snapshot,
-        fetched_at=datetime(2026, 8, 7, tzinfo=UTC),
-        source_config_sha256=None,
+        requested_at=datetime(2026, 8, 7, tzinfo=UTC),
     )
 
     statement, parameters = connection.cursor_instance.executed[0]
-    assert "INSERT INTO export_runs" in statement
+    assert "INSERT INTO ingestion_runs" in statement
+    assert "source_system" in statement
+    assert "source_scope" in statement
+    assert "requested_at" in statement
+    assert "started_at" in statement
+    assert "run_status" in statement
+    assert "manifest_sha256" in statement
+    assert "export_runs" not in statement
     assert parameters == (
         snapshot.run_id,
+        "house-consensus-ingestion",
         "boliga.dk",
         datetime(2026, 8, 7, tzinfo=UTC),
-        1,
+        datetime(2026, 8, 7, tzinfo=UTC),
+        "running",
         snapshot.manifest_sha256,
-        None,
     )
     assert connection.committed is True
+
+
+def test_write_started_run_rejects_a_conflicting_native_run_identity() -> None:
+    from house_consensus_ingestion.identity import build_snapshot
+    from house_consensus_ingestion.postgres import IngestionRunConflictError, PostgresRunWriter
+
+    connection = Connection(result=None)
+    snapshot = build_snapshot(
+        source_scope="boliga.dk",
+        records=[{"external_id": "1", "address": "One Street 1"}],
+    )
+
+    with pytest.raises(IngestionRunConflictError, match="immutable provenance"):
+        PostgresRunWriter(connection_factory=lambda: connection).write_started_run(
+            snapshot=snapshot,
+            requested_at=datetime(2026, 8, 7, tzinfo=UTC),
+        )
+
+    statement, _ = connection.cursor_instance.executed[0]
+    assert "ON CONFLICT (run_id) DO UPDATE" in statement
+    assert "source_system = EXCLUDED.source_system" in statement
+    assert "source_scope = EXCLUDED.source_scope" in statement
+    assert "manifest_sha256 = EXCLUDED.manifest_sha256" in statement
+    assert "DO NOTHING" not in statement

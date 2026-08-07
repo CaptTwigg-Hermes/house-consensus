@@ -18,7 +18,7 @@ def test_dry_run_prints_deterministic_snapshot_identity(capsys) -> None:
     assert json.loads(capsys.readouterr().out) == {
         "dry_run": True,
         "manifest_sha256": "08ad28ea97226e274874ee2c0a8332209f0a88e40d63d0e5e91de9a3ea48f345",
-        "run_id": "ingest-boliga.dk-08ad28ea97226e27",
+        "run_id": "dc040e66-a265-5ada-8886-c2398b6b38de",
         "snapshot_count": 1,
         "source_scope": "boliga.dk",
     }

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+from uuid import UUID
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -25,5 +26,5 @@ def build_snapshot(*, source_scope: str, records: Sequence[Mapping[str, Any]]) -
         source_scope=source_scope,
         snapshot_count=len(canonical_records),
         manifest_sha256=manifest_sha256,
-        run_id=f"ingest-{source_scope}-{manifest_sha256[:16]}",
+        run_id=str(UUID(bytes=sha256(manifest_sha256.encode()).digest()[:16], version=5)),
     )

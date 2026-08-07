@@ -11,6 +11,7 @@ class _Cursor(Protocol):
     def __enter__(self) -> _Cursor: ...
     def __exit__(self, *args: object) -> None: ...
     def execute(self, statement: str, parameters: tuple[object, ...]) -> None: ...
+    def fetchone(self) -> tuple[object, ...] | None: ...
 
 
 class _Connection(Protocol):
@@ -18,6 +19,10 @@ class _Connection(Protocol):
     def __exit__(self, *args: object) -> None: ...
     def cursor(self) -> _Cursor: ...
     def commit(self) -> None: ...
+
+
+class IngestionRunConflictError(RuntimeError):
+    """A deterministic run ID is already bound to different immutable provenance."""
 
 
 class PostgresRunWriter:
@@ -28,25 +33,34 @@ class PostgresRunWriter:
         self,
         *,
         snapshot: RunSnapshot,
-        fetched_at: datetime,
-        source_config_sha256: str | None,
+        requested_at: datetime,
     ) -> None:
         with self._connection_factory() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO export_runs
-                        (run_id, source_scope, fetched_at, snapshot_count, manifest_sha256, source_config_sha256)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (run_id) DO NOTHING
+                    INSERT INTO ingestion_runs
+                        (run_id, source_system, source_scope, requested_at, started_at, run_status, manifest_sha256)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (run_id) DO UPDATE
+                    SET run_id = ingestion_runs.run_id
+                    WHERE ingestion_runs.source_system = EXCLUDED.source_system
+                      AND ingestion_runs.source_scope = EXCLUDED.source_scope
+                      AND ingestion_runs.manifest_sha256 = EXCLUDED.manifest_sha256
+                    RETURNING run_id
                     """,
                     (
                         snapshot.run_id,
+                        "house-consensus-ingestion",
                         snapshot.source_scope,
-                        fetched_at,
-                        snapshot.snapshot_count,
+                        requested_at,
+                        requested_at,
+                        "running",
                         snapshot.manifest_sha256,
-                        source_config_sha256,
                     ),
                 )
+                if cursor.fetchone() is None:
+                    raise IngestionRunConflictError(
+                        f"run ID {snapshot.run_id} conflicts with immutable provenance"
+                    )
             connection.commit()
