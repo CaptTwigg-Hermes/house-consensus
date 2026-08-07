@@ -117,9 +117,10 @@ def test_rejects_ambiguous_or_manual_listing_identity_instead_of_overwriting_it(
 def test_application_migration_owns_native_listing_projection_identity() -> None:
     from pathlib import Path
 
-    migration = Path(__file__).resolve().parents[2] / "src/Server/Data/Migrations/202608070002_AddNativeListingProjection.cs"
+    migration = Path(__file__).resolve().parents[2] / "src/Server/Data/Migrations/202608070003_AddNativeListingProjection.cs"
     text = migration.read_text()
 
+    assert 'Migration("202608070003_AddNativeListingProjection")' in text
     assert "CREATE TABLE IF NOT EXISTS listing_ingestion_projections" in text
     assert "UNIQUE (source_system, source_scope, source_record_id)" in text
     assert 'FOREIGN KEY (listing_id) REFERENCES listings("Id") ON DELETE RESTRICT' in text

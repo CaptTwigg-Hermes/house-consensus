@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 #nullable disable
 namespace HouseConsensus.Server.Data.Migrations;
 
-[DbContext(typeof(AppDbContext)), Migration("202608070002_AddNativeListingProjection")]
+[DbContext(typeof(AppDbContext)), Migration("202608070003_AddNativeListingProjection")]
 public sealed class AddNativeListingProjection : Migration
 {
     protected override void Up(MigrationBuilder m) => m.Sql("""
