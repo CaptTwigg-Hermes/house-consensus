@@ -217,10 +217,13 @@ def test_native_ingestion_contract_rejects_child_facts_after_parent_run_is_termi
 def test_native_ingestion_contract_rejects_truncating_every_audit_table(database_url):
     """PostgreSQL rejects TRUNCATE even though it bypasses row-level triggers."""
     with psycopg.connect(database_url, autocommit=True) as conn:
-        for table in (
-            "ingestion_runs",
-            "ingestion_source_snapshots",
-            "ingestion_stage_outcomes",
+        for table, statement in (
+            ("ingestion_runs", "TRUNCATE ingestion_runs CASCADE"),
+            ("ingestion_source_snapshots", "TRUNCATE ingestion_source_snapshots CASCADE"),
+            ("ingestion_stage_outcomes", "TRUNCATE ingestion_stage_outcomes"),
         ):
-            with pytest.raises(psycopg.errors.RaiseException):
-                conn.execute(f"TRUNCATE {table}")
+            with pytest.raises(
+                psycopg.errors.RaiseException,
+                match=rf"{table} records cannot be truncated",
+            ):
+                conn.execute(statement)
