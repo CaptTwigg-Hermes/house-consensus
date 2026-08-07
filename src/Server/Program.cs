@@ -7,6 +7,7 @@ using HouseConsensus.Server.Auth;
 using HouseConsensus.Server.Data;
 using HouseConsensus.Server.Listings;
 using HouseConsensus.Server.Learning;
+using HouseConsensus.Server.Scoring;
 using HouseConsensus.Server.Hubs;
 using HouseConsensus.Shared;
 using Microsoft.AspNetCore.Authentication;
@@ -16,6 +17,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using System.Threading.RateLimiting;
 
@@ -25,7 +27,9 @@ var e2eTestAuth = builder.Configuration.GetValue("E2E:TestAuth", false);
 var e2eSeedData = builder.Configuration.GetValue("E2E:SeedData", false);
 DebugAutoLoginMiddleware.EnsureSafe(debugAutoLogin, builder.Environment.EnvironmentName);
 DebugAutoLoginMiddleware.EnsureE2ETestAuthSafe(e2eTestAuth, debugAutoLogin, e2eSeedData, builder.Environment.EnvironmentName);
-builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(builder.Configuration.GetConnectionString("Database") ?? "Host=postgres;Database=house_consensus;Username=house_consensus;Password=house_consensus", n => n.MapEnum<MemberRole>("member_role").MapEnum<VoteChoice>("vote_choice").MapEnum<ListingState>("listing_state").MapEnum<ReasonTag>("reason_tag").MapEnum<VoteCategory>("vote_category").MapEnum<CategoryRating>("category_rating").MapEnum<OverrideAction>("override_action")));
+var databaseConnectionString = builder.Configuration.GetConnectionString("Database") ?? "Host=postgres;Database=house_consensus;Username=house_consensus;Password=house_consensus";
+builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(databaseConnectionString, n => n.MapEnum<MemberRole>("member_role").MapEnum<VoteChoice>("vote_choice").MapEnum<ListingState>("listing_state").MapEnum<ReasonTag>("reason_tag").MapEnum<VoteCategory>("vote_category").MapEnum<CategoryRating>("category_rating").MapEnum<OverrideAction>("override_action")));
+builder.Services.AddScoped(_ => new PostgresManualScoringStore(databaseConnectionString));
 var cloudflareAccess = AuthenticationSetup.Add(builder.Services, builder.Configuration, builder.Environment.IsProduction());
 if (e2eTestAuth && !cloudflareAccess.Enabled) builder.Services.AddScoped<ICloudflareMemberService, CloudflareMemberService>();
 builder.Services.AddAuthorization(o => o.AddPolicy("owner", p => p.RequireClaim(ClaimTypes.Role, MemberRole.Owner.ToString())));
@@ -91,7 +95,7 @@ listings.MapPost("/preview", async (FetchManualListing request, BoligsidenListin
     var preview = await lookup.ResolveAsync(request.Url, ct);
     return preview is null ? Results.NotFound(new { error = "No active Boligsiden listing was found for that address." }) : Results.Ok(preview);
 }).RequireRateLimiting("listing-lookup");
-listings.MapPost("/", async (CreateManualListing request, ClaimsPrincipal user, AppDbContext db, IHubContext<ConsensusHub> hub, BoligsidenListingLookup lookup, TimeProvider clock, CancellationToken ct) =>
+listings.MapPost("/", async (CreateManualListing request, ClaimsPrincipal user, AppDbContext db, PostgresManualScoringStore scoringStore, IHubContext<ConsensusHub> hub, BoligsidenListingLookup lookup, TimeProvider clock, CancellationToken ct) =>
 {
     var memberId = user.MemberId();
     if (!await db.Members.AnyAsync(x => x.Id == memberId && x.IsActive, ct)) return Results.Forbid();
@@ -132,7 +136,9 @@ listings.MapPost("/", async (CreateManualListing request, ClaimsPrincipal user, 
             listing.Latitude = fetched.Latitude; listing.Longitude = fetched.Longitude;
         }
         db.Listings.Add(listing);
-        await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
+        await db.SaveChangesAsync(ct);
+        await scoringStore.EnqueueAsync((NpgsqlConnection)db.Database.GetDbConnection(), (NpgsqlTransaction)transaction.GetDbTransaction(), listing.Id, listing.ExternalId, listing.CanonicalUrl!, listing.ManualScoringRequestedAt!.Value, ct);
+        await transaction.CommitAsync(ct);
         await hub.Clients.All.SendAsync("ListingStateChanged", listing.Id, listing.State, ct);
         return Results.Created($"/api/listings/{listing.Id}", new ManualListingResult(listing.Id, false));
     }

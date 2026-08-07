@@ -813,6 +813,18 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
 
         var createdResponse = await client.PostAsJsonAsync("/api/listings", new CreateManualListing("https://Example.dk/home/?utm_source=test#photos", "  Testvej  1 ", "Roskilde", 7_500_000m), ct);
         var created = await createdResponse.Content.ReadFromJsonAsync<ManualListingResult>(ct);
+        await using (var queueConnection = new NpgsqlConnection(_connectionString))
+        {
+            await queueConnection.OpenAsync(ct);
+            await using var queueCommand = new NpgsqlCommand("SELECT \"SourceExternalId\", \"SourceCanonicalUrl\", \"NextAttemptAt\" FROM manual_scoring_jobs WHERE \"ListingId\" = @listingId", queueConnection);
+            queueCommand.Parameters.AddWithValue("listingId", created!.ListingId);
+            await using var queueReader = await queueCommand.ExecuteReaderAsync(ct);
+            Assert.True(await queueReader.ReadAsync(ct));
+            Assert.StartsWith("manual:", queueReader.GetString(0));
+            Assert.Equal("https://example.dk/home", queueReader.GetString(1));
+            Assert.False(queueReader.IsDBNull(2));
+            Assert.False(await queueReader.ReadAsync(ct));
+        }
         await using (var clearRequest = Db())
         {
             var pending = await clearRequest.Listings.SingleAsync(x => x.Id == created!.ListingId, ct);

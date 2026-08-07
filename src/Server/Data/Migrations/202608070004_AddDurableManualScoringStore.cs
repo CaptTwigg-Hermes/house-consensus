@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 #nullable disable
 namespace HouseConsensus.Server.Data.Migrations;
 
-[DbContext(typeof(AppDbContext)), Migration("202608070002_AddDurableManualScoringStore")]
+[DbContext(typeof(AppDbContext)), Migration("202608070004_AddDurableManualScoringStore")]
 public sealed class AddDurableManualScoringStore : Migration
 {
     protected override void Up(MigrationBuilder m) => m.Sql("""

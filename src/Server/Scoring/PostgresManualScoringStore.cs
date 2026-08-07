@@ -21,17 +21,29 @@ public sealed class PostgresManualScoringStore(string connectionString)
 
     public async Task EnqueueAsync(Guid listingId, string sourceExternalId, string sourceCanonicalUrl, DateTimeOffset requestedAt, CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sourceExternalId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(sourceCanonicalUrl);
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(ct);
+        await EnqueueAsync(connection, null, listingId, sourceExternalId, sourceCanonicalUrl, requestedAt, ct);
+    }
+
+    public async Task EnqueueAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, Guid listingId, string sourceExternalId, string sourceCanonicalUrl, DateTimeOffset requestedAt, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceExternalId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceCanonicalUrl);
         await using var command = new NpgsqlCommand("""
 INSERT INTO manual_scoring_jobs ("Id", "ListingId", "SourceExternalId", "SourceCanonicalUrl", "RequestedAt", "NextAttemptAt")
-VALUES (@id, @listingId, @externalId, @canonicalUrl, @requestedAt, @requestedAt)
+VALUES (@id, @listingId, @externalId, @canonicalUrl, @requestedAt, CURRENT_TIMESTAMP)
 ON CONFLICT ("ListingId") DO UPDATE
-SET "SourceExternalId" = EXCLUDED."SourceExternalId", "SourceCanonicalUrl" = EXCLUDED."SourceCanonicalUrl"
+SET "SourceExternalId" = EXCLUDED."SourceExternalId",
+    "SourceCanonicalUrl" = EXCLUDED."SourceCanonicalUrl",
+    "NextAttemptAt" = CURRENT_TIMESTAMP,
+    "LeaseFence" = CASE WHEN manual_scoring_jobs."LeaseExpiresAt" > CURRENT_TIMESTAMP THEN manual_scoring_jobs."LeaseFence" + 1 ELSE manual_scoring_jobs."LeaseFence" END,
+    "LeaseExpiresAt" = NULL,
+    "LastErrorCode" = NULL,
+    "LastErrorMessage" = NULL
 WHERE manual_scoring_jobs."CompletedAt" IS NULL AND manual_scoring_jobs."TerminalFailureAt" IS NULL;
-""", connection);
+""", connection, transaction);
         command.Parameters.AddWithValue("id", Guid.NewGuid()); command.Parameters.AddWithValue("listingId", listingId);
         command.Parameters.AddWithValue("externalId", sourceExternalId); command.Parameters.AddWithValue("canonicalUrl", sourceCanonicalUrl);
         command.Parameters.AddWithValue("requestedAt", requestedAt);
@@ -41,7 +53,6 @@ WHERE manual_scoring_jobs."CompletedAt" IS NULL AND manual_scoring_jobs."Termina
     public async Task<ManualScoringLease?> ClaimNextAsync(DateTimeOffset now, TimeSpan leaseDuration, CancellationToken ct = default)
     {
         if (leaseDuration <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(leaseDuration));
-        var leaseExpiresAt = now.Add(leaseDuration);
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(ct);
         await using var command = new NpgsqlCommand("""
@@ -50,22 +61,22 @@ WITH candidate AS (
     FROM manual_scoring_jobs
     WHERE "CompletedAt" IS NULL
       AND "TerminalFailureAt" IS NULL
-      AND "NextAttemptAt" <= @now
-      AND ("LeaseExpiresAt" IS NULL OR "LeaseExpiresAt" <= @now)
+      AND "NextAttemptAt" <= CURRENT_TIMESTAMP
+      AND ("LeaseExpiresAt" IS NULL OR "LeaseExpiresAt" <= CURRENT_TIMESTAMP)
     ORDER BY "RequestedAt", "Id"
     FOR UPDATE SKIP LOCKED
     LIMIT 1
 )
 UPDATE manual_scoring_jobs AS job
 SET "LeaseFence" = job."LeaseFence" + 1,
-    "LeaseExpiresAt" = @leaseExpiresAt,
-    "LastAttemptAt" = @now,
+    "LeaseExpiresAt" = CURRENT_TIMESTAMP + @leaseDuration,
+    "LastAttemptAt" = CURRENT_TIMESTAMP,
     "AttemptCount" = job."AttemptCount" + 1
 FROM candidate
 WHERE job."Id" = candidate."Id"
 RETURNING job."Id", job."ListingId", job."SourceExternalId", job."SourceCanonicalUrl", job."RequestedAt", job."LeaseFence", job."LeaseExpiresAt";
 """, connection);
-        command.Parameters.AddWithValue("now", now); command.Parameters.AddWithValue("leaseExpiresAt", leaseExpiresAt);
+        command.Parameters.Add(new NpgsqlParameter("leaseDuration", NpgsqlDbType.Interval) { Value = leaseDuration });
         await using var reader = await command.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) return null;
         return new ManualScoringLease(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetString(3), reader.GetFieldValue<DateTimeOffset>(4), reader.GetInt64(5), reader.GetFieldValue<DateTimeOffset>(6));
@@ -95,7 +106,7 @@ SET "CompletedAt" = CASE WHEN @isCompletion THEN @at ELSE "CompletedAt" END,
     "LastErrorMessage" = @errorMessage
 WHERE "Id" = @id
   AND "LeaseFence" = @leaseFence
-  AND "LeaseExpiresAt" > @at
+  AND "LeaseExpiresAt" > CURRENT_TIMESTAMP
   AND "CompletedAt" IS NULL
   AND "TerminalFailureAt" IS NULL;
 """, connection);
