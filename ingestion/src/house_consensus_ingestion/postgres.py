@@ -42,12 +42,8 @@ class PostgresRunWriter:
                     INSERT INTO ingestion_runs
                         (run_id, source_system, source_scope, requested_at, started_at, run_status, manifest_sha256)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (run_id) DO UPDATE
-                    SET run_id = ingestion_runs.run_id
-                    WHERE ingestion_runs.source_system = EXCLUDED.source_system
-                      AND ingestion_runs.source_scope = EXCLUDED.source_scope
-                      AND ingestion_runs.manifest_sha256 = EXCLUDED.manifest_sha256
-                    RETURNING run_id
+                    ON CONFLICT (run_id) DO NOTHING
+                    RETURNING source_system, source_scope, manifest_sha256
                     """,
                     (
                         snapshot.run_id,
@@ -59,7 +55,23 @@ class PostgresRunWriter:
                         snapshot.manifest_sha256,
                     ),
                 )
-                if cursor.fetchone() is None:
+                provenance = cursor.fetchone()
+                if provenance is None:
+                    cursor.execute(
+                        """
+                        SELECT source_system, source_scope, manifest_sha256
+                        FROM ingestion_runs
+                        WHERE run_id = %s
+                        FOR KEY SHARE
+                        """,
+                        (snapshot.run_id,),
+                    )
+                    provenance = cursor.fetchone()
+                if provenance != (
+                    snapshot.source_system,
+                    snapshot.source_scope,
+                    snapshot.manifest_sha256,
+                ):
                     raise IngestionRunConflictError(
                         f"run ID {snapshot.run_id} conflicts with immutable provenance"
                     )

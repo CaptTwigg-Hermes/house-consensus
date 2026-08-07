@@ -61,6 +61,33 @@ def test_native_ingestion_contract_copies_define_the_same_immutability_guards():
     assert normalized_guard_sql(migration) == normalized_guard_sql(schema)
 
 
+def test_native_ingestion_contract_copies_reject_child_facts_after_run_completion():
+    """Snapshots and stage outcomes are only appendable while their parent run is running."""
+    migration = MIGRATION.read_text()
+    schema = SCHEMA.read_text()
+    required_guards = (
+        "CREATE OR REPLACE FUNCTION enforce_ingestion_child_fact_parent_running()",
+        "CREATE TRIGGER ingestion_source_snapshots_parent_running",
+        "BEFORE INSERT ON ingestion_source_snapshots",
+        "CREATE TRIGGER ingestion_stage_outcomes_parent_running",
+        "BEFORE INSERT ON ingestion_stage_outcomes",
+    )
+
+    for guard in required_guards:
+        assert guard in migration
+        assert guard in schema
+
+    def normalized_guard_sql(contract: str) -> str:
+        start = contract.index(required_guards[0])
+        end = contract.index(
+            "CREATE OR REPLACE FUNCTION reject_ingestion_audit_fact_truncate()",
+            start,
+        )
+        return " ".join(contract[start:end].split())
+
+    assert normalized_guard_sql(migration) == normalized_guard_sql(schema)
+
+
 def test_native_ingestion_contract_copies_reject_truncating_every_audit_table():
     """Both schema entry points make each native audit table append-only."""
     migration = MIGRATION.read_text()
@@ -148,6 +175,43 @@ def test_native_ingestion_contract_enforces_audit_immutability_and_run_lifecycle
 
         with pytest.raises(psycopg.errors.RaiseException):
             conn.execute("UPDATE ingestion_runs SET completed_at=%s", (requested_at,))
+
+
+def test_native_ingestion_contract_rejects_child_facts_after_parent_run_is_terminal(database_url):
+    """PostgreSQL rejects late child audit facts, not just application writers."""
+    run_id = "00000000-0000-0000-0000-000000000011"
+    requested_at = "2026-08-07T12:00:00Z"
+    completed_at = "2026-08-07T12:01:00Z"
+    digest = "a" * 64
+
+    with psycopg.connect(database_url, autocommit=True) as conn:
+        conn.execute(
+            """INSERT INTO ingestion_runs
+            (run_id, source_system, source_scope, requested_at, run_status, manifest_sha256)
+            VALUES (%s, 'native', 'all', %s, 'running', %s)""",
+            (run_id, requested_at, digest),
+        )
+        conn.execute(
+            """UPDATE ingestion_runs
+            SET run_status='succeeded', completed_at=%s
+            WHERE run_id=%s""",
+            (completed_at, run_id),
+        )
+
+        with pytest.raises(psycopg.errors.RaiseException, match="running parent run"):
+            conn.execute(
+                """INSERT INTO ingestion_source_snapshots
+                (snapshot_id, run_id, source_name, snapshot_sha256, payload, captured_at)
+                VALUES ('00000000-0000-0000-0000-000000000012', %s, 'source', %s, '{}', %s)""",
+                (run_id, digest, completed_at),
+            )
+        with pytest.raises(psycopg.errors.RaiseException, match="running parent run"):
+            conn.execute(
+                """INSERT INTO ingestion_stage_outcomes
+                (run_id, stage_name, attempt, stage_status, started_at, completed_at)
+                VALUES (%s, 'fetch', 1, 'succeeded', %s, %s)""",
+                (run_id, requested_at, completed_at),
+            )
 
 
 def test_native_ingestion_contract_rejects_truncating_every_audit_table(database_url):

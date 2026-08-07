@@ -45,11 +45,13 @@ def test_write_started_run_uses_injected_native_postgres_connection() -> None:
     from house_consensus_ingestion.identity import build_snapshot
     from house_consensus_ingestion.postgres import PostgresRunWriter
 
-    connection = Connection()
     snapshot = build_snapshot(
         source_system="house-consensus-ingestion",
         source_scope="boliga.dk",
         records=[{"external_id": "1", "address": "One Street 1"}],
+    )
+    connection = Connection(
+        result=(snapshot.source_system, snapshot.source_scope, snapshot.manifest_sha256)
     )
 
     PostgresRunWriter(connection_factory=lambda: connection).write_started_run(
@@ -95,9 +97,8 @@ def test_write_started_run_rejects_a_conflicting_native_run_identity() -> None:
             requested_at=datetime(2026, 8, 7, tzinfo=UTC),
         )
 
-    statement, _ = connection.cursor_instance.executed[0]
-    assert "ON CONFLICT (run_id) DO UPDATE" in statement
-    assert "source_system = EXCLUDED.source_system" in statement
-    assert "source_scope = EXCLUDED.source_scope" in statement
-    assert "manifest_sha256 = EXCLUDED.manifest_sha256" in statement
-    assert "DO NOTHING" not in statement
+    statements = "\n".join(statement for statement, _ in connection.cursor_instance.executed)
+    assert "ON CONFLICT (run_id) DO NOTHING" in statements
+    assert "DO UPDATE" not in statements
+    assert "RETURNING source_system, source_scope, manifest_sha256" in statements
+    assert "FOR KEY SHARE" in statements

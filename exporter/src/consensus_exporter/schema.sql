@@ -353,6 +353,35 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION enforce_ingestion_child_fact_parent_running()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    PERFORM 1
+    FROM ingestion_runs
+    WHERE run_id = NEW.run_id
+      AND run_status = 'running'
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'ingestion child facts require a running parent run';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS ingestion_source_snapshots_parent_running ON ingestion_source_snapshots;
+CREATE TRIGGER ingestion_source_snapshots_parent_running
+BEFORE INSERT ON ingestion_source_snapshots
+FOR EACH ROW EXECUTE FUNCTION enforce_ingestion_child_fact_parent_running();
+
+DROP TRIGGER IF EXISTS ingestion_stage_outcomes_parent_running ON ingestion_stage_outcomes;
+CREATE TRIGGER ingestion_stage_outcomes_parent_running
+BEFORE INSERT ON ingestion_stage_outcomes
+FOR EACH ROW EXECUTE FUNCTION enforce_ingestion_child_fact_parent_running();
+
 CREATE OR REPLACE FUNCTION reject_ingestion_audit_fact_truncate()
 RETURNS trigger
 LANGUAGE plpgsql
