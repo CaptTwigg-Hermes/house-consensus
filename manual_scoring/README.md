@@ -71,3 +71,33 @@ completion/failure state; it does not overwrite scoring projection data.
 ```sh
 uv run --project manual_scoring --extra test pytest -q manual_scoring/tests
 ```
+
+### Real PostgreSQL lease gate
+
+`tests/test_postgres_store_integration.py` resets only the `public` schema of
+`TEST_DATABASE_URL`, verifies that its database name contains `test`, and uses
+independent real psycopg connections. It covers simultaneous claims, an actual
+`FOR UPDATE` lock skipped by another claim, database-clock lease expiry,
+reclaim fencing, active-lease re-enqueue identity replacement, and terminal /
+retry queue selection.
+
+For the dedicated native database described by `/opt/data/.env`, construct the
+URL without printing its password and run the gate:
+
+```sh
+set -a; . /opt/data/.env; set +a
+TEST_DATABASE_URL="$(python3 - <<'BUILD_DSN'
+import os
+from urllib.parse import quote
+print(f"postgresql://{quote(os.environ['POSTGRES_USERNAME'], safe='')}:{quote(os.environ['POSTGRES_PASSWORD'], safe='')}@{os.environ['POSTGRES_IP']}:{os.environ['POSTGRES_PORT']}/house_consensus_native_test")
+BUILD_DSN
+)" uv run --project manual_scoring --extra 'postgres,test' pytest -q \
+  manual_scoring/tests/test_postgres_store_integration.py
+```
+
+The C# companion is `ManualScoringStorePostgresTests`. The environment used for
+this gate has no `dotnet` executable, so it could not execute the C# project or
+apply EF migrations; the Python gate creates the exact durable queue table
+shape from `AddDurableManualScoringStore` and exercises the Python adapter
+against PostgreSQL. The remaining verification gap is executing that C# suite
+with `TEST_DATABASE_URL` on a host with the .NET SDK installed.

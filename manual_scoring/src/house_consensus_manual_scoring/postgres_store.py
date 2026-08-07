@@ -126,7 +126,7 @@ RETURNING job."Id", job."ListingId", job."SourceExternalId", job."SourceCanonica
 UPDATE manual_scoring_jobs
 SET "CompletedAt" = CASE WHEN %(is_completion)s THEN %(at)s ELSE "CompletedAt" END,
     "TerminalFailureAt" = CASE WHEN %(terminal)s THEN %(at)s ELSE "TerminalFailureAt" END,
-    "NextAttemptAt" = CASE WHEN %(is_completion)s OR %(terminal)s THEN NULL ELSE %(retry_at)s END,
+    "NextAttemptAt" = CASE WHEN %(is_completion)s OR %(terminal)s THEN NULL ELSE %(retry_at)s::timestamptz END,
     "LeaseExpiresAt" = NULL,
     "LastErrorCode" = %(error_code)s,
     "LastErrorMessage" = %(error_message)s
