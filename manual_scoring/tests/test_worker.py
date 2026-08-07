@@ -85,8 +85,28 @@ def test_worker_records_terminal_failure_when_source_identity_is_ambiguous():
     assert store.completed == []
     assert store.failures[0][0] == request
     assert store.failures[0][1].code == "source_identity_ambiguous"
+    assert store.failures[0][1].terminal is True
     assert store.failures[0][1].retry_at is None
     assert store.failures[0][2] == now
+
+
+def test_select_next_pending_skips_terminal_ambiguous_failure_after_persistence():
+    from house_consensus_manual_scoring.worker import select_next_pending
+
+    now = datetime(2026, 8, 7, 12, tzinfo=timezone.utc)
+    ambiguous_request = ManualScoringRequest(
+        "listing-1",
+        SourceIdentity("manual:1", "https://example.test/1"),
+        now,
+        terminal_failure=True,
+    )
+    later_request = ManualScoringRequest(
+        "listing-2",
+        SourceIdentity("manual:2", "https://example.test/2"),
+        now.replace(minute=1),
+    )
+
+    assert select_next_pending([ambiguous_request, later_request], now) == later_request
 
 
 def test_worker_records_retryable_source_resolution_failure_for_resolver_outage():

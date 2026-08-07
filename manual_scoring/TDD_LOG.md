@@ -17,5 +17,6 @@ All commands were run from the repository root. Each RED command was observed be
 | Blank evidence | `uv run --project manual_scoring --extra test pytest -q manual_scoring/tests/test_worker.py::test_worker_rejects_blank_evidence_output` — expected `failed`, got `completed` | Same command — `1 passed` |
 | Non-dict evidence | `uv run --project manual_scoring --extra test pytest -q manual_scoring/tests/test_worker.py::test_worker_rejects_non_dict_evidence_output` — expected `failed`, got `completed` | Same command — `1 passed` |
 | Delayed invalid output retry | `uv run --project manual_scoring --extra test pytest -q manual_scoring/tests/test_worker.py::test_worker_does_not_complete_when_required_score_or_evidence_is_missing` — expected retry after attempt, got attempt timestamp | Same command — `1 passed` |
+| Terminal ambiguity queue reclaim | `manual_scoring/.venv/bin/python -m pytest manual_scoring/tests/test_worker.py::test_worker_records_terminal_failure_when_source_identity_is_ambiguous -q` — `AttributeError: ScoringFailure has no attribute terminal`; then `...::test_select_next_pending_skips_terminal_ambiguous_failure_after_persistence -q` — `TypeError: unexpected keyword terminal_failure` | Focused tests — `2 passed` |
 
-Focused suite: `uv run --project manual_scoring --extra test pytest -q manual_scoring/tests` — **10 passed**.
+Focused suite: `uv run --project manual_scoring --extra test pytest -q manual_scoring/tests` — **11 passed**.

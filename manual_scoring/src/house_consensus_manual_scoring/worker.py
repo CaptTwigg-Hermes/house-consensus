@@ -21,6 +21,7 @@ class ManualScoringRequest:
     requested_at: datetime
     completed_at: datetime | None = None
     retry_at: datetime | None = None
+    terminal_failure: bool = False
 
 
 def select_next_pending(
@@ -30,6 +31,7 @@ def select_next_pending(
         request
         for request in requests
         if request.completed_at is None
+        and not request.terminal_failure
         and (request.retry_at is None or request.retry_at <= now)
     ]
     return min(eligible, key=lambda request: request.requested_at, default=None)
@@ -47,6 +49,7 @@ class ScoringFailure:
     code: str
     message: str
     retry_at: datetime | None
+    terminal: bool = False
 
 
 class AmbiguousSourceIdentity(Exception):
@@ -106,7 +109,7 @@ class ManualScoringWorker:
         except AmbiguousSourceIdentity as error:
             self._store.record_failure(
                 request,
-                ScoringFailure("source_identity_ambiguous", str(error), retry_at=None),
+                ScoringFailure("source_identity_ambiguous", str(error), retry_at=None, terminal=True),
                 now,
             )
             return WorkerResult(status="failed")
