@@ -102,3 +102,30 @@ def test_write_started_run_rejects_a_conflicting_native_run_identity() -> None:
     assert "DO UPDATE" not in statements
     assert "RETURNING source_system, source_scope, manifest_sha256" in statements
     assert "FOR KEY SHARE" in statements
+
+
+
+def test_run_writer_persists_native_snapshot_stage_outcome_and_terminal_status() -> None:
+    from house_consensus_ingestion.identity import build_snapshot
+    from house_consensus_ingestion.postgres import PostgresRunWriter
+
+    snapshot = build_snapshot(source_scope="boligsiden.dk/open-cases", records=[{"caseID": "42"}])
+    connection = Connection(result=(snapshot.source_system, snapshot.source_scope, snapshot.manifest_sha256))
+    writer = PostgresRunWriter(lambda: connection)
+    now = datetime(2026, 8, 7, tzinfo=UTC)
+
+    snapshot_id = writer.write_source_snapshot(
+        snapshot=snapshot, source_name="boligsiden-search-cases", payload={"records": [{"caseID": "42"}]}, captured_at=now,
+    )
+    writer.write_stage_outcome(
+        snapshot=snapshot, stage_name="fetch", stage_status="succeeded", outcome={"record_count": 1}, started_at=now, completed_at=now,
+    )
+    writer.complete_run(snapshot=snapshot, run_status="succeeded", completed_at=now)
+
+    statements = "\n".join(statement for statement, _ in connection.cursor_instance.executed)
+    assert snapshot_id
+    assert "INSERT INTO ingestion_source_snapshots" in statements
+    assert "INSERT INTO ingestion_stage_outcomes" in statements
+    assert "UPDATE ingestion_runs" in statements
+    assert "run_status = %s" in statements
+    assert "run_status = 'running'" in statements

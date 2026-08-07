@@ -47,3 +47,37 @@ def test_exact_provenance_retry_does_not_mutate_immutable_ingestion_run(database
             snapshot.source_scope,
             snapshot.manifest_sha256,
         )
+
+
+
+def test_native_lifecycle_snapshot_and_projection_round_trip_on_postgres(database_url):
+    from house_consensus_ingestion.projection import PostgresListingProjectionWriter
+
+    raw_records = [{
+        "caseID": "case-42",
+        "address": {"roadName": "Example Road", "houseNumber": "42", "zipCode": "2100", "cityName": "Copenhagen"},
+        "priceCash": 2_500_000,
+    }]
+    snapshot = build_snapshot(source_system="house-consensus-ingestion", source_scope="boligsiden.dk/open-cases", records=raw_records)
+    now = datetime(2026, 8, 7, tzinfo=UTC)
+    writer = PostgresRunWriter(lambda: psycopg.connect(database_url))
+    writer.write_started_run(snapshot=snapshot, requested_at=now)
+    source_snapshot_id = writer.write_source_snapshot(
+        snapshot=snapshot,
+        source_name="boligsiden-search-cases",
+        payload={
+            "records": raw_records,
+            "projection_records": [{"external_id": "case-42", "address": "Example Road 42, 2100 Copenhagen", "city": "Copenhagen", "price": 2_500_000}],
+        },
+        captured_at=now,
+    )
+    writer.write_stage_outcome(snapshot=snapshot, stage_name="fetch", stage_status="succeeded", outcome={"record_count": 1}, started_at=now, completed_at=now)
+    writer.complete_run(snapshot=snapshot, run_status="succeeded", completed_at=now)
+
+    assert PostgresListingProjectionWriter(lambda: psycopg.connect(database_url)).project_completed_snapshot(
+        source_snapshot_id=source_snapshot_id, projected_at=now,
+    ) == 1
+    with psycopg.connect(database_url) as conn:
+        assert conn.execute("SELECT run_status FROM ingestion_runs WHERE run_id=%s", (snapshot.run_id,)).fetchone() == ("succeeded",)
+        assert conn.execute('SELECT "ExternalId", "Address", "Price" FROM listings').fetchone() == ("case-42", "Example Road 42, 2100 Copenhagen", 2_500_000)
+        assert conn.execute("SELECT source_record_id FROM listing_ingestion_projections").fetchone() == ("case-42",)

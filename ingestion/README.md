@@ -28,10 +28,19 @@ Run the House Consensus application migrations before using the writer. The pres
 | `run_status text` | initialized as `running` |
 | `manifest_sha256 text` | canonical snapshot SHA-256 and immutable provenance |
 
-The application contract also owns source snapshots and stage outcomes. This foundation does not capture those records or complete/reconcile a run; those belong to later orchestration slices.
+The native run writer captures immutable source snapshots and fetch-stage outcomes while the run is running, then transitions it exactly once to a terminal status.
 
 ## Native listing projection seam
 
 `PostgresListingProjectionWriter.project_completed_snapshot` reads an immutable `ingestion_source_snapshots.payload` only after its parent run is `succeeded`. Payloads may be a records array or an object containing a `records` array; every record must supply `external_id` (or `id`) and a non-empty `address`. It writes only the core listing fields from that source record and records the source identity in the application-owned `listing_ingestion_projections` table added by migration `202608070003_AddNativeListingProjection`.
 
-The source identity is `(source_system, source_scope, source_record_id)` and is unique. If an `ExternalId` is already held by a manually added listing, a listing with an owner override, an unprovenanced legacy row, or a different native source identity, the projection raises `ListingIdentityConflictError` instead of changing it. No CLI, service registration, scheduler, or production call site invokes this seam yet.
+The source identity is `(source_system, source_scope, source_record_id)` and is unique. If an `ExternalId` is already held by a manually added listing, a listing with an owner override, an unprovenanced legacy row, or a different native source identity, the projection raises `ListingIdentityConflictError` instead of changing it. The native CLI invokes this seam only after its source run has reached succeeded; no scheduler or cron entrypoint is added.
+
+
+## Native Boligsiden orchestration
+
+The runnable native path is dry-run-first. It maps Boligsiden caseID, address, and priceCash fields into validated projection records before any write.
+
+    uv run --project ingestion house-consensus-ingest --boligsiden --dry-run --municipality 101 --address-type villa --price-min 1000000 --price-max 3000000
+
+Use --execute instead of --dry-run only with an explicit DATABASE_URL. Execution fetches the complete sweep, creates a running native run, stores the raw source envelope plus validated projection_records, appends its fetch outcome, makes the run terminal succeeded, and only then projects listings. A persistence error after the run starts records a failed fetch outcome and terminal failed state; projection is deliberately not scheduled by cron.

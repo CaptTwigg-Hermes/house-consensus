@@ -157,3 +157,31 @@ def test_rejects_duplicate_native_source_identities_in_one_completed_snapshot() 
         )
 
     assert len(connection.cursor_instance.executed) == 1
+
+
+
+def test_projects_native_boligsiden_snapshot_using_validated_projection_records() -> None:
+    from house_consensus_ingestion.projection import PostgresListingProjectionWriter
+
+    connection = Connection(results=[
+        ("house-consensus-ingestion", "boligsiden.dk/open-cases", {
+            "records": [{"caseID": "case-42", "address": {"roadName": "Example Road"}}],
+            "projection_records": [{"external_id": "case-42", "address": "Example Road 42, 2100 Copenhagen", "city": "Copenhagen", "price": 2_500_000}],
+        }),
+        None,
+        ("00000000-0000-0000-0000-000000000042",),
+    ])
+
+    assert PostgresListingProjectionWriter(lambda: connection).project_completed_snapshot(
+        source_snapshot_id="00000000-0000-0000-0000-000000000010", projected_at=datetime(2026, 8, 7, tzinfo=UTC),
+    ) == 1
+    listing_insert = connection.cursor_instance.executed[2]
+    assert listing_insert[1][1:5] == ("case-42", "Example Road 42, 2100 Copenhagen", "Copenhagen", 2_500_000)
+
+
+
+def test_isolated_postgres_bootstrap_mirrors_native_listing_projection_contract() -> None:
+    from pathlib import Path
+    schema = (Path(__file__).resolve().parents[2] / "exporter/src/consensus_exporter/schema.sql").read_text()
+    assert "CREATE TABLE IF NOT EXISTS listing_ingestion_projections" in schema
+    assert "UNIQUE (source_system, source_scope, source_record_id)" in schema

@@ -77,7 +77,7 @@ class PostgresListingProjectionWriter:
 
     @staticmethod
     def _records(payload: object) -> Sequence[Mapping[str, Any]]:
-        records = payload.get("records") if isinstance(payload, Mapping) else payload
+        records = (payload.get("projection_records") or payload.get("records")) if isinstance(payload, Mapping) else payload
         if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
             raise SourceRecordError("completed source snapshot payload must contain a records array")
         if not all(isinstance(record, Mapping) for record in records):

@@ -25,3 +25,26 @@ def test_dry_run_prints_deterministic_snapshot_identity(capsys) -> None:
         "source_scope": "boliga.dk",
         "source_system": "house-consensus-ingestion",
     }
+
+
+
+def test_boligsiden_dry_run_uses_native_orchestrator_without_database(monkeypatch, capsys) -> None:
+    from house_consensus_ingestion.boligsiden import RawFetchSnapshot
+    from house_consensus_ingestion.identity import build_snapshot
+    import house_consensus_ingestion.cli as cli
+
+    records = ({"caseID": "42", "address": {"roadName": "Example Road", "houseNumber": "42", "cityName": "Copenhagen"}, "priceCash": 2_500_000},)
+    fetched = RawFetchSnapshot(records=records, run_snapshot=build_snapshot(source_scope="boligsiden.dk/open-cases", records=records))
+
+    class Fetcher:
+        def __init__(self, config):
+            assert config.municipalities == ("101",)
+        def fetch(self):
+            return fetched
+
+    monkeypatch.setattr(cli, "BoligsidenFetcher", Fetcher)
+    assert cli.main(["--boligsiden", "--dry-run", "--municipality", "101", "--address-type", "villa", "--price-min", "1000000", "--price-max", "3000000"]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["dry_run"] is True
+    assert output["snapshot_count"] == 1
+    assert output["projected_count"] == 0
