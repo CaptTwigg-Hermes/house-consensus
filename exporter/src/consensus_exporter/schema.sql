@@ -353,6 +353,30 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION reject_ingestion_audit_fact_truncate()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION '% records cannot be truncated', TG_TABLE_NAME;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS ingestion_runs_truncate_immutable ON ingestion_runs;
+CREATE TRIGGER ingestion_runs_truncate_immutable
+BEFORE TRUNCATE ON ingestion_runs
+FOR EACH STATEMENT EXECUTE FUNCTION reject_ingestion_audit_fact_truncate();
+
+DROP TRIGGER IF EXISTS ingestion_source_snapshots_truncate_immutable ON ingestion_source_snapshots;
+CREATE TRIGGER ingestion_source_snapshots_truncate_immutable
+BEFORE TRUNCATE ON ingestion_source_snapshots
+FOR EACH STATEMENT EXECUTE FUNCTION reject_ingestion_audit_fact_truncate();
+
+DROP TRIGGER IF EXISTS ingestion_stage_outcomes_truncate_immutable ON ingestion_stage_outcomes;
+CREATE TRIGGER ingestion_stage_outcomes_truncate_immutable
+BEFORE TRUNCATE ON ingestion_stage_outcomes
+FOR EACH STATEMENT EXECUTE FUNCTION reject_ingestion_audit_fact_truncate();
+
 DROP TRIGGER IF EXISTS ingestion_source_snapshots_immutable ON ingestion_source_snapshots;
 CREATE TRIGGER ingestion_source_snapshots_immutable
 BEFORE UPDATE OR DELETE ON ingestion_source_snapshots

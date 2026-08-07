@@ -52,13 +52,29 @@ def test_native_ingestion_contract_copies_define_the_same_immutability_guards():
 
     def normalized_guard_sql(contract: str) -> str:
         start = contract.index(required_guards[0])
-        end = contract.index(
-            "FOR EACH ROW EXECUTE FUNCTION enforce_ingestion_run_lifecycle();",
+        end = contract.rindex(
+            "FOR EACH STATEMENT EXECUTE FUNCTION reject_ingestion_audit_fact_truncate();",
             start,
-        ) + len("FOR EACH ROW EXECUTE FUNCTION enforce_ingestion_run_lifecycle();")
+        ) + len("FOR EACH STATEMENT EXECUTE FUNCTION reject_ingestion_audit_fact_truncate();")
         return " ".join(contract[start:end].split())
 
     assert normalized_guard_sql(migration) == normalized_guard_sql(schema)
+
+
+def test_native_ingestion_contract_copies_reject_truncating_every_audit_table():
+    """Both schema entry points make each native audit table append-only."""
+    migration = MIGRATION.read_text()
+    schema = SCHEMA.read_text()
+    truncate_guards = (
+        "CREATE OR REPLACE FUNCTION reject_ingestion_audit_fact_truncate()",
+        "CREATE TRIGGER ingestion_runs_truncate_immutable\nBEFORE TRUNCATE ON ingestion_runs\nFOR EACH STATEMENT EXECUTE FUNCTION reject_ingestion_audit_fact_truncate();",
+        "CREATE TRIGGER ingestion_source_snapshots_truncate_immutable\nBEFORE TRUNCATE ON ingestion_source_snapshots\nFOR EACH STATEMENT EXECUTE FUNCTION reject_ingestion_audit_fact_truncate();",
+        "CREATE TRIGGER ingestion_stage_outcomes_truncate_immutable\nBEFORE TRUNCATE ON ingestion_stage_outcomes\nFOR EACH STATEMENT EXECUTE FUNCTION reject_ingestion_audit_fact_truncate();",
+    )
+
+    for guard in truncate_guards:
+        assert guard in migration
+        assert guard in schema
 
 
 @pytest.fixture()
@@ -132,3 +148,15 @@ def test_native_ingestion_contract_enforces_audit_immutability_and_run_lifecycle
 
         with pytest.raises(psycopg.errors.RaiseException):
             conn.execute("UPDATE ingestion_runs SET completed_at=%s", (requested_at,))
+
+
+def test_native_ingestion_contract_rejects_truncating_every_audit_table(database_url):
+    """PostgreSQL rejects TRUNCATE even though it bypasses row-level triggers."""
+    with psycopg.connect(database_url, autocommit=True) as conn:
+        for table in (
+            "ingestion_runs",
+            "ingestion_source_snapshots",
+            "ingestion_stage_outcomes",
+        ):
+            with pytest.raises(psycopg.errors.RaiseException):
+                conn.execute(f"TRUNCATE {table}")
