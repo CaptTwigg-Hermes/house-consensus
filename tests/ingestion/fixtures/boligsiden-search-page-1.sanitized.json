@@ -1,0 +1,560 @@
+{
+  "_links": {
+    "self": {
+      "href": "/search/cases"
+    }
+  },
+  "totalHits": 12158,
+  "cases": [
+    {
+      "caseID": "fixture-case-001",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "1",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-002",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "2",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-003",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "3",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-004",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "4",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-005",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "5",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-006",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "6",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-007",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "7",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-008",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "8",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-009",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "9",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-010",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "10",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-011",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "11",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-012",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "12",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-013",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "13",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-014",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "14",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-015",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "15",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-016",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "16",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-017",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "17",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-018",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "18",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-019",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "19",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-020",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "20",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-021",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "21",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-022",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "22",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-023",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "23",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-024",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "24",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-025",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "25",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-026",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "26",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-027",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "27",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-028",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "28",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-029",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "29",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-030",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "30",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-031",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "31",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-032",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "32",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-033",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "33",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-034",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "34",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-035",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "35",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-036",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "36",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-037",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "37",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-038",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "38",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-039",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "39",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-040",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "40",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-041",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "41",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-042",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "42",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-043",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "43",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-044",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "44",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-045",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "45",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-046",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "46",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-047",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "47",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-048",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "48",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-049",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "49",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    },
+    {
+      "caseID": "fixture-case-050",
+      "address": {
+        "roadName": "Example Road",
+        "houseNumber": "50",
+        "zipCode": "0000",
+        "cityName": "Example City"
+      },
+      "priceCash": 1500000,
+      "status": "open"
+    }
+  ]
+}

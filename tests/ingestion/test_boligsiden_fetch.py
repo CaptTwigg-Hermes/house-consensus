@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -27,7 +28,7 @@ class Transport:
 
 
 def page(*, total: int, cases: list[dict[str, Any]]) -> dict[str, object]:
-    return {"totalCount": total, "cases": cases}
+    return {"totalHits": total, "cases": cases}
 
 
 def config():
@@ -38,8 +39,41 @@ def config():
         address_types=("villa",),
         price_min=1_000_000,
         price_max=2_000_000,
-        page_size=2,
     )
+
+
+FIXTURE = Path(__file__).with_name("fixtures") / "boligsiden-search-page-1.sanitized.json"
+
+
+def real_page(*, total: int, case_ids: list[str]) -> dict[str, object]:
+    return {"totalHits": total, "cases": [{"caseID": case_id} for case_id in case_ids]}
+
+
+def test_parser_accepts_sanitized_real_api_page_with_total_hits_and_case_id() -> None:
+    from house_consensus_ingestion.boligsiden import _page
+
+    total, cases = _page(json.loads(FIXTURE.read_text()))
+
+    assert total > 50
+    assert len(cases) == 50
+    assert cases[0]["caseID"] == "fixture-case-001"
+
+
+def test_fetch_paginates_by_real_total_hits_despite_ignored_requested_page_size() -> None:
+    from house_consensus_ingestion.boligsiden import BoligsidenFetcher
+
+    transport = Transport([
+        Response(real_page(total=51, case_ids=[f"case-{number:03d}" for number in range(1, 51)])),
+        Response(real_page(total=51, case_ids=["case-051"])),
+    ])
+
+    snapshot = BoligsidenFetcher(config(), transport=transport, sleep=lambda _: None).fetch()
+
+    assert snapshot.records[0]["caseID"] == "case-001"
+    assert snapshot.records[-1]["caseID"] == "case-051"
+    assert snapshot.run_snapshot.snapshot_count == 51
+    assert len(transport.calls) == 2
+    assert "pageSize" not in transport.calls[0][0]
 
 
 def test_config_exposes_canonical_boligsiden_source_namespace_and_query() -> None:
@@ -50,17 +84,17 @@ def test_config_exposes_canonical_boligsiden_source_namespace_and_query() -> Non
     assert configured.endpoint == "https://api.boligsiden.dk/search/cases"
     assert configured.query(page=2) == {
         "municipality": "101", "addressType": "villa", "priceMin": "1000000",
-        "priceMax": "2000000", "page": "2", "pageSize": "2",
+        "priceMax": "2000000", "page": "2",
     }
 
 
 def test_fetch_retries_transient_http_failure_with_configured_timeout() -> None:
     from house_consensus_ingestion.boligsiden import BoligsidenFetcher
 
-    transport = Transport([TimeoutError("temporarily unavailable"), Response(page(total=1, cases=[{"id": "case-1", "priceCash": 1_500_000}]))])
+    transport = Transport([TimeoutError("temporarily unavailable"), Response(page(total=1, cases=[{"caseID": "case-1", "priceCash": 1_500_000}]))])
     snapshot = BoligsidenFetcher(config(), transport=transport, retry_attempts=2, timeout_seconds=7.5, sleep=lambda _: None).fetch()
 
-    assert snapshot.records == ({"id": "case-1", "priceCash": 1_500_000},)
+    assert snapshot.records == ({"caseID": "case-1", "priceCash": 1_500_000},)
     assert snapshot.run_snapshot.snapshot_count == 1
     assert len(transport.calls) == 2
     assert {timeout for _, timeout in transport.calls} == {7.5}
@@ -69,10 +103,10 @@ def test_fetch_retries_transient_http_failure_with_configured_timeout() -> None:
 def test_fetch_returns_deterministic_raw_snapshot_after_complete_pagination() -> None:
     from house_consensus_ingestion.boligsiden import BoligsidenFetcher
 
-    transport = Transport([Response(page(total=3, cases=[{"id": "3"}, {"id": "1"}])), Response(page(total=3, cases=[{"id": "2"}]))])
+    transport = Transport([Response(page(total=3, cases=[{"caseID": "3"}, {"caseID": "1"}])), Response(page(total=3, cases=[{"caseID": "2"}]))])
     snapshot = BoligsidenFetcher(config(), transport=transport, sleep=lambda _: None).fetch()
 
-    assert snapshot.records == ({"id": "1"}, {"id": "2"}, {"id": "3"})
+    assert snapshot.records == ({"caseID": "1"}, {"caseID": "2"}, {"caseID": "3"})
     assert snapshot.run_snapshot.source_scope == "boligsiden.dk/open-cases"
     assert snapshot.run_snapshot.snapshot_count == 3
     assert len(transport.calls) == 2
@@ -81,9 +115,9 @@ def test_fetch_returns_deterministic_raw_snapshot_after_complete_pagination() ->
 @pytest.mark.parametrize(
     "responses",
     [
-        [Response(page(total=3, cases=[{"id": "1"}, {"id": "2"}])), Response(page(total=2, cases=[{"id": "3"}]))],
-        [Response(page(total=3, cases=[{"id": "1"}, {"id": "2"}])), Response(page(total=3, cases=[{"id": "2"}]))],
-        [Response(page(total=1, cases=[{"id": " "}]))],
+        [Response(page(total=3, cases=[{"caseID": "1"}, {"caseID": "2"}])), Response(page(total=2, cases=[{"caseID": "3"}]))],
+        [Response(page(total=3, cases=[{"caseID": "1"}, {"caseID": "2"}])), Response(page(total=3, cases=[{"caseID": "2"}]))],
+        [Response(page(total=1, cases=[{"caseID": " "}]))],
     ],
     ids=["total-changes", "duplicate-id", "blank-id"],
 )

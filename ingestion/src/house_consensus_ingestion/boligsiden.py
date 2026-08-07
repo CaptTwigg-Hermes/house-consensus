@@ -33,7 +33,6 @@ class BoligsidenSourceConfig:
     address_types: tuple[str, ...]
     price_min: int
     price_max: int
-    page_size: int = 100
     allow_empty: bool = False
     source_system: str = "house-consensus-ingestion"
     source_scope: str = "boligsiden.dk/open-cases"
@@ -46,8 +45,6 @@ class BoligsidenSourceConfig:
             raise ValueError("source filters must be non-blank")
         if self.price_min < 0 or self.price_max < self.price_min:
             raise ValueError("price range must be non-negative and ordered")
-        if not 1 <= self.page_size <= 100:
-            raise ValueError("page_size must be between 1 and 100")
         if not self.endpoint.startswith("https://api.boligsiden.dk/"):
             raise ValueError("endpoint must be the Boligsiden public API")
 
@@ -62,7 +59,6 @@ class BoligsidenSourceConfig:
             "priceMin": str(self.price_min),
             "priceMax": str(self.price_max),
             "page": str(page),
-            "pageSize": str(self.page_size),
         }
 
 
@@ -178,10 +174,10 @@ class BoligsidenFetcher:
 
 
 def _page(payload: Mapping[str, Any]) -> tuple[int, list[Mapping[str, Any]]]:
-    total = payload.get("totalCount")
+    total = payload.get("totalHits")
     cases = payload.get("cases")
     if isinstance(total, bool) or not isinstance(total, int) or total < 0:
-        raise BoligsidenFetchError("Boligsiden response has no valid totalCount")
+        raise BoligsidenFetchError("Boligsiden response has no valid totalHits")
     if not isinstance(cases, list) or not all(isinstance(case, Mapping) for case in cases):
         raise BoligsidenFetchError("Boligsiden response has no valid cases array")
     copied = [dict(case) for case in cases]
@@ -191,12 +187,12 @@ def _page(payload: Mapping[str, Any]) -> tuple[int, list[Mapping[str, Any]]]:
 
 
 def _case_id(record: Mapping[str, Any]) -> str:
-    value = record.get("id")
+    value = record.get("caseID")
     if isinstance(value, bool) or not isinstance(value, (str, int)):
-        raise BoligsidenFetchError("Boligsiden case has no valid id")
+        raise BoligsidenFetchError("Boligsiden case has no valid caseID")
     identifier = str(value).strip()
     if not identifier or len(identifier) > 128:
-        raise BoligsidenFetchError("Boligsiden case has no valid id")
+        raise BoligsidenFetchError("Boligsiden case has no valid caseID")
     return identifier
 
 
