@@ -30,7 +30,7 @@ def test_claim_next_pending_returns_a_lease_fenced_request_from_durable_postgres
 
 def test_record_completion_uses_job_id_fence_and_unexpired_database_lease():
     from house_consensus_manual_scoring.postgres_store import PostgresManualScoringStore
-    from house_consensus_manual_scoring.worker import ManualScoringRequest, SourceIdentity
+    from house_consensus_manual_scoring.worker import ManualScoringRequest, ScoringOutput, SourceIdentity
 
     now = datetime(2026, 8, 7, 12, tzinfo=timezone.utc)
     request = ManualScoringRequest(
@@ -43,15 +43,20 @@ def test_record_completion_uses_job_id_fence_and_unexpired_database_lease():
     connection = FakeConnection(rowcount=1)
 
     accepted = PostgresManualScoringStore("postgresql://example.test/db", connect=lambda _: connection).record_completion(
-        request, None, now
+        request, ScoringOutput(87.5, {"minutes": 31}, {"model": "scorer-v1"}), now
     )
 
     assert accepted is True
     sql, parameters = connection.executed[0]
+    assert 'WITH finalized_job AS' in sql
+    assert 'UPDATE listings AS listing' in sql
     assert '"LeaseFence" = %(lease_fence)s' in sql
     assert '"LeaseExpiresAt" > CURRENT_TIMESTAMP' in sql
     assert parameters["id"] == request.job_id
     assert parameters["lease_fence"] == 7
+    assert parameters["family_fit_score"] == 87.5
+    assert parameters["commute_json"] == '{"minutes":31}'
+    assert parameters["ai_evidence_json"] == '{"model":"scorer-v1"}'
 
 
 def test_record_failure_rejects_request_without_durable_lease_token():

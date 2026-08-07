@@ -45,7 +45,7 @@ public sealed class ManualScoringStorePostgresTests : IAsyncLifetime
 
         await store.EnqueueAsync(listing.Id, "manual:new", "https://example.test/new", now.AddMinutes(1));
 
-        Assert.False(await store.RecordCompletionAsync(oldLease!, now.AddMinutes(1)));
+        Assert.False(await store.RecordCompletionAsync(oldLease!, new ManualScoringCompletion(80, "{\"minutes\":30}", "{\"model\":\"scorer-v1\"}"), now.AddMinutes(1)));
         var replacement = await store.ClaimNextAsync(now.AddMinutes(1), TimeSpan.FromMinutes(1));
         Assert.NotNull(replacement); Assert.True(replacement!.LeaseFence > oldLease.LeaseFence); Assert.Equal("manual:new", replacement.SourceExternalId); Assert.Equal("https://example.test/new", replacement.SourceCanonicalUrl);
     }
@@ -62,6 +62,18 @@ public sealed class ManualScoringStorePostgresTests : IAsyncLifetime
     }
 
     [Fact(Skip = "requires TEST_DATABASE_URL", SkipUnless = nameof(HasTestDatabaseUrl))]
+    public async Task Completion_persists_projection_evidence_and_listing_lifecycle_under_lease_fence()
+    {
+        var now = DateTimeOffset.UtcNow; var listing = await AddManualListingAsync("completion-projection", now); var store = new PostgresManualScoringStore(_connectionString);
+        await store.EnqueueAsync(listing.Id, listing.ExternalId, listing.CanonicalUrl!, now); var lease = await store.ClaimNextAsync(now, TimeSpan.FromMinutes(1)); Assert.NotNull(lease);
+
+        Assert.True(await store.RecordCompletionAsync(lease!, new ManualScoringCompletion(87.5, "{\"minutes\":31}", "{\"model\":\"scorer-v1\"}"), now));
+
+        await using var connection = new NpgsqlConnection(_connectionString); await connection.OpenAsync(); await using var command = new NpgsqlCommand("SELECT j.\"CompletedAt\", j.\"LeaseExpiresAt\", l.\"FamilyFitScore\", l.\"CommuteJson\", l.\"AiEvidence\", l.\"ManualScoringCompletedAt\", l.\"ManualScoringError\" FROM manual_scoring_jobs j JOIN listings l ON l.\"Id\" = j.\"ListingId\" WHERE j.\"Id\" = @id", connection); command.Parameters.AddWithValue("id", lease.JobId); await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync()); Assert.False(reader.IsDBNull(0)); Assert.True(reader.IsDBNull(1)); Assert.Equal(87.5, reader.GetDouble(2)); Assert.Equal("{\"minutes\":31}", reader.GetString(3)); Assert.Equal("{\"model\":\"scorer-v1\"}", reader.GetString(4)); Assert.False(reader.IsDBNull(5)); Assert.True(reader.IsDBNull(6));
+    }
+
+    [Fact(Skip = "requires TEST_DATABASE_URL", SkipUnless = nameof(HasTestDatabaseUrl))]
     public async Task Reclaimed_job_rejects_completion_and_failure_from_stale_lease_holder()
     {
         var now = DateTimeOffset.UtcNow; var listing = await AddManualListingAsync("fenced", now); var store = new PostgresManualScoringStore(_connectionString);
@@ -72,7 +84,7 @@ public sealed class ManualScoringStorePostgresTests : IAsyncLifetime
             await connection.OpenAsync(); await using var expire = new NpgsqlCommand("UPDATE manual_scoring_jobs SET \"LeaseExpiresAt\" = CURRENT_TIMESTAMP - make_interval(secs => 1) WHERE \"Id\" = @id", connection); expire.Parameters.AddWithValue("id", first!.JobId); await expire.ExecuteNonQueryAsync();
         }
         var second = await store.ClaimNextAsync(now.AddMinutes(2), TimeSpan.FromMinutes(1));
-        Assert.NotNull(first); Assert.NotNull(second); Assert.True(second!.LeaseFence > first!.LeaseFence); Assert.False(await store.RecordCompletionAsync(first, now.AddMinutes(2))); Assert.False(await store.RecordFailureAsync(first, "retry", "stale", now.AddMinutes(2), now.AddMinutes(3), terminal: false)); Assert.True(await store.RecordCompletionAsync(second, now.AddMinutes(2))); Assert.Null(await store.ClaimNextAsync(now.AddMinutes(3), TimeSpan.FromMinutes(1)));
+        Assert.NotNull(first); Assert.NotNull(second); Assert.True(second!.LeaseFence > first!.LeaseFence); Assert.False(await store.RecordCompletionAsync(first, new ManualScoringCompletion(80, "{\"minutes\":30}", "{\"model\":\"scorer-v1\"}"), now.AddMinutes(2))); Assert.False(await store.RecordFailureAsync(first, "retry", "stale", now.AddMinutes(2), now.AddMinutes(3), terminal: false)); Assert.True(await store.RecordCompletionAsync(second, new ManualScoringCompletion(80, "{\"minutes\":30}", "{\"model\":\"scorer-v1\"}"), now.AddMinutes(2))); Assert.Null(await store.ClaimNextAsync(now.AddMinutes(3), TimeSpan.FromMinutes(1)));
     }
 
     [Fact(Skip = "requires TEST_DATABASE_URL", SkipUnless = nameof(HasTestDatabaseUrl))]

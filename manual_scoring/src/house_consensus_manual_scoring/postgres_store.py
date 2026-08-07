@@ -8,6 +8,8 @@ another worker's lease.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import json
+import math
 from typing import Any, Callable, Protocol
 from uuid import UUID
 
@@ -93,8 +95,57 @@ RETURNING job."Id", job."ListingId", job."SourceExternalId", job."SourceCanonica
     def record_completion(
         self, request: ManualScoringRequest, output: ScoringOutput | None, completed_at: datetime
     ) -> bool:
-        del output  # Score persistence belongs to the scoring pipeline/projection boundary.
-        return self._finalize(request, completed_at, error_code=None, error_message=None, retry_at=None, terminal=False)
+        if output is None:
+            raise ValueError("a scoring output is required to complete a manual-scoring job")
+        score, commute_json, ai_evidence_json = _completion_projection(output)
+        return self._finalize_completion(request, completed_at, score, commute_json, ai_evidence_json)
+
+    def _finalize_completion(
+        self,
+        request: ManualScoringRequest,
+        completed_at: datetime,
+        family_fit_score: float,
+        commute_json: str,
+        ai_evidence_json: str,
+    ) -> bool:
+        if request.job_id is None or request.lease_fence is None:
+            raise ValueError("a durable lease token is required to finalize a manual-scoring job")
+        with self._connect(self._database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+WITH finalized_job AS (
+    UPDATE manual_scoring_jobs
+    SET "CompletedAt" = %(completed_at)s,
+        "NextAttemptAt" = NULL,
+        "LeaseExpiresAt" = NULL,
+        "LastErrorCode" = NULL,
+        "LastErrorMessage" = NULL
+    WHERE "Id" = %(id)s
+      AND "LeaseFence" = %(lease_fence)s
+      AND "LeaseExpiresAt" > CURRENT_TIMESTAMP
+      AND "CompletedAt" IS NULL
+      AND "TerminalFailureAt" IS NULL
+    RETURNING "ListingId"
+)
+UPDATE listings AS listing
+SET "FamilyFitScore" = %(family_fit_score)s,
+    "CommuteJson" = %(commute_json)s,
+    "AiEvidence" = %(ai_evidence_json)s,
+    "ManualScoringCompletedAt" = %(completed_at)s,
+    "ManualScoringError" = NULL
+FROM finalized_job
+WHERE listing."Id" = finalized_job."ListingId";
+""",
+                {
+                    "completed_at": completed_at,
+                    "id": request.job_id,
+                    "lease_fence": request.lease_fence,
+                    "family_fit_score": family_fit_score,
+                    "commute_json": commute_json,
+                    "ai_evidence_json": ai_evidence_json,
+                },
+            )
+            return cursor.rowcount == 1
 
     def record_failure(self, request: ManualScoringRequest, failure: ScoringFailure, attempted_at: datetime) -> bool:
         if failure.terminal == (failure.retry_at is not None):
@@ -156,3 +207,22 @@ def _psycopg_connect(database_url: str) -> _Connection:
     except ImportError as error:  # pragma: no cover - exercised only in misconfigured deployments
         raise RuntimeError("install house-consensus-manual-scoring[postgres] to use PostgreSQL") from error
     return psycopg.connect(database_url)
+
+
+def _completion_projection(output: ScoringOutput) -> tuple[float, str, str]:
+    score = output.family_fit_score
+    if not isinstance(score, (int, float)) or isinstance(score, bool) or not math.isfinite(score) or not 0 <= score <= 100:
+        raise ValueError("family_fit_score must be a finite number from 0 through 100")
+    return float(score), _evidence_json("commute_evidence", output.commute_evidence), _evidence_json("ai_evidence", output.ai_evidence)
+
+
+def _evidence_json(name: str, evidence: object) -> str:
+    if not isinstance(evidence, dict) or not evidence:
+        raise ValueError(f"{name} must be a non-empty JSON object")
+    try:
+        encoded = json.dumps(evidence, separators=(",", ":"), sort_keys=True, allow_nan=False)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} must be JSON serializable") from error
+    if len(encoded) > 100_000:
+        raise ValueError(f"{name} exceeds the 100000-byte persistence limit")
+    return encoded

@@ -22,7 +22,14 @@ def durable_manual_queue_schema() -> str:
         with connection.cursor() as cursor:
             cursor.execute("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;")
             cursor.execute('''
-CREATE TABLE listings ("Id" uuid PRIMARY KEY);
+CREATE TABLE listings (
+ "Id" uuid PRIMARY KEY,
+ "FamilyFitScore" double precision NULL,
+ "CommuteJson" text NULL,
+ "AiEvidence" text NULL,
+ "ManualScoringCompletedAt" timestamptz NULL,
+ "ManualScoringError" text NULL
+);
 CREATE TABLE manual_scoring_jobs (
  "Id" uuid PRIMARY KEY, "ListingId" uuid NOT NULL UNIQUE REFERENCES listings("Id") ON DELETE RESTRICT,
  "SourceExternalId" text NOT NULL, "SourceCanonicalUrl" character varying(2048) NOT NULL,
@@ -46,6 +53,11 @@ def database_url() -> str:
 def store(*, lease_duration: timedelta = timedelta(minutes=5)):
     from house_consensus_manual_scoring.postgres_store import PostgresManualScoringStore
     return PostgresManualScoringStore(database_url(), lease_duration=lease_duration)
+
+
+def completion_output():
+    from house_consensus_manual_scoring.worker import ScoringOutput
+    return ScoringOutput(80.0, {"minutes": 30}, {"model": "scorer-v1"})
 
 
 def add_listing() -> UUID:
@@ -105,9 +117,43 @@ def test_database_time_expiration_reclaims_lease_and_fences_stale_finalizers() -
     second = store().claim_next_pending(datetime.now(timezone.utc))
     assert second is not None
     assert second.lease_fence > first.lease_fence
-    assert store().record_completion(first, None, datetime.now(timezone.utc)) is False
+    assert store().record_completion(first, completion_output(), datetime.now(timezone.utc)) is False
+    with psycopg.connect(database_url()) as connection, connection.cursor() as cursor:
+        cursor.execute('SELECT "FamilyFitScore", "ManualScoringCompletedAt" FROM listings WHERE "Id" = %s', (listing_id,))
+        assert cursor.fetchone() == (None, None)
     assert store().record_failure(first, ScoringFailure("retry", "stale", datetime.now(timezone.utc) + timedelta(minutes=1)), datetime.now(timezone.utc)) is False
-    assert store().record_completion(second, None, datetime.now(timezone.utc)) is True
+    assert store().record_completion(second, completion_output(), datetime.now(timezone.utc)) is True
+
+
+def test_completion_persists_output_and_listing_lifecycle_atomically_under_lease_fence() -> None:
+    from house_consensus_manual_scoring.worker import ScoringOutput
+
+    listing_id = add_listing()
+    enqueue(listing_id, "manual:completed", datetime.now(timezone.utc))
+    lease = store().claim_next_pending(datetime.now(timezone.utc))
+    assert lease is not None
+
+    assert store().record_completion(
+        lease,
+        ScoringOutput(
+            family_fit_score=87.5,
+            commute_evidence={"minutes": 31, "mode": "car"},
+            ai_evidence={"model": "scorer-v1", "rationale": "good fit"},
+        ),
+        datetime.now(timezone.utc),
+    ) is True
+
+    with psycopg.connect(database_url()) as connection, connection.cursor() as cursor:
+        cursor.execute('''SELECT job."CompletedAt", job."LeaseExpiresAt", listing."FamilyFitScore",
+ listing."CommuteJson", listing."AiEvidence", listing."ManualScoringCompletedAt", listing."ManualScoringError"
+ FROM manual_scoring_jobs AS job JOIN listings AS listing ON listing."Id" = job."ListingId"
+ WHERE job."Id" = %s''', (lease.job_id,))
+        completed_at, lease_expires_at, score, commute_json, ai_evidence, listing_completed_at, listing_error = cursor.fetchone()
+    assert completed_at is not None and lease_expires_at is None
+    assert score == 87.5
+    assert commute_json == '{"minutes":31,"mode":"car"}'
+    assert ai_evidence == '{"model":"scorer-v1","rationale":"good fit"}'
+    assert listing_completed_at is not None and listing_error is None
 
 
 def test_reenqueue_replaces_identity_and_fences_active_holder() -> None:
@@ -119,7 +165,7 @@ def test_reenqueue_replaces_identity_and_fences_active_holder() -> None:
         cursor.execute('''UPDATE manual_scoring_jobs SET "SourceExternalId" = %s, "SourceCanonicalUrl" = %s,
 "NextAttemptAt" = CURRENT_TIMESTAMP, "LeaseFence" = CASE WHEN "LeaseExpiresAt" > CURRENT_TIMESTAMP THEN "LeaseFence" + 1 ELSE "LeaseFence" END,
 "LeaseExpiresAt" = NULL WHERE "ListingId" = %s''', ("manual:new", "https://example.test/manual:new", listing_id))
-    assert store().record_completion(old, None, datetime.now(timezone.utc)) is False
+    assert store().record_completion(old, completion_output(), datetime.now(timezone.utc)) is False
     replacement = store().claim_next_pending(datetime.now(timezone.utc))
     assert replacement is not None
     assert replacement.lease_fence > old.lease_fence

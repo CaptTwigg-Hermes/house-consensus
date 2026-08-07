@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
 
@@ -11,6 +12,8 @@ public sealed record ManualScoringLease(
     DateTimeOffset RequestedAt,
     long LeaseFence,
     DateTimeOffset LeaseExpiresAt);
+
+public sealed record ManualScoringCompletion(double FamilyFitScore, string CommuteJson, string AiEvidenceJson);
 
 /// <summary>PostgreSQL-backed, lease-fenced persistence boundary for manual scoring workers.</summary>
 public sealed class PostgresManualScoringStore(string connectionString)
@@ -82,14 +85,67 @@ RETURNING job."Id", job."ListingId", job."SourceExternalId", job."SourceCanonica
         return new ManualScoringLease(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetString(3), reader.GetFieldValue<DateTimeOffset>(4), reader.GetInt64(5), reader.GetFieldValue<DateTimeOffset>(6));
     }
 
-    public Task<bool> RecordCompletionAsync(ManualScoringLease lease, DateTimeOffset completedAt, CancellationToken ct = default) =>
-        FinalizeAsync(lease, completedAt, null, null, null, false, ct);
+    public async Task<bool> RecordCompletionAsync(ManualScoringLease lease, ManualScoringCompletion completion, DateTimeOffset completedAt, CancellationToken ct = default)
+    {
+        ValidateCompletion(completion);
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(ct);
+        await using var command = new NpgsqlCommand("""
+WITH finalized_job AS (
+    UPDATE manual_scoring_jobs
+    SET "CompletedAt" = @completedAt,
+        "NextAttemptAt" = NULL,
+        "LeaseExpiresAt" = NULL,
+        "LastErrorCode" = NULL,
+        "LastErrorMessage" = NULL
+    WHERE "Id" = @id
+      AND "LeaseFence" = @leaseFence
+      AND "LeaseExpiresAt" > CURRENT_TIMESTAMP
+      AND "CompletedAt" IS NULL
+      AND "TerminalFailureAt" IS NULL
+    RETURNING "ListingId"
+)
+UPDATE listings AS listing
+SET "FamilyFitScore" = @familyFitScore,
+    "CommuteJson" = @commuteJson,
+    "AiEvidence" = @aiEvidenceJson,
+    "ManualScoringCompletedAt" = @completedAt,
+    "ManualScoringError" = NULL
+FROM finalized_job
+WHERE listing."Id" = finalized_job."ListingId";
+""", connection);
+        command.Parameters.AddWithValue("completedAt", completedAt); command.Parameters.AddWithValue("id", lease.JobId); command.Parameters.AddWithValue("leaseFence", lease.LeaseFence);
+        command.Parameters.AddWithValue("familyFitScore", completion.FamilyFitScore); command.Parameters.AddWithValue("commuteJson", completion.CommuteJson); command.Parameters.AddWithValue("aiEvidenceJson", completion.AiEvidenceJson);
+        return await command.ExecuteNonQueryAsync(ct) == 1;
+    }
 
     public Task<bool> RecordFailureAsync(ManualScoringLease lease, string errorCode, string errorMessage, DateTimeOffset attemptedAt, DateTimeOffset? retryAt, bool terminal, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(errorCode); ArgumentException.ThrowIfNullOrWhiteSpace(errorMessage);
         if (terminal != !retryAt.HasValue) throw new ArgumentException("Terminal failures must not have a retry time, and retryable failures must have one.", nameof(retryAt));
         return FinalizeAsync(lease, attemptedAt, errorCode, errorMessage, retryAt, terminal, ct);
+    }
+
+    private static void ValidateCompletion(ManualScoringCompletion completion)
+    {
+        ArgumentNullException.ThrowIfNull(completion);
+        if (!double.IsFinite(completion.FamilyFitScore) || completion.FamilyFitScore is < 0 or > 100) throw new ArgumentOutOfRangeException(nameof(completion), "Family fit score must be finite and from 0 through 100.");
+        ValidateEvidenceJson(completion.CommuteJson, nameof(completion.CommuteJson));
+        ValidateEvidenceJson(completion.AiEvidenceJson, nameof(completion.AiEvidenceJson));
+    }
+
+    private static void ValidateEvidenceJson(string json, string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(json) || json.Length > 100_000) throw new ArgumentException("Evidence must be a bounded JSON object.", parameterName);
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Object) throw new ArgumentException("Evidence must be a JSON object.", parameterName);
+        }
+        catch (JsonException error)
+        {
+            throw new ArgumentException("Evidence must be valid JSON.", parameterName, error);
+        }
     }
 
     private async Task<bool> FinalizeAsync(ManualScoringLease lease, DateTimeOffset at, string? errorCode, string? errorMessage, DateTimeOffset? retryAt, bool terminal, CancellationToken ct)

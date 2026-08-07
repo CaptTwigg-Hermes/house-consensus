@@ -50,10 +50,13 @@ class Pipeline:
     def score(self, listing: dict[str, Any]) -> ScoringOutput: ...
 ```
 
-It must persist any score/projection side effects idempotently before returning
-`ScoringOutput`: a finite `family_fit_score` in `[0, 100]`, and nonempty dicts
-for `commute_evidence` and `ai_evidence`. The durable store only owns job
-completion/failure state; it does not overwrite scoring projection data.
+It returns `ScoringOutput`: a finite `family_fit_score` in `[0, 100]`, and
+nonempty dicts for `commute_evidence` and `ai_evidence`. The durable adapter
+serializes bounded evidence JSON and, in the **same lease-fenced PostgreSQL
+statement**, writes the listing's `FamilyFitScore`, `CommuteJson`, `AiEvidence`,
+`ManualScoringCompletedAt`, and queue completion. A stale lease updates neither
+the queue nor visible listing projection; pipelines must not independently
+persist those fields before returning.
 
 ## Lease and fencing guarantees
 
