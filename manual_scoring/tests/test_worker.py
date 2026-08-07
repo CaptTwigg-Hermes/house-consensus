@@ -68,7 +68,7 @@ def test_select_next_pending_prefers_oldest_retryable_uncompleted_request():
     assert select_next_pending([newer_eligible, completed, delayed_retry, oldest_eligible], now) == oldest_eligible
 
 
-def test_worker_records_retryable_error_when_source_identity_is_ambiguous():
+def test_worker_records_terminal_failure_when_source_identity_is_ambiguous():
     from house_consensus_manual_scoring.worker import AmbiguousSourceIdentity
 
     now = datetime(2026, 8, 7, 12, tzinfo=timezone.utc)
@@ -85,8 +85,96 @@ def test_worker_records_retryable_error_when_source_identity_is_ambiguous():
     assert store.completed == []
     assert store.failures[0][0] == request
     assert store.failures[0][1].code == "source_identity_ambiguous"
-    assert store.failures[0][1].retry_at == now
+    assert store.failures[0][1].retry_at is None
     assert store.failures[0][2] == now
+
+
+def test_worker_records_retryable_source_resolution_failure_for_resolver_outage():
+    now = datetime(2026, 8, 7, 12, tzinfo=timezone.utc)
+    request = ManualScoringRequest("listing-1", SourceIdentity("manual:1", "https://example.test/1"), now)
+    store = Store(request)
+
+    class FixedRetryPolicy:
+        def retry_at(self, attempted_at, failure_code):
+            assert failure_code == "source_resolution_error"
+            return attempted_at.replace(minute=5)
+
+    class OutageSource:
+        def resolve(self, identity):
+            raise ConnectionError("source service unavailable")
+
+    result = ManualScoringWorker(store, OutageSource(), Pipeline(), FixedRetryPolicy()).run_once(now)
+
+    assert result.status == "failed"
+    assert store.completed == []
+    assert store.failures[0][1].code == "source_resolution_error"
+    assert store.failures[0][1].message == "source service unavailable"
+    assert store.failures[0][1].retry_at == now.replace(minute=5)
+
+
+def test_worker_rejects_non_finite_score_output():
+    now = datetime(2026, 8, 7, 12, tzinfo=timezone.utc)
+    request = ManualScoringRequest("listing-1", SourceIdentity("manual:1", "https://example.test/1"), now)
+    store = Store(request)
+
+    class NonFinitePipeline:
+        def score(self, listing):
+            return ScoringOutput(float("nan"), {"minutes": 24}, {"summary": "separate entrance"})
+
+    result = ManualScoringWorker(store, Source(), NonFinitePipeline()).run_once(now)
+
+    assert result.status == "failed"
+    assert store.completed == []
+    assert store.failures[0][1].code == "incomplete_scoring_output"
+    assert "family_fit_score" in store.failures[0][1].message
+
+
+def test_worker_rejects_out_of_range_score_output():
+    now = datetime(2026, 8, 7, 12, tzinfo=timezone.utc)
+    request = ManualScoringRequest("listing-1", SourceIdentity("manual:1", "https://example.test/1"), now)
+    store = Store(request)
+
+    class OutOfRangePipeline:
+        def score(self, listing):
+            return ScoringOutput(101, {"minutes": 24}, {"summary": "separate entrance"})
+
+    result = ManualScoringWorker(store, Source(), OutOfRangePipeline()).run_once(now)
+
+    assert result.status == "failed"
+    assert store.completed == []
+    assert "family_fit_score" in store.failures[0][1].message
+
+
+def test_worker_rejects_blank_evidence_output():
+    now = datetime(2026, 8, 7, 12, tzinfo=timezone.utc)
+    request = ManualScoringRequest("listing-1", SourceIdentity("manual:1", "https://example.test/1"), now)
+    store = Store(request)
+
+    class BlankEvidencePipeline:
+        def score(self, listing):
+            return ScoringOutput(88.5, {}, {"summary": "separate entrance"})
+
+    result = ManualScoringWorker(store, Source(), BlankEvidencePipeline()).run_once(now)
+
+    assert result.status == "failed"
+    assert store.completed == []
+    assert "commute_evidence" in store.failures[0][1].message
+
+
+def test_worker_rejects_non_dict_evidence_output():
+    now = datetime(2026, 8, 7, 12, tzinfo=timezone.utc)
+    request = ManualScoringRequest("listing-1", SourceIdentity("manual:1", "https://example.test/1"), now)
+    store = Store(request)
+
+    class NonDictEvidencePipeline:
+        def score(self, listing):
+            return ScoringOutput(88.5, "24 minutes", {"summary": "separate entrance"})
+
+    result = ManualScoringWorker(store, Source(), NonDictEvidencePipeline()).run_once(now)
+
+    assert result.status == "failed"
+    assert store.completed == []
+    assert "commute_evidence" in store.failures[0][1].message
 
 
 def test_worker_does_not_complete_when_required_score_or_evidence_is_missing():
@@ -105,22 +193,36 @@ def test_worker_does_not_complete_when_required_score_or_evidence_is_missing():
     assert store.failures[0][1].code == "incomplete_scoring_output"
     assert "family_fit_score" in store.failures[0][1].message
     assert "ai_evidence" in store.failures[0][1].message
-    assert store.failures[0][1].retry_at == now
+    assert store.failures[0][1].retry_at > now
 
 
-def test_worker_records_retryable_pipeline_error_without_completing_request():
+def test_worker_defers_pipeline_failure_so_later_queue_item_remains_selectable():
+    from house_consensus_manual_scoring.worker import select_next_pending
+
     now = datetime(2026, 8, 7, 12, tzinfo=timezone.utc)
     request = ManualScoringRequest("listing-1", SourceIdentity("manual:1", "https://example.test/1"), now)
+    later_request = ManualScoringRequest(
+        "listing-2", SourceIdentity("manual:2", "https://example.test/2"), now.replace(minute=1)
+    )
     store = Store(request)
+
+    class FixedRetryPolicy:
+        def retry_at(self, attempted_at, failure_code):
+            assert failure_code == "pipeline_error"
+            return attempted_at.replace(minute=5)
 
     class BrokenPipeline:
         def score(self, listing):
             raise RuntimeError("executor unavailable")
 
-    result = ManualScoringWorker(store, Source(), BrokenPipeline()).run_once(now)
+    result = ManualScoringWorker(store, Source(), BrokenPipeline(), FixedRetryPolicy()).run_once(now)
 
     assert result.status == "failed"
     assert store.completed == []
     assert store.failures[0][1].code == "pipeline_error"
     assert store.failures[0][1].message == "executor unavailable"
-    assert store.failures[0][1].retry_at == now
+    assert store.failures[0][1].retry_at == now.replace(minute=5)
+    failed_request = ManualScoringRequest(
+        request.listing_id, request.source_identity, request.requested_at, retry_at=store.failures[0][1].retry_at
+    )
+    assert select_next_pending([failed_request, later_request], now) == later_request

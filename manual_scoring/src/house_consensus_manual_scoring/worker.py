@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+import math
+from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 
@@ -71,11 +72,30 @@ class ScoringPipeline(Protocol):
     def score(self, listing: dict[str, Any]) -> ScoringOutput: ...
 
 
+class RetryPolicy(Protocol):
+    def retry_at(self, attempted_at: datetime, failure_code: str) -> datetime: ...
+
+
+@dataclass(frozen=True)
+class FixedRetryPolicy:
+    delay: timedelta = timedelta(minutes=5)
+
+    def retry_at(self, attempted_at: datetime, failure_code: str) -> datetime:
+        return attempted_at + self.delay
+
+
 class ManualScoringWorker:
-    def __init__(self, store: ManualScoringStore, source: ListingSource, pipeline: ScoringPipeline):
+    def __init__(
+        self,
+        store: ManualScoringStore,
+        source: ListingSource,
+        pipeline: ScoringPipeline,
+        retry_policy: RetryPolicy | None = None,
+    ):
         self._store = store
         self._source = source
         self._pipeline = pipeline
+        self._retry_policy = retry_policy or FixedRetryPolicy()
 
     def run_once(self, now: datetime) -> WorkerResult:
         request = self._store.claim_next_pending(now)
@@ -86,7 +106,18 @@ class ManualScoringWorker:
         except AmbiguousSourceIdentity as error:
             self._store.record_failure(
                 request,
-                ScoringFailure("source_identity_ambiguous", str(error), retry_at=now),
+                ScoringFailure("source_identity_ambiguous", str(error), retry_at=None),
+                now,
+            )
+            return WorkerResult(status="failed")
+        except Exception as error:
+            self._store.record_failure(
+                request,
+                ScoringFailure(
+                    "source_resolution_error",
+                    str(error),
+                    retry_at=self._retry_policy.retry_at(now, "source_resolution_error"),
+                ),
                 now,
             )
             return WorkerResult(status="failed")
@@ -95,23 +126,24 @@ class ManualScoringWorker:
         except Exception as error:
             self._store.record_failure(
                 request,
-                ScoringFailure("pipeline_error", str(error), retry_at=now),
+                ScoringFailure("pipeline_error", str(error), retry_at=self._retry_policy.retry_at(now, "pipeline_error")),
                 now,
             )
             return WorkerResult(status="failed")
-        missing = [
-            name
-            for name, value in (
-                ("family_fit_score", output.family_fit_score),
-                ("commute_evidence", output.commute_evidence),
-                ("ai_evidence", output.ai_evidence),
-            )
-            if value is None
-        ]
+        missing = []
+        score = output.family_fit_score
+        if not isinstance(score, (int, float)) or isinstance(score, bool) or not math.isfinite(score) or not 0 <= score <= 100:
+            missing.append("family_fit_score")
+        for name, value in (
+            ("commute_evidence", output.commute_evidence),
+            ("ai_evidence", output.ai_evidence),
+        ):
+            if not isinstance(value, dict) or not value:
+                missing.append(name)
         if missing:
             self._store.record_failure(
                 request,
-                ScoringFailure("incomplete_scoring_output", ", ".join(missing), retry_at=now),
+                ScoringFailure("incomplete_scoring_output", ", ".join(missing), retry_at=self._retry_policy.retry_at(now, "incomplete_scoring_output")),
                 now,
             )
             return WorkerResult(status="failed")
