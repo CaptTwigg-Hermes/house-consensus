@@ -7,6 +7,7 @@ dependencies = ["psycopg[binary]>=3.2,<4"]
 
 [project.scripts]
 house-consensus-ingest = "house_consensus_ingestion.cli:main"
+house-consensus-shadow-parity = "house_consensus_ingestion.shadow_parity:main"
 
 [project.optional-dependencies]
 test = ["pytest>=8,<10"]

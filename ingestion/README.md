@@ -44,3 +44,14 @@ The runnable native path is dry-run-first. It maps Boligsiden caseID, address, a
     uv run --project ingestion house-consensus-ingest --boligsiden --dry-run --municipality 101 --address-type villa --price-min 1000000 --price-max 3000000
 
 Use --execute instead of --dry-run only with an explicit DATABASE_URL. Execution fetches the complete sweep, creates a running native run, stores the raw source envelope plus validated projection_records, appends its fetch outcome, makes the run terminal succeeded, and only then projects listings. A persistence error after the run starts records a failed fetch outcome and terminal failed state; projection is deliberately not scheduled by cron.
+
+
+## Read-only legacy shadow parity
+
+`house-consensus-shadow-parity` compares the latest completed legacy SQLite snapshot for one scope with the corresponding native projection namespace. It never invokes the exporter or native writer: its PostgreSQL transaction is explicitly `READ ONLY` and it only selects `listing_ingestion_projections` joined to `listings`.
+
+Run it only against a disposable native test database, supplying every location explicitly so it cannot inherit a production write target:
+
+    house-consensus-shadow-parity --sqlite /workspace/houseshopping/state/house.db --database-url "$TEST_DATABASE_URL" --source-system house-consensus-ingestion --source-scope tofamiliehus
+
+It fails closed on source-count or identity differences, mismatched native `ExternalId`, duplicate source identities, and differences in the projection-relevant mapped fields: address, city, price, and source URL. A passing result is one JSON line with the source and native counts; it writes no rows.
