@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "House Consensus Quick Add",
+  "version": "1.0.0",
+  "description": "Adds a button on boligsiden.dk listing pages to send the listing to House Consensus.",
+  "permissions": ["notifications", "storage", "scripting", "webNavigation", "activeTab"],
+  "host_permissions": [
+    "https://house-consensus.jahn-software.com/*",
+    "https://*.boligsiden.dk/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.boligsiden.dk/adresse/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "House Consensus Quick Add"
+  }
+}
