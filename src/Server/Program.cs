@@ -20,8 +20,25 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using System.Threading.RateLimiting;
+using Serilog;
 
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .CreateBootstrapLogger();
+
+try
+{
 var builder = WebApplication.CreateBuilder(args);
+builder.Host.UseSerilog((context, services, logger) =>
+{
+    logger
+        .ReadFrom.Configuration(context.Configuration)
+        .ReadFrom.Services(services)
+        .Enrich.FromLogContext()
+        .Enrich.WithProperty("Application", "HouseConsensus");
+    var seqUrl = context.Configuration["Seq:Url"];
+    if (!string.IsNullOrWhiteSpace(seqUrl)) logger.WriteTo.Seq(seqUrl);
+});
 var debugAutoLogin = builder.Configuration.GetValue("Debug:AutoLogin", false);
 var e2eTestAuth = builder.Configuration.GetValue("E2E:TestAuth", false);
 var e2eSeedData = builder.Configuration.GetValue("E2E:SeedData", false);
@@ -50,6 +67,7 @@ else
 builder.Services.AddScoped<AiLearningService>();
 var app = builder.Build();
 app.UseForwardedHeaders();
+app.UseSerilogRequestLogging();
 if (app.Environment.IsProduction()) { app.UseHsts(); if (!cloudflareAccess.Enabled) app.UseHttpsRedirection(); }
 app.UseExceptionHandler(e => e.Run(async c => { c.Response.StatusCode = 500; await c.Response.WriteAsJsonAsync(new { error = "An unexpected error occurred." }); }));
 app.UseBlazorFrameworkFiles();
@@ -282,6 +300,16 @@ app.Map("/api/{**path}", () => Results.NotFound());
 app.MapFallbackToFile("index.html");
 await Bootstrap(app);
 app.Run();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "House Consensus terminated unexpectedly");
+    throw;
+}
+finally
+{
+    Log.CloseAndFlush();
+}
 
 static async Task Bootstrap(WebApplication app)
 {

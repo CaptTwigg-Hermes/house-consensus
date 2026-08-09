@@ -9,6 +9,7 @@ services:
       ConnectionStrings__Database: ${DATABASE_CONNECTION_STRING:?DATABASE_CONNECTION_STRING must be set}
       INITIAL_OWNER_EMAIL: ${INITIAL_OWNER_EMAIL:?INITIAL_OWNER_EMAIL must be set}
       PublicOrigin: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN must be set}
+      Seq__Url: http://192.168.50.2:5341
       CloudflareAccess__Enabled: "true"
       CloudflareAccess__TeamDomain: ${CLOUDFLARE_ACCESS_TEAM_DOMAIN:?CLOUDFLARE_ACCESS_TEAM_DOMAIN must be set}
       CloudflareAccess__Audience: ${CLOUDFLARE_ACCESS_AUDIENCE:?CLOUDFLARE_ACCESS_AUDIENCE must be set}
