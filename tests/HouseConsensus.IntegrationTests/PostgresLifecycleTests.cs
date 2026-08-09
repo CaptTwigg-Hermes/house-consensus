@@ -2,11 +2,13 @@ using Xunit;
 using HouseConsensus.Server.Auth;
 using HouseConsensus.Server.Data;
 using HouseConsensus.Server.Learning;
+using HouseConsensus.Server.Diagnostics;
 using HouseConsensus.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -740,6 +742,73 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Client_diagnostic_endpoint_enforces_auth_csrf_limits_validation_and_rate_limiting()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var validationMember = new Member { Email = "diagnostics-validation@example.test" };
+        var rateMember = new Member { Email = "diagnostics-rate@example.test" };
+        await using (var setup = Db())
+        {
+            setup.Members.AddRange(validationMember, rateMember);
+            await setup.SaveChangesAsync(ct);
+        }
+
+        var logs = new RecordingClientDiagnosticLogger();
+        await using var factory = new WebApplicationFactory<CloudflareAccessOptions>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Development");
+            builder.UseSetting("Debug:AutoLogin", "true");
+            builder.UseSetting("E2E:TestAuth", "true");
+            builder.UseSetting("E2E:SeedData", "true");
+            builder.UseSetting("ConnectionStrings:Database", _connectionString);
+            builder.UseSetting("Database:AutoMigrate", "false");
+            builder.UseSetting("INITIAL_OWNER_EMAIL", "");
+            builder.UseSetting("Diagnostics:ClientErrorPermitLimit", "2");
+            builder.ConfigureServices(services => services.AddSingleton<ILogger<ClientDiagnosticSink>>(logs));
+        });
+        var valid = new ClientErrorReport("render", "InvalidOperationException", new string('A', 64));
+
+        using var anonymous = factory.CreateClient();
+        anonymous.DefaultRequestHeaders.Add("X-House-Consensus-CSRF", "1");
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsJsonAsync("/api/diagnostics/client-errors", valid, ct)).StatusCode);
+
+        using var missingCsrf = factory.CreateClient();
+        missingCsrf.DefaultRequestHeaders.Add(DebugAutoLoginMiddleware.E2EEmailHeader, validationMember.Email);
+        Assert.Equal(HttpStatusCode.BadRequest, (await missingCsrf.PostAsJsonAsync("/api/diagnostics/client-errors", valid, ct)).StatusCode);
+
+        using var validation = factory.CreateClient();
+        validation.DefaultRequestHeaders.Add("X-House-Consensus-CSRF", "1");
+        validation.DefaultRequestHeaders.Add(DebugAutoLoginMiddleware.E2EEmailHeader, validationMember.Email);
+        var malformed = await validation.PostAsJsonAsync(
+            "/api/diagnostics/client-errors",
+            new ClientErrorReport("untrusted", "PrivateException", "not-a-fingerprint"),
+            ct);
+        var oversizedJson = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            area = "render",
+            exceptionType = "InvalidOperationException",
+            fingerprint = new string('A', 64),
+            padding = new string('x', 5_000),
+        });
+        var oversized = await validation.PostAsync(
+            "/api/diagnostics/client-errors",
+            new StringContent(oversizedJson, System.Text.Encoding.UTF8, "application/json"),
+            ct);
+        var accepted = await validation.PostAsJsonAsync("/api/diagnostics/client-errors", valid, ct);
+        Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, oversized.StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, accepted.StatusCode);
+
+        using var limited = factory.CreateClient();
+        limited.DefaultRequestHeaders.Add("X-House-Consensus-CSRF", "1");
+        limited.DefaultRequestHeaders.Add(DebugAutoLoginMiddleware.E2EEmailHeader, rateMember.Email);
+        Assert.Equal(HttpStatusCode.Accepted, (await limited.PostAsJsonAsync("/api/diagnostics/client-errors", valid, ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, (await limited.PostAsJsonAsync("/api/diagnostics/client-errors", valid, ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await limited.PostAsJsonAsync("/api/diagnostics/client-errors", valid, ct)).StatusCode);
+        Assert.Equal(3, logs.Messages.Count);
+    }
+
+    [Fact]
     public async Task Profile_endpoint_updates_only_the_authenticated_member_and_rejects_invalid_payloads()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -1054,6 +1123,15 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
     {
         public override DateTimeOffset GetUtcNow() => now;
         public void Advance(TimeSpan amount) => now += amount;
+    }
+
+    private sealed class RecordingClientDiagnosticLogger : ILogger<ClientDiagnosticSink>
+    {
+        public List<string> Messages { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
     }
 }
 

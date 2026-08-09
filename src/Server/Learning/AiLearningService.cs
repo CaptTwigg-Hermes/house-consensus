@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using HouseConsensus.Server.Data;
 using HouseConsensus.Shared;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HouseConsensus.Server.Learning;
 
@@ -20,7 +21,10 @@ public sealed class E2EAiRuleGenerator : IAiRuleGenerator
             "{\"combinator\":\"all\",\"conditions\":[{\"field\":\"condition\",\"operator\":\"contains\",\"value\":\"renovation\"}]}"));
 }
 
-public sealed class OllamaAiRuleGenerator(HttpClient http, IConfiguration config) : IAiRuleGenerator
+public sealed class OllamaAiRuleGenerator(
+    HttpClient http,
+    IConfiguration config,
+    ILogger<OllamaAiRuleGenerator>? logger = null) : IAiRuleGenerator
 {
     public async Task<GeneratedAiRule> GenerateAsync(IReadOnlyList<VoteNoteInput> notes, CancellationToken ct)
     {
@@ -45,6 +49,13 @@ VOTE NOTES:
         var apiKey = config["AiLearning:ApiKey"];
         if (!string.IsNullOrWhiteSpace(apiKey)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
         using var response = await http.SendAsync(request, ct);
+        if (!response.IsSuccessStatusCode)
+            logger?.LogWarning(
+                new EventId(DiagnosticEventIds.AiGenerationFailed, nameof(DiagnosticEventIds.AiGenerationFailed)),
+                "AI rule generation failed for model {Model} with status {StatusCode}; note count {NoteCount}",
+                model,
+                (int)response.StatusCode,
+                notes.Count);
         response.EnsureSuccessStatusCode();
         using var envelope = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
         var generated = envelope.RootElement.GetProperty("response").GetString() ?? throw new InvalidOperationException("AI returned no proposal.");
@@ -54,12 +65,22 @@ VOTE NOTES:
         if (ruleElement.ValueKind != JsonValueKind.Object) throw new DomainException(summary);
         var ruleJson = ruleElement.GetRawText();
         AiLearningRules.Validate(ruleJson);
+        logger?.LogInformation(
+            new EventId(DiagnosticEventIds.AiGenerationCompleted, nameof(DiagnosticEventIds.AiGenerationCompleted)),
+            "AI rule generation completed for model {Model}; note count {NoteCount}",
+            model,
+            notes.Count);
         return new GeneratedAiRule(summary, ruleJson);
     }
 }
 
-public sealed class AiLearningService(AppDbContext db, IAiRuleGenerator generator, TimeProvider clock)
+public sealed class AiLearningService(
+    AppDbContext db,
+    IAiRuleGenerator generator,
+    TimeProvider clock,
+    ILogger<AiLearningService>? logger = null)
 {
+    private readonly ILogger<AiLearningService> _logger = logger ?? NullLogger<AiLearningService>.Instance;
     public async Task<AiRuleProposal> CreateProposalAsync(Guid ownerId, CancellationToken ct)
     {
         var notes = await db.Votes.AsNoTracking().Where(x => x.Note != null && x.Choice != VoteChoice.NotVoted)
@@ -87,7 +108,18 @@ public sealed class AiLearningService(AppDbContext db, IAiRuleGenerator generato
         var version = (await db.AiRuleProposals.MaxAsync(x => (int?)x.Version, ct) ?? 0) + 1;
         var proposal = new AiRuleProposal(ownerId, version, generated.Summary, generated.RuleJson,
             JsonSerializer.Serialize(notes), impact, clock.GetUtcNow());
-        db.AiRuleProposals.Add(proposal); await db.SaveChangesAsync(ct); return proposal;
+        db.AiRuleProposals.Add(proposal); await db.SaveChangesAsync(ct);
+        _logger.LogInformation(
+            new EventId(DiagnosticEventIds.AiProposalLifecycle, nameof(DiagnosticEventIds.AiProposalLifecycle)),
+            "Created AI rule proposal {ProposalId}, version {ProposalVersion}, by owner {OwnerId}; notes {NoteCount}, eligible {EligibleCount}, evaluated {EvaluatedCount}, matches {MatchCount}",
+            proposal.Id,
+            proposal.Version,
+            ownerId,
+            notes.Count,
+            eligible.Count,
+            evaluated.Count,
+            matches.Length);
+        return proposal;
     }
 
     public async Task<AiRuleProposal?> ApproveAsync(Guid id, Guid ownerId, CancellationToken ct)
@@ -122,13 +154,28 @@ public sealed class AiLearningService(AppDbContext db, IAiRuleGenerator generato
         }
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
+        _logger.LogInformation(
+            new EventId(DiagnosticEventIds.AiProposalLifecycle, nameof(DiagnosticEventIds.AiProposalLifecycle)),
+            "Approved AI rule proposal {ProposalId}, version {ProposalVersion}, by owner {OwnerId}; affected {AffectedListingCount}, replaced {PreviousProposalId}",
+            proposal.Id,
+            proposal.Version,
+            ownerId,
+            currentEvaluated.Count,
+            active?.Id);
         return proposal;
     }
 
     public async Task<AiRuleProposal?> RejectAsync(Guid id, Guid ownerId, CancellationToken ct)
     {
         var proposal = await db.AiRuleProposals.SingleOrDefaultAsync(x => x.Id == id, ct); if (proposal is null) return null;
-        var now = clock.GetUtcNow(); proposal.Reject(ownerId, now); AddAction(proposal.Id, "rejected", ownerId, now); await db.SaveChangesAsync(ct); return proposal;
+        var now = clock.GetUtcNow(); proposal.Reject(ownerId, now); AddAction(proposal.Id, "rejected", ownerId, now); await db.SaveChangesAsync(ct);
+        _logger.LogInformation(
+            new EventId(DiagnosticEventIds.AiProposalLifecycle, nameof(DiagnosticEventIds.AiProposalLifecycle)),
+            "Rejected AI rule proposal {ProposalId}, version {ProposalVersion}, by owner {OwnerId}",
+            proposal.Id,
+            proposal.Version,
+            ownerId);
+        return proposal;
     }
 
     public async Task<AiRuleProposal?> DeactivateAsync(Guid id, Guid ownerId, CancellationToken ct)
@@ -171,6 +218,14 @@ public sealed class AiLearningService(AppDbContext db, IAiRuleGenerator generato
         }
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
+        _logger.LogInformation(
+            new EventId(DiagnosticEventIds.AiProposalLifecycle, nameof(DiagnosticEventIds.AiProposalLifecycle)),
+            "Deactivated AI rule proposal {ProposalId}, version {ProposalVersion}, by owner {OwnerId}; restored {AffectedListingCount}, reactivated {PreviousProposalId}",
+            proposal.Id,
+            proposal.Version,
+            ownerId,
+            affected.Count,
+            proposal.PreviousProposalId);
         return proposal;
     }
 

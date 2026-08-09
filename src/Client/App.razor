@@ -1,1 +1,16 @@
-<AuthGate />
+@inject I18n L
+@inject NavigationManager Navigation
+
+<ClientErrorBoundary>
+    <ChildContent><AuthGate /></ChildContent>
+    <ErrorContent>
+        <main class="center-stage">
+            <p role="alert">@L["Error"]</p>
+            <button type="button" @onclick="Reload">@L["TryAgain"]</button>
+        </main>
+    </ErrorContent>
+</ClientErrorBoundary>
+
+@code {
+    private void Reload() => Navigation.NavigateTo("/", forceLoad: true);
+}

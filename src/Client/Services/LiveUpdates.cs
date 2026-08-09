@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.SignalR.Client;
 
 namespace HouseConsensus.Client.Services;
 
-public sealed class LiveUpdates(NavigationManager navigation) : IAsyncDisposable
+public sealed class LiveUpdates(NavigationManager navigation, ClientDiagnostics? diagnostics = null) : IAsyncDisposable
 {
     private HubConnection? hub;
     public event Action? Changed;
@@ -19,7 +19,11 @@ public sealed class LiveUpdates(NavigationManager navigation) : IAsyncDisposable
         hub.On<Guid, bool>("MembershipChanged", (_, _) => Changed?.Invoke());
         hub.Reconnected += _ => { Changed?.Invoke(); return Task.CompletedTask; };
         hub.Closed += _ => { Changed?.Invoke(); return Task.CompletedTask; };
-        try { await hub.StartAsync(); } catch (HttpRequestException) { }
+        try { await hub.StartAsync(); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            if (diagnostics is not null) await diagnostics.ReportAsync("signalr.start", ex);
+        }
         Changed?.Invoke();
     }
     public async Task WatchAsync(Guid listingId)

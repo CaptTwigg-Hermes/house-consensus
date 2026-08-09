@@ -22,7 +22,8 @@ public static class AuthenticationSetup
             services.AddSingleton<ICloudflareJwtValidator>(provider => new CloudflareJwtValidator(
                 provider.GetRequiredService<IHttpClientFactory>().CreateClient("CloudflareAccessJwks"),
                 cloudflare,
-                provider.GetRequiredService<TimeProvider>()));
+                provider.GetRequiredService<TimeProvider>(),
+                provider.GetRequiredService<ILogger<CloudflareJwtValidator>>()));
             services.AddScoped<ICloudflareMemberService, CloudflareMemberService>();
             services.AddAuthentication(CloudflareAccessOptions.Scheme)
                 .AddScheme<AuthenticationSchemeOptions, CloudflareAccessHandler>(CloudflareAccessOptions.Scheme, _ => { });
