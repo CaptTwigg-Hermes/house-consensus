@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json.Nodes;
 using HouseConsensus.Client.Services;
 using HouseConsensus.Server.Auth;
 using HouseConsensus.Server.Diagnostics;
@@ -20,6 +21,19 @@ namespace HouseConsensus.UnitTests;
 
 public sealed class StructuredDiagnosticsTests
 {
+    [Fact]
+    public void Production_logging_suppresses_HttpClient_request_URI_events()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "src", "Server", "appsettings.json")))
+            directory = directory.Parent;
+        Assert.NotNull(directory);
+        var settings = JsonNode.Parse(File.ReadAllText(Path.Combine(directory.FullName, "src", "Server", "appsettings.json")));
+
+        Assert.Equal("Warning", settings?["Serilog"]?["MinimumLevel"]?["Override"]?["System.Net.Http.HttpClient"]?.GetValue<string>());
+        Assert.Equal("Warning", settings?["Logging"]?["LogLevel"]?["System.Net.Http.HttpClient"]?.GetValue<string>());
+    }
+
     [Fact]
     public async Task SignalR_diagnostics_preserve_the_existing_hub_contract()
     {
