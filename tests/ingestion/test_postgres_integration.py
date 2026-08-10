@@ -86,7 +86,7 @@ def test_native_lifecycle_snapshot_and_projection_round_trip_on_postgres(databas
         source_name="boligsiden-search-cases",
         payload={
             "records": raw_records,
-            "projection_records": [{"external_id": "case-42", "address": "Example Road 42, 2100 Copenhagen", "city": "Copenhagen", "price": 2_500_000}],
+            "projection_records": [{"external_id": "case-42", "address": "Example Road 42, 2100 Copenhagen", "city": "Copenhagen", "price": 2_500_000, "asbestos_source": {"roof_materials": ["Fibercement herunder asbest"]}}],
         },
         captured_at=now,
     )
@@ -100,6 +100,7 @@ def test_native_lifecycle_snapshot_and_projection_round_trip_on_postgres(databas
         assert conn.execute("SELECT run_status FROM ingestion_runs WHERE run_id=%s", (snapshot.run_id,)).fetchone() == ("succeeded",)
         assert conn.execute('SELECT "ExternalId", "Address", "Price" FROM listings').fetchone() == ("case-42", "Example Road 42, 2100 Copenhagen", 2_500_000)
         assert conn.execute("SELECT source_record_id FROM listing_ingestion_projections").fetchone() == ("case-42",)
+        assert conn.execute("SELECT status, primary_source, rule_version FROM asbestos_roof_assessments ORDER BY assessed_at DESC, id DESC LIMIT 1").fetchone() == ("possible", "structured", "asbestos-roof-v1")
 
 
 def test_projection_failure_leaves_a_terminal_failed_run_and_a_reconcilable_snapshot(database_url):

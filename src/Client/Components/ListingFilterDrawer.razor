@@ -31,6 +31,13 @@
             <label>@L["MinPrivacy"]<input data-testid="filter-privacy-min" type="number" min="1" max="5" @bind="State.MinPrivacy" /></label>
             <label>@L["MaxPrivacy"]<input type="number" min="1" max="5" @bind="State.MaxPrivacy" /></label>
         </div></fieldset>
+        <fieldset><legend>@L["AsbestosRoof"]</legend><div class="filter-chips">
+            <button type="button" data-testid="filter-asbestos-Likely" class="tag @(State.AsbestosRoofStatuses.Contains(HouseConsensus.Shared.AsbestosRoofStatus.Likely) ? "selected" : "")" aria-pressed="@(State.AsbestosRoofStatuses.Contains(HouseConsensus.Shared.AsbestosRoofStatus.Likely) ? "true" : "false")" @onclick="() => ToggleAsbestos(HouseConsensus.Shared.AsbestosRoofStatus.Likely)">@L["AsbestosLikely"]</button>
+            <button type="button" data-testid="filter-asbestos-Possible" class="tag @(State.AsbestosRoofStatuses.Contains(HouseConsensus.Shared.AsbestosRoofStatus.Possible) ? "selected" : "")" aria-pressed="@(State.AsbestosRoofStatuses.Contains(HouseConsensus.Shared.AsbestosRoofStatus.Possible) ? "true" : "false")" @onclick="() => ToggleAsbestos(HouseConsensus.Shared.AsbestosRoofStatus.Possible)">@L["AsbestosPossible"]</button>
+            <button type="button" data-testid="filter-asbestos-NoIndication" class="tag @(State.AsbestosRoofStatuses.Contains(HouseConsensus.Shared.AsbestosRoofStatus.NoIndication) ? "selected" : "")" aria-pressed="@(State.AsbestosRoofStatuses.Contains(HouseConsensus.Shared.AsbestosRoofStatus.NoIndication) ? "true" : "false")" @onclick="() => ToggleAsbestos(HouseConsensus.Shared.AsbestosRoofStatus.NoIndication)">@L["AsbestosNoIndication"]</button>
+            <button type="button" data-testid="filter-asbestos-Unknown" class="tag @(State.AsbestosRoofStatuses.Contains(HouseConsensus.Shared.AsbestosRoofStatus.Unknown) ? "selected" : "")" aria-pressed="@(State.AsbestosRoofStatuses.Contains(HouseConsensus.Shared.AsbestosRoofStatus.Unknown) ? "true" : "false")" @onclick="() => ToggleAsbestos(HouseConsensus.Shared.AsbestosRoofStatus.Unknown)">@L["AsbestosUnknown"]</button>
+            <button type="button" data-testid="filter-asbestos-human-corrected" class="tag @(State.OnlyAsbestosRoofHumanCorrected ? "selected" : "")" aria-pressed="@(State.OnlyAsbestosRoofHumanCorrected ? "true" : "false")" @onclick="() => State.OnlyAsbestosRoofHumanCorrected = !State.OnlyAsbestosRoofHumanCorrected">@L["AsbestosHumanCorrected"]</button>
+        </div></fieldset>
         @Category(L["Municipality"], nameof(State.Municipalities), State.Municipalities, Options(x => x.City))
         @Category(L["MultiGen"], nameof(State.MultigenFits), State.MultigenFits, Options(x => x.MultigenFit))
         @Category(L["Buildable"], nameof(State.BuildableStatuses), State.BuildableStatuses, Options(x => x.BuildableStatus))
@@ -51,6 +58,7 @@
     private IReadOnlyList<string> Options(Func<ListingDto, string?> selector) => Items.Select(selector).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToList();
     private async Task KeyDown(KeyboardEventArgs e) { if (e.Key == "Escape") await OnClose.InvokeAsync(); }
     private void Toggle(List<string> selected, string value) { var found = selected.FirstOrDefault(x => x.Equals(value, StringComparison.OrdinalIgnoreCase)); if (found is null) selected.Add(value); else selected.Remove(found); }
+    private void ToggleAsbestos(HouseConsensus.Shared.AsbestosRoofStatus value) { if (!State.AsbestosRoofStatuses.Remove(value)) State.AsbestosRoofStatuses.Add(value); }
     private RenderFragment Category(string label, string name, List<string> selected, IReadOnlyList<string> values) => builder =>
     {
         if (values.Count == 0) return;

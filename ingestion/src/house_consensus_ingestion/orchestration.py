@@ -54,7 +54,27 @@ def boligsiden_projection_record(case: Mapping[str, Any]) -> dict[str, Any]:
     price = case.get("priceCash")
     if isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price < 0:
         raise BoligsidenProjectionRecordError("Boligsiden priceCash must be a non-negative number")
-    return {"external_id": case_id, "address": full_address, "city": city, "price": price}
+    asbestos_source = _asbestos_source(case, address)
+    record = {"external_id": case_id, "address": full_address, "city": city, "price": price}
+    if asbestos_source["roof_materials"] or asbestos_source["description_title"] or asbestos_source["description_body"] or asbestos_source["images"]:
+        record["asbestos_source"] = asbestos_source
+    return record
+
+
+def _asbestos_source(case: Mapping[str, Any], address: Mapping[str, Any]) -> dict[str, Any]:
+    buildings = address.get("buildings")
+    roof_materials: list[str] = []
+    if isinstance(buildings, (list, tuple)):
+        for building in buildings:
+            if isinstance(building, Mapping) and isinstance(building.get("roofingMaterial"), str):
+                roof_materials.append(str(building["roofingMaterial"]).strip())
+    images = case.get("images")
+    return {
+        "roof_materials": roof_materials,
+        "description_title": case.get("descriptionTitle"),
+        "description_body": case.get("descriptionBody"),
+        "images": list(images) if isinstance(images, (list, tuple)) else [],
+    }
 
 
 class NativeIngestionOrchestrator:

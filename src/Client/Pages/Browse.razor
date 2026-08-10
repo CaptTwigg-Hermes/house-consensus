@@ -8,9 +8,9 @@
 <header class="page-head browse-head"><div><p class="eyebrow">@L["Browse"]</p><h1>@L["Browse"]</h1><p>@L["BrowseIntro"]</p></div>@if (allItems is not null) { <span class="count">@Visible.Count</span> }</header>
 <section class="browse-toolbar" aria-label="@L["Filters"]">
     <form class="browse-search" @onsubmit="ApplySearch" @onsubmit:preventDefault><span aria-hidden="true">⌕</span><input placeholder="@L["SearchHomes"]" @bind="applied.Search" /><button type="submit" class="search-submit">@L["Search"]</button></form>
-    <div class="toolbar-actions"><div class="view-toggle compact" role="group"><button type="button" data-testid="mobile-list-toggle" aria-label="@L["List"]" class="@(view == "list" ? "active" : "")" @onclick="ShowList">☷ <span>@L["List"]</span></button><button type="button" data-testid="mobile-map-toggle" aria-label="@L["Map"]" class="@(view == "map" ? "active" : "")" @onclick="ShowMap">⌖ <span>@L["Map"]</span></button></div><button type="button" data-testid="filter-open" class="filter-open" @ref="filterTrigger" @onclick="OpenFilters">@L["Filters"]@if (applied.ActiveCount > 0) { <b>@applied.ActiveCount</b> }</button></div>
+    <div class="toolbar-actions"><div class="view-toggle compact" role="group"><button type="button" data-testid="mobile-list-toggle" aria-label="@L["List"]" class="@(view == "list" ? "active" : "")" @onclick="ShowList">☷ <span>@L["List"]</span></button><button type="button" data-testid="mobile-map-toggle" aria-label="@L["Map"]" class="@(view == "map" ? "active" : "")" @onclick="ShowMap">⌖ <span>@L["Map"]</span></button></div><button type="button" data-testid="filter-open" class="filter-open" disabled="@(allItems is null)" @ref="filterTrigger" @onclick="OpenFilters">@L["Filters"]@if (applied.ActiveCount > 0) { <b>@applied.ActiveCount</b> }</button></div>
 </section>
-@if (filtersOpen)
+@if (filtersOpen && allItems is not null)
 {
     <div class="filter-backdrop open" @onclick="CloseFilters"><ListingFilterDrawer State="draft" Items="allItems!" PreviewCount="@draft.Apply(allItems!).Count" OnApply="ApplyFilters" OnClear="ClearFilters" OnClose="CloseFilters" /></div>
 }
@@ -42,10 +42,11 @@ else { <div id="browse-map" data-testid="browse-map" class="map" aria-label="@L[
         if (!firstRender || stateLoaded) return;
         stateLoaded = true;
         applied = await JS.InvokeAsync<ListingFilterState?>("hc.loadState", StateKey) ?? new();
+        applied.NormalizeSavedState();
         draft = applied.Clone();
         StateHasChanged();
     }
-    private void OpenFilters() { draft = applied.Clone(); filtersOpen = true; focusFiltersOnRender = true; }
+    private void OpenFilters() { if (allItems is null) return; draft = applied.Clone(); filtersOpen = true; focusFiltersOnRender = true; }
     private async Task CloseFilters() { if (!filtersOpen) return; filtersOpen = false; await JS.InvokeVoidAsync("hc.dialogClose"); await filterTrigger.FocusAsync(); }
     private async Task ApplyFilters() { applied = draft.Clone(); await CloseFilters(); await SaveAndRender(); }
     private async Task ClearFilters() { draft = new(); applied = new(); await CloseFilters(); await SaveAndRender(); }

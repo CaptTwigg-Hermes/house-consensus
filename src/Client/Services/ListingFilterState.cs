@@ -32,8 +32,24 @@ public sealed class ListingFilterState
     public List<string> EnergyLabels { get; set; } = [];
     public List<string> GardenOrientations { get; set; } = [];
     public List<string> FamilyUnits { get; set; } = [];
+    public List<AsbestosRoofStatus> AsbestosRoofStatuses { get; set; } = [];
+    public bool OnlyAsbestosRoofHumanCorrected { get; set; }
     public List<VoteChoice> VoteChoices { get; set; } = [VoteChoice.Like, VoteChoice.Dislike];
     public ListingSort Sort { get; set; } = ListingSort.FamilyScore;
+
+    public void NormalizeSavedState()
+    {
+        Search ??= "";
+        Municipalities ??= [];
+        MultigenFits ??= [];
+        BuildableStatuses ??= [];
+        Conditions ??= [];
+        EnergyLabels ??= [];
+        GardenOrientations ??= [];
+        FamilyUnits ??= [];
+        AsbestosRoofStatuses ??= [];
+        VoteChoices ??= [VoteChoice.Like, VoteChoice.Dislike];
+    }
 
     public bool Matches(ListingDto x)
     {
@@ -45,6 +61,8 @@ public sealed class ListingFilterState
         if (OnlyQuiet && x.Quiet is not true) return false;
         if (OnlyNew && x.IsNew is not true) return false;
         if (OnlyAiAssessed && !x.AiAssessed) return false;
+        if (OnlyAsbestosRoofHumanCorrected && !x.AsbestosRoofHumanCorrected) return false;
+        if ((AsbestosRoofStatuses?.Count ?? 0) > 0 && !AsbestosRoofStatuses!.Contains(x.EffectiveAsbestosRoofStatus)) return false;
         if (!Range(x.Price, MinPrice, MaxPrice)) return false;
         if (!Range(x.LivingArea, MinArea, MaxArea)) return false;
         if (!Minimum(x.LotArea, MinGarden) || !Minimum(x.Rooms, MinRooms)) return false;
@@ -81,12 +99,13 @@ public sealed class ListingFilterState
         MinFamilyScore = MinFamilyScore, MinPrivacy = MinPrivacy, MaxPrivacy = MaxPrivacy,
         OnlyPreferred = OnlyPreferred, OnlyQuiet = OnlyQuiet, OnlyNew = OnlyNew, OnlyAiAssessed = OnlyAiAssessed,
         Municipalities = [.. Municipalities], MultigenFits = [.. MultigenFits], BuildableStatuses = [.. BuildableStatuses], Conditions = [.. Conditions],
-        EnergyLabels = [.. EnergyLabels], GardenOrientations = [.. GardenOrientations], FamilyUnits = [.. FamilyUnits], VoteChoices = [.. VoteChoices], Sort = Sort,
+        EnergyLabels = [.. EnergyLabels], GardenOrientations = [.. GardenOrientations], FamilyUnits = [.. FamilyUnits], AsbestosRoofStatuses = [.. (AsbestosRoofStatuses ?? [])], OnlyAsbestosRoofHumanCorrected = OnlyAsbestosRoofHumanCorrected, VoteChoices = [.. VoteChoices], Sort = Sort,
     };
 
     public int ActiveCount => new object?[] { string.IsNullOrWhiteSpace(Search) ? null : Search, MinPrice, MaxPrice, MinArea, MaxArea, MinGarden, MinRooms, MinYear, MaxYear, MaxCommute, MaxMonthlyExpense, MaxDaysOnMarket, MinFamilyScore, MinPrivacy, MaxPrivacy }.Count(x => x is not null)
         + new[] { Municipalities, MultigenFits, BuildableStatuses, Conditions, EnergyLabels, GardenOrientations, FamilyUnits }.Count(x => x.Count > 0)
-        + new[] { OnlyPreferred, OnlyQuiet, OnlyNew, OnlyAiAssessed }.Count(x => x);
+        + ((AsbestosRoofStatuses?.Count ?? 0) > 0 ? 1 : 0)
+        + new[] { OnlyPreferred, OnlyQuiet, OnlyNew, OnlyAiAssessed, OnlyAsbestosRoofHumanCorrected }.Count(x => x);
 
     private static bool Category(string? value, List<string> selected) => selected.Count == 0 || (value is not null && selected.Contains(value, StringComparer.OrdinalIgnoreCase));
     private static bool Range<T>(T? value, T? min, T? max) where T : struct, IComparable<T> => (!min.HasValue && !max.HasValue) || (value.HasValue && (!min.HasValue || value.Value.CompareTo(min.Value) >= 0) && (!max.HasValue || value.Value.CompareTo(max.Value) <= 0));

@@ -52,6 +52,10 @@
             <PropertyFacts Listing="Listing" />
             <NoiseLevels Listing="Listing" />
             <CommuteTable Json="@Listing.CommuteJson" Compact="true" />
+            @if (Listing.EffectiveAsbestosRoofStatus is HouseConsensus.Shared.AsbestosRoofStatus.Likely or HouseConsensus.Shared.AsbestosRoofStatus.Possible)
+            {
+                <AsbestosRoofStatus Listing="Listing" Compact="true" />
+            }
             @if (HasFitSignals)
             {
                 <div class="fit-signals" aria-label="@L["FamilyFitSignals"]">

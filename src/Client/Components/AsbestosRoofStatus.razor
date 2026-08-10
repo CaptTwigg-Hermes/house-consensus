@@ -1,0 +1,97 @@
+@inject I18n L
+@using System.Text.Json
+
+@if (!Compact || IsRisk)
+{
+    <section class="asbestos-status @CssClass" data-testid="asbestos-status" data-status="@CssClass" aria-label="@($"{L["AsbestosRoof"]}: {Label}")">
+        <span class="asbestos-status-badge">@Label</span>
+        @if (!Compact)
+        {
+            <div class="asbestos-status-copy">
+                <strong>@L["AsbestosRoof"]</strong>
+                @if (Listing.AsbestosRoofHumanCorrected) { <small>@L["AsbestosHumanCorrected"]</small> }
+                @if (Listing.AutomatedAsbestosRoofStatus is not null)
+                {
+                    <div data-testid="asbestos-automated-provenance">
+                        <small><strong>@L["AutomatedAssessmentProvenance"]</strong></small>
+                        <small data-testid="asbestos-automated-status">@L["AutomatedAssessmentStatus"]: @AutomatedLabel</small>
+                        @if (Listing.AsbestosRoofConfidence is { } confidence) { <small>@L["Confidence"]: @confidence.ToString("P0")</small> }
+                        @if (!string.IsNullOrWhiteSpace(Listing.AsbestosRoofPrimarySource)) { <small>@L["AssessmentSource"]: @SourceLabel(Listing.AsbestosRoofPrimarySource)</small> }
+                        @if (Listing.AsbestosRoofAssessedAt is { } assessed) { <small>@L["Assessed"]: @assessed.ToLocalTime().ToString("d")</small> }
+                        @if (EvidenceItems.Count > 0)
+                        {
+                            <ul class="asbestos-evidence" data-testid="asbestos-evidence-list">
+                                @foreach (var item in EvidenceItems)
+                                {
+                                    <li><strong>@SourceLabel(item.Source)</strong>: @EvidenceText(item)</li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                }
+                <p>@L["AsbestosAdvice"]</p>
+            </div>
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public ListingDto Listing { get; set; } = default!;
+    [Parameter] public bool Compact { get; set; }
+    private bool IsRisk => Listing.EffectiveAsbestosRoofStatus is HouseConsensus.Shared.AsbestosRoofStatus.Likely or HouseConsensus.Shared.AsbestosRoofStatus.Possible;
+    private string CssClass => Listing.EffectiveAsbestosRoofStatus switch
+    {
+        HouseConsensus.Shared.AsbestosRoofStatus.Likely => "likely",
+        HouseConsensus.Shared.AsbestosRoofStatus.Possible => "possible",
+        HouseConsensus.Shared.AsbestosRoofStatus.NoIndication => "no-indication",
+        _ => "unknown",
+    };
+    private string Label => L[Listing.EffectiveAsbestosRoofStatus switch
+    {
+        HouseConsensus.Shared.AsbestosRoofStatus.Likely => "AsbestosLikely",
+        HouseConsensus.Shared.AsbestosRoofStatus.Possible => "AsbestosPossible",
+        HouseConsensus.Shared.AsbestosRoofStatus.NoIndication => "AsbestosNoIndication",
+        _ => "AsbestosUnknown",
+    }];
+    private string AutomatedLabel => L[Listing.AutomatedAsbestosRoofStatus switch
+    {
+        HouseConsensus.Shared.AsbestosRoofStatus.Likely => "AsbestosLikely",
+        HouseConsensus.Shared.AsbestosRoofStatus.Possible => "AsbestosPossible",
+        HouseConsensus.Shared.AsbestosRoofStatus.NoIndication => "AsbestosNoIndication",
+        _ => "AsbestosUnknown",
+    }];
+    private IReadOnlyList<EvidenceItem> EvidenceItems
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(Listing.AsbestosRoofEvidence)) return [];
+            try
+            {
+                return JsonSerializer.Deserialize<List<EvidenceItem>>(
+                    Listing.AsbestosRoofEvidence,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+            }
+            catch (JsonException) { return []; }
+        }
+    }
+    private string SourceLabel(string? source) => L[source?.ToLowerInvariant() switch
+    {
+        "structured" => "EvidenceSourceStructured",
+        "text" => "EvidenceSourceText",
+        "document" => "EvidenceSourceDocument",
+        "image" => "EvidenceSourceImage",
+        "conflict" => "EvidenceSourceConflict",
+        "assessment" => "EvidenceSourceAssessment",
+        "backfill" => "EvidenceSourceBackfill",
+        _ => "EvidenceSourceNone",
+    }];
+    private string EvidenceText(EvidenceItem item) => item.Signal?.ToLowerInvariant() switch
+    {
+        "evidence_unavailable" => L["EvidenceUnavailable"],
+        _ when item.Excerpt == "No roof-relevant evidence was available." => L["EvidenceUnavailable"],
+        _ when item.Excerpt == "Positive and negative asbestos evidence conflict." => L["EvidenceConflict"],
+        _ when item.Excerpt == "Assessment failed; evidence could not be evaluated." => L["EvidenceAssessmentFailed"],
+        _ => item.Excerpt ?? L["EvidenceUnavailable"],
+    };
+    private sealed record EvidenceItem(string? Source, string? Excerpt, string? Signal);
+}

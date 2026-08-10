@@ -19,6 +19,7 @@ public sealed record EditComment(string Body);
 public sealed record SubmitFeedback(Guid? ListingId, string Body);
 public sealed record ReviewFeedback(bool Reviewed);
 public sealed record ApplyListingOverride(OverrideAction Action, string? Reason);
+public sealed record SetAsbestosRoofCorrection(AsbestosRoofStatus? Status, bool Confirmed);
 public sealed record UpdateLanguage(string Language);
 public sealed record UpdateProfile(string DisplayName, string AvatarColor);
 public sealed record AuthModeDto(bool CloudflareAccess);
@@ -57,7 +58,14 @@ public sealed record ListingDto(
     string? RailNoiseStatus = null, double? RailNoiseLnightDb = null, string? RailNoiseLnightStatus = null,
     string? AirNoiseStatus = null, double? AirNoiseLnightDb = null, string? AirNoiseLnightStatus = null,
     double? ScoreCoveragePct = null, bool? FamilyPrivacyAvailable = null,
-    string? ScoreRuleVersion = null, string? ScoreNotesJson = null)
+    string? ScoreRuleVersion = null, string? ScoreNotesJson = null,
+    AsbestosRoofStatus? AutomatedAsbestosRoofStatus = null,
+    AsbestosRoofStatus? AsbestosRoofCorrection = null,
+    double? AsbestosRoofConfidence = null,
+    string? AsbestosRoofPrimarySource = null,
+    string? AsbestosRoofEvidence = null,
+    string? AsbestosRoofRuleVersion = null,
+    DateTimeOffset? AsbestosRoofAssessedAt = null)
 {
     public ScoreStatus ScoreStatus => ScoreStatusRules.Resolve(
         FamilyFitScore,
@@ -71,6 +79,8 @@ public sealed record ListingDto(
         ScoreRuleVersion);
 
     public double? TrustedFamilyFitScore => ScoreStatus == ScoreStatus.Complete ? FamilyFitScore : null;
+    public AsbestosRoofStatus EffectiveAsbestosRoofStatus => AsbestosRoofCorrection ?? AutomatedAsbestosRoofStatus ?? AsbestosRoofStatus.Unknown;
+    public bool AsbestosRoofHumanCorrected => AsbestosRoofCorrection.HasValue;
 
     public string ScoreStatusLabelKey => ScoreStatus switch
     {

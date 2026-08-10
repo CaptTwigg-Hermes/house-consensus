@@ -858,6 +858,40 @@ public sealed class ClientUiTests
         }
     }
 
+    [Fact]
+    public void Asbestos_assessment_is_localized_filterable_and_confirmed_on_every_listing_surface()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var status = File.ReadAllText(Path.Combine(root, "src/Client/Components/AsbestosRoofStatus.razor"));
+        var card = File.ReadAllText(Path.Combine(root, "src/Client/Components/ListingCard.razor"));
+        var detail = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Detail.razor"));
+        var votes = File.ReadAllText(Path.Combine(root, "src/Client/Pages/MyVotes.razor"));
+        var drawer = File.ReadAllText(Path.Combine(root, "src/Client/Components/ListingFilterDrawer.razor"));
+        var i18n = File.ReadAllText(Path.Combine(root, "src/Client/Services/I18n.cs"));
+        var api = File.ReadAllText(Path.Combine(root, "src/Client/Services/ApiClient.cs"));
+
+        Assert.Contains("data-testid=\"asbestos-status\"", status, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"asbestos-automated-provenance\"", status, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"asbestos-automated-status\"", status, StringComparison.Ordinal);
+        Assert.Contains("Listing.AutomatedAsbestosRoofStatus", status, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"asbestos-evidence-list\"", status, StringComparison.Ordinal);
+        Assert.Contains("JsonSerializer.Deserialize", status, StringComparison.Ordinal);
+        Assert.DoesNotContain("<small class=\"asbestos-evidence\">@Listing.AsbestosRoofEvidence</small>", status, StringComparison.Ordinal);
+        Assert.Contains("AsbestosRoofStatus", card, StringComparison.Ordinal);
+        Assert.Contains("AsbestosRoofStatus", detail, StringComparison.Ordinal);
+        Assert.Contains("AsbestosRoofStatus", votes, StringComparison.Ordinal);
+        Assert.Contains("filter-asbestos-Likely", drawer, StringComparison.Ordinal);
+        Assert.Contains("filter-asbestos-human-corrected", drawer, StringComparison.Ordinal);
+        Assert.Contains("data-testid=\"asbestos-confirm-dialog\"", detail, StringComparison.Ordinal);
+        Assert.Contains("aria-labelledby=\"asbestos-confirm-title\"", detail, StringComparison.Ordinal);
+        Assert.Contains("hc.dialogOpen", detail, StringComparison.Ordinal);
+        Assert.Contains("hc.dialogClose", detail, StringComparison.Ordinal);
+        Assert.Contains("asbestosTrigger.FocusAsync", detail, StringComparison.Ordinal);
+        Assert.Contains("SetAsbestosRoofCorrection", api, StringComparison.Ordinal);
+        foreach (var key in new[] { "AsbestosRoof", "AsbestosLikely", "AsbestosPossible", "AsbestosNoIndication", "AsbestosUnknown", "AsbestosHumanCorrected", "AutomatedAssessmentProvenance", "AutomatedAssessmentStatus", "EvidenceSourceStructured", "EvidenceSourceText", "EvidenceUnavailable", "EvidenceConflict", "ConfirmAsbestosAssessment" })
+            Assert.Contains($"[\"{key}\"]", i18n, StringComparison.Ordinal);
+    }
+
     private sealed class CaptureHandler : HttpMessageHandler
     {
         public HttpRequestMessage? Request { get; private set; }

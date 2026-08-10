@@ -39,7 +39,10 @@ user data or translated copy in the id):
 - shell/auth: `app-shell`, `auth-email`, `auth-link-sent`, `profile-name`,
   `invite-email`, `current-user-email`, `language-select`
 - listings: `listing-card` plus `data-listing-id`, `data-price`, `data-area`;
-  `vote-interested`, `vote-reject`, `restore-listing`, `unanimity-status`, `match-banner`
+  `vote-interested`, `vote-reject`, `restore-listing`, `unanimity-status`, `match-banner`;
+  asbestos assessment hooks: `asbestos-status` plus `data-status`,
+  `asbestos-assessment-open`, `asbestos-confirm-dialog`, `asbestos-assessment-option`,
+  `asbestos-confirm`, `asbestos-cancel`
 - browse/map: `filter-price-max`, `filter-area-min`, `filter-apply`, `filter-clear`,
   `browse-map`, `map-marker` plus `data-highlighted=true` on the synchronized marker
 - feedback: `feedback-message`, `feedback-category`, `feedback-success`,

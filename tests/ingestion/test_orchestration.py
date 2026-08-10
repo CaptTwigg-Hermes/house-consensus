@@ -76,6 +76,26 @@ def test_maps_live_boligsiden_case_id_address_object_and_price_cash_to_projectio
     }
 
 
+def test_maps_asbestos_evidence_into_the_native_projection_record() -> None:
+    from house_consensus_ingestion.orchestration import boligsiden_projection_record
+
+    record = boligsiden_projection_record({
+        "caseID": "case-asbestos",
+        "address": {"roadName": "Tagvej", "houseNumber": "1", "buildings": [{"roofingMaterial": "Fibercement herunder asbest"}]},
+        "priceCash": 3_000_000,
+        "descriptionTitle": "Original eternittag",
+        "descriptionBody": "Tag fra opførelsen",
+        "images": [{"url": "https://example.test/roof.jpg", "alt": "Bølget eternittag"}],
+    })
+
+    assert record["asbestos_source"] == {
+        "roof_materials": ["Fibercement herunder asbest"],
+        "description_title": "Original eternittag",
+        "description_body": "Tag fra opførelsen",
+        "images": [{"url": "https://example.test/roof.jpg", "alt": "Bølget eternittag"}],
+    }
+
+
 def test_rejects_malformed_live_boligsiden_address_or_price_before_any_native_write() -> None:
     from house_consensus_ingestion.orchestration import BoligsidenProjectionRecordError, boligsiden_projection_record
 

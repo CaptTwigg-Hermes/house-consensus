@@ -19,6 +19,7 @@ import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
+from .asbestos import AsbestosRoofAssessment, RULE_VERSION, assess_asbestos_roof
 from .media import MediaCache, discover_media
 from .models import ExportCase
 
@@ -27,6 +28,21 @@ _SCHEMA = Path(__file__).with_name("schema.sql")
 
 _PERCENT_ESCAPE = re.compile(r"%([0-9A-Fa-f]{2})")
 _UNRESERVED = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
+
+
+def _assess_asbestos_safely(record: dict[str, object]) -> AsbestosRoofAssessment:
+    try:
+        return assess_asbestos_roof(record)
+    except Exception:
+        canonical = json.dumps(record, ensure_ascii=False, separators=(",", ":"), sort_keys=True, default=str)
+        return AsbestosRoofAssessment(
+            status="unknown",
+            confidence=None,
+            primary_source=None,
+            evidence=({"source": "assessment", "path": "", "excerpt": "Assessment failed; evidence could not be evaluated."},),
+            rule_version=RULE_VERSION,
+            source_fingerprint=hashlib.sha256(canonical.encode()).hexdigest(),
+        )
 
 
 def _canonical_url_path(path: str) -> str:
@@ -100,6 +116,37 @@ def _normalize_listing_address(value: str) -> str | None:
 
 def ensure_schema(conn) -> None:
     conn.execute(_SCHEMA.read_text())
+    _reassess_retained_asbestos_sources(conn)
+
+
+def _reassess_retained_asbestos_sources(conn) -> None:
+    retained = conn.execute(
+        """SELECT l."Id", s.last_seen_run_id, s.raw_payload, s.last_seen_at
+           FROM listings l
+           JOIN listing_export_state s ON s.listing_id = l."Id"
+           WHERE l."State" <> 'archived'
+             AND s.raw_payload IS NOT NULL"""
+    ).fetchall()
+    for listing_id, run_id, raw_payload, assessed_at in retained:
+        record = dict(raw_payload) if isinstance(raw_payload, dict) else {}
+        assessment = _assess_asbestos_safely(record)
+        conn.execute(
+            """INSERT INTO asbestos_roof_assessments
+               (listing_id,run_id,status,confidence,primary_source,evidence,rule_version,source_fingerprint,assessed_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               ON CONFLICT(listing_id,rule_version,source_fingerprint) DO NOTHING""",
+            (
+                listing_id,
+                run_id,
+                assessment.status,
+                assessment.confidence,
+                assessment.primary_source,
+                Jsonb(list(assessment.evidence)),
+                assessment.rule_version,
+                assessment.source_fingerprint,
+                assessed_at,
+            ),
+        )
 
 
 def tombstone_listing(
@@ -977,6 +1024,25 @@ class PostgresExporter:
                         THEN ST_SetSRID(ST_MakePoint("Longitude","Latitude"),4326)
                         ELSE NULL END WHERE "Id"=%s""",
                         (listing_id,),
+                    )
+                if not dry_run:
+                    asbestos = _assess_asbestos_safely(case.raw)
+                    conn.execute(
+                        """INSERT INTO asbestos_roof_assessments
+                        (listing_id,run_id,status,confidence,primary_source,evidence,rule_version,source_fingerprint,assessed_at)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT(listing_id,rule_version,source_fingerprint) DO NOTHING""",
+                        (
+                            listing_id,
+                            run_id,
+                            asbestos.status,
+                            asbestos.confidence,
+                            asbestos.primary_source,
+                            Jsonb(list(asbestos.evidence)),
+                            asbestos.rule_version,
+                            asbestos.source_fingerprint,
+                            fetched_at,
+                        ),
                     )
                 conn.execute(
                     """INSERT INTO listing_export_state

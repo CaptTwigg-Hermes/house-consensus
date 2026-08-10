@@ -1025,6 +1025,69 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Asbestos_assessment_projects_and_member_correction_replaces_without_history()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var member = new Member { Email = "asbestos-member@example.test" };
+        var listing = new Listing { ExternalId = "asbestos-api", Address = "Tagvej 1" };
+        await using (var setup = Db())
+        {
+            setup.AddRange(member, listing);
+            await setup.SaveChangesAsync(ct);
+            setup.AsbestosRoofAssessments.Add(new AsbestosRoofAssessment
+            {
+                ListingId = listing.Id, Status = "likely", Confidence = .98,
+                PrimarySource = "structured", EvidenceJson = "[{\"value\":\"Asbest\"}]",
+                RuleVersion = "asbestos-roof-v1", SourceFingerprint = new string('a', 64),
+                AssessedAt = DateTimeOffset.UtcNow,
+            });
+            setup.AsbestosRoofAssessments.Add(new AsbestosRoofAssessment
+            {
+                ListingId = listing.Id, Status = "unknown", PrimarySource = "backfill",
+                EvidenceJson = "[{\"source\":\"backfill\"}]", RuleVersion = "asbestos-roof-v1-backfill-pending",
+                SourceFingerprint = new string('0', 64), AssessedAt = DateTimeOffset.UtcNow.AddYears(1),
+            });
+            await setup.SaveChangesAsync(ct);
+        }
+        await using var factory = new WebApplicationFactory<CloudflareAccessOptions>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Development"); builder.UseSetting("Debug:AutoLogin", "true"); builder.UseSetting("E2E:TestAuth", "true"); builder.UseSetting("E2E:SeedData", "true");
+            builder.UseSetting("ConnectionStrings:Database", _connectionString); builder.UseSetting("Database:AutoMigrate", "false"); builder.UseSetting("INITIAL_OWNER_EMAIL", "");
+        });
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-House-Consensus-CSRF", "1");
+        client.DefaultRequestHeaders.Add(DebugAutoLoginMiddleware.E2EEmailHeader, member.Email);
+
+        var projected = await client.GetFromJsonAsync<ListingDto>($"/api/listings/{listing.Id}", ct);
+        Assert.Equal(AsbestosRoofStatus.Likely, projected?.EffectiveAsbestosRoofStatus);
+        Assert.Equal(.98, projected?.AsbestosRoofConfidence);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync($"/api/listings/{listing.Id}/asbestos-roof-correction", new SetAsbestosRoofCorrection(AsbestosRoofStatus.Possible, false), ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PutAsJsonAsync($"/api/listings/{listing.Id}/asbestos-roof-correction", new SetAsbestosRoofCorrection(AsbestosRoofStatus.Possible, true), ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PutAsJsonAsync($"/api/listings/{listing.Id}/asbestos-roof-correction", new SetAsbestosRoofCorrection(AsbestosRoofStatus.NoIndication, true), ct)).StatusCode);
+
+        projected = await client.GetFromJsonAsync<ListingDto>($"/api/listings/{listing.Id}", ct);
+        Assert.Equal(AsbestosRoofStatus.NoIndication, projected?.EffectiveAsbestosRoofStatus);
+        Assert.True(projected?.AsbestosRoofHumanCorrected);
+        Assert.Equal(AsbestosRoofStatus.Likely, projected?.AutomatedAsbestosRoofStatus);
+        Assert.Equal(.98, projected?.AsbestosRoofConfidence);
+        Assert.Equal("structured", projected?.AsbestosRoofPrimarySource);
+        Assert.Contains("Asbest", projected?.AsbestosRoofEvidence, StringComparison.Ordinal);
+        Assert.Equal("asbestos-roof-v1", projected?.AsbestosRoofRuleVersion);
+        Assert.NotNull(projected?.AsbestosRoofAssessedAt);
+
+        await using (var verify = Db())
+        {
+            Assert.Equal(AsbestosRoofStatus.NoIndication, (await verify.Listings.SingleAsync(x => x.Id == listing.Id, ct)).AsbestosRoofCorrection);
+            Assert.Equal(2, await verify.AsbestosRoofAssessments.CountAsync(x => x.ListingId == listing.Id, ct));
+        }
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PutAsJsonAsync($"/api/listings/{listing.Id}/asbestos-roof-correction", new SetAsbestosRoofCorrection(null, true), ct)).StatusCode);
+        projected = await client.GetFromJsonAsync<ListingDto>($"/api/listings/{listing.Id}", ct);
+        Assert.Equal(AsbestosRoofStatus.Likely, projected?.EffectiveAsbestosRoofStatus);
+        Assert.False(projected?.AsbestosRoofHumanCorrected);
+        Assert.Equal(.98, projected?.AsbestosRoofConfidence);
+    }
+
+    [Fact]
     public async Task Manual_create_rejects_split_url_and_address_identity_without_mutation()
     {
         var ct = TestContext.Current.CancellationToken;

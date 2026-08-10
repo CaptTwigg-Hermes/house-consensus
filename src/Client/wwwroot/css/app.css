@@ -2003,6 +2003,17 @@ textarea:focus-visible {
 .vote-rating-summary { display: block; margin-top: 5px; line-height: 1.45; }
 .manual-provenance { color: var(--muted); }
 .btn.danger { color: var(--red); border-color: var(--red); }
+.asbestos-status { display: flex; gap: 12px; align-items: flex-start; margin: 10px 0; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); }
+.asbestos-status-badge { display: inline-flex; min-height: 28px; align-items: center; padding: 4px 10px; border-radius: 999px; font-weight: 800; }
+.asbestos-status.likely .asbestos-status-badge { color: #fff; background: #a12d32; }
+.asbestos-status.possible .asbestos-status-badge { color: #3b2800; background: #f3bf55; }
+.asbestos-status.no-indication .asbestos-status-badge, .asbestos-status.unknown .asbestos-status-badge { color: var(--ink); background: var(--sage); }
+.asbestos-status-copy { display: grid; gap: 4px; min-width: 0; }
+.asbestos-status-copy small { color: var(--muted); overflow-wrap: anywhere; }
+.asbestos-status-copy p { margin: 4px 0 0; }
+.asbestos-assessment-open { margin: 0 0 14px; }
+.asbestos-confirm { width: min(92vw, 600px); }
+.asbestos-options { margin: 16px 0; }
 @media (min-width: 740px) {
   .content { padding-bottom: 50px; }
   .guided-vote-sheet { top: 50%; bottom: auto; transform: translate(-50%, -50%); max-height: 88vh; border-radius: 24px; }

@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
+from hashlib import sha256
+import json
 from typing import Any, Protocol
 from uuid import NAMESPACE_URL, uuid5
+
+from .asbestos import AsbestosRoofAssessment, RULE_VERSION, assess_asbestos_roof
 
 
 class _Cursor(Protocol):
@@ -165,12 +169,44 @@ class PostgresListingProjectionWriter:
             raise ListingIdentityConflictError(
                 f"listing identity {source_system}/{source_scope}/{external_id} is protected from projection"
             )
+        assessment = _assess_safely(record.get("asbestos_source"))
+        cursor.execute(
+            """
+            INSERT INTO asbestos_roof_assessments
+                (listing_id, status, confidence, primary_source, evidence, rule_version, source_fingerprint, assessed_at)
+            VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+            ON CONFLICT (listing_id, rule_version, source_fingerprint) DO NOTHING
+            """,
+            (
+                listing_id, assessment.status, assessment.confidence, assessment.primary_source,
+                json.dumps(assessment.evidence, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+                assessment.rule_version, assessment.source_fingerprint, projected_at,
+            ),
+        )
         cursor.execute(
             """
             INSERT INTO listing_ingestion_projections
                 (listing_id, source_system, source_scope, source_record_id, source_snapshot_id, projected_at)
             VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT (source_system, source_scope, source_record_id) DO NOTHING
+            ON CONFLICT (source_system, source_scope, source_record_id) DO UPDATE SET
+                source_snapshot_id = EXCLUDED.source_snapshot_id,
+                projected_at = EXCLUDED.projected_at
             """,
             (listing_id, source_system, source_scope, external_id, source_snapshot_id, projected_at),
+        )
+
+
+def _assess_safely(value: object) -> AsbestosRoofAssessment:
+    record = dict(value) if isinstance(value, Mapping) else {}
+    try:
+        return assess_asbestos_roof(record)
+    except Exception:
+        canonical = json.dumps(record, ensure_ascii=False, separators=(",", ":"), sort_keys=True, default=str)
+        return AsbestosRoofAssessment(
+            status="unknown",
+            confidence=None,
+            primary_source=None,
+            evidence=({"source": "assessment", "path": "", "excerpt": "Assessment failed; evidence could not be evaluated."},),
+            rule_version=RULE_VERSION,
+            source_fingerprint=sha256(canonical.encode()).hexdigest(),
         )

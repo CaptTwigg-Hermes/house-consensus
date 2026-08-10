@@ -43,6 +43,7 @@ public static class E2EDataSeeder
                 else if (listing.ExternalId == "e2e-rejected")
                     SetCompleteScore(listing, 72, 72, 72, 72, 72, 72);
             }
+            await EnsureAsbestosEvidenceAsync(db, existingListings.Single(x => x.ExternalId == "e2e-active").Id, ct);
             await db.SaveChangesAsync(ct);
             return;
         }
@@ -140,6 +141,23 @@ public static class E2EDataSeeder
         rejected.ApplyImportDecision(true);
         db.Listings.AddRange(active, rejected);
         await db.SaveChangesAsync(ct);
+        await EnsureAsbestosEvidenceAsync(db, active.Id, ct);
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static async Task EnsureAsbestosEvidenceAsync(AppDbContext db, Guid listingId, CancellationToken ct)
+    {
+        if (await db.AsbestosRoofAssessments.AnyAsync(x => x.ListingId == listingId, ct)) return;
+        db.AsbestosRoofAssessments.Add(new AsbestosRoofAssessment
+        {
+            ListingId = listingId,
+            Status = "unknown",
+            PrimarySource = "none",
+            EvidenceJson = "[{\"source\":\"none\",\"path\":\"\",\"excerpt\":\"No roof-relevant evidence was available.\"}]",
+            RuleVersion = "asbestos-roof-v1",
+            SourceFingerprint = new string('0', 63) + "1",
+            AssessedAt = DateTimeOffset.UtcNow,
+        });
     }
 
     private static void SetCompleteScore(

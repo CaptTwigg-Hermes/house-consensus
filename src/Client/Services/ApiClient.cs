@@ -25,6 +25,7 @@ public sealed class ApiClient(HttpClient http)
     public async Task<ManualListingPreview?> FetchManualListing(string url, CancellationToken ct = default) => await SendAsync<ManualListingPreview>(HttpMethod.Post, "api/listings/preview", new FetchManualListing(url), ct);
     public Task<HttpResponseMessage> WithdrawListing(Guid id, CancellationToken ct = default) => http.DeleteAsync($"api/listings/{id}", ct);
     public async Task<HttpResponseMessage> EditVoteNote(Guid id, string? note, CancellationToken ct = default) => await RawAsync(HttpMethod.Put, $"api/listings/{id}/votes/note", new EditVoteNote(note), ct);
+    public async Task<HttpResponseMessage> SetAsbestosRoofCorrection(Guid id, AsbestosRoofStatus? status, CancellationToken ct = default) => await RawAsync(HttpMethod.Put, $"api/listings/{id}/asbestos-roof-correction", new SetAsbestosRoofCorrection(status, true), ct);
     public Task<HttpResponseMessage> AddComment(Guid id, string body, CancellationToken ct = default) => http.PostAsJsonAsync($"api/listings/{id}/comments", new AddComment(body), ct);
     public async Task<HttpResponseMessage> EditComment(Guid id, string body, CancellationToken ct = default) => await RawAsync(HttpMethod.Put, $"api/comments/{id}", new EditComment(body), ct);
     public Task<HttpResponseMessage> DeleteComment(Guid id, CancellationToken ct = default) => http.DeleteAsync($"api/comments/{id}", ct);

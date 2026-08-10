@@ -12,6 +12,7 @@ public static class VoteCategories
     public static readonly VoteCategory[] All = [VoteCategory.Layout, VoteCategory.Privacy, VoteCategory.Garden, VoteCategory.Condition, VoteCategory.Location, VoteCategory.Noise, VoteCategory.Price, VoteCategory.MultiGenerationFit, VoteCategory.Commute, VoteCategory.Buildability];
 }
 public enum OverrideAction { Restore, Reject }
+public enum AsbestosRoofStatus { Likely, Possible, NoIndication, Unknown }
 
 public sealed class Member
 {
@@ -123,6 +124,7 @@ public sealed class Listing
     public double? ScoreCoveragePct { get; set; }
     public bool? FamilyPrivacyAvailable { get; set; }
     public string? ScoreNotesJson { get; set; }
+    public AsbestosRoofStatus? AsbestosRoofCorrection { get; private set; }
     public DateTimeOffset ImportedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? ArchivedAt { get; private set; }
     public List<ListingOverride> Overrides { get; } = [];
@@ -162,6 +164,7 @@ public sealed class Listing
         LearningRuleVersion = previousVersion;
     }
     public void ClearLearningRejection() { if (LearningRuleVersion is not null && Overrides.Count == 0) State = ListingState.Active; LearningRuleVersion = null; }
+    public void SetAsbestosRoofCorrection(AsbestosRoofStatus? status) => AsbestosRoofCorrection = status;
     public void Archive(DateTimeOffset at, bool automated = false) { if (automated && ManualLifecycleProtected) return; State = ListingState.Archived; ArchivedAt = at; }
 }
 
@@ -173,6 +176,20 @@ public sealed class ListingOverride
     public OverrideAction Action { get; init; }
     public string? Reason { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
+}
+
+public sealed class AsbestosRoofAssessment
+{
+    public long Id { get; init; }
+    public Guid ListingId { get; init; }
+    public string? RunId { get; init; }
+    public required string Status { get; init; }
+    public double? Confidence { get; init; }
+    public string? PrimarySource { get; init; }
+    public required string EvidenceJson { get; init; }
+    public required string RuleVersion { get; init; }
+    public required string SourceFingerprint { get; init; }
+    public DateTimeOffset AssessedAt { get; init; }
 }
 
 public sealed class Vote

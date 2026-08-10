@@ -4,6 +4,7 @@
 @inject I18n L
 @inject LiveUpdates Live
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 @implements IDisposable
 <PageTitle>@(listing?.Address ?? L["Details"]) · @L["AppName"]</PageTitle>
 @if (listing is null) { <Loading /> } else
@@ -37,6 +38,8 @@
     <PropertyFacts Listing="listing" />
     <NoiseLevels Listing="listing" />
     <CommuteTable Json="@listing.CommuteJson" />
+    <AsbestosRoofStatus Listing="listing" />
+    <button @ref="asbestosTrigger" type="button" class="btn ghost asbestos-assessment-open" data-testid="asbestos-assessment-open" @onclick="OpenAsbestosDialog">@L["ChangeAsbestosAssessment"]</button>
     <div class="fit-signals detail-signals">
         @if (listing.Quiet is true) { <span>@L["Quiet"]</span> }
         @if (listing.SeparateEntrance is true) { <span>@L["SeparateEntrance"]</span> }
@@ -51,9 +54,39 @@
         <article class="panel"><h2>@L["Evidence"]</h2>@if (!listing.AiAssessed) { <span class="badge neutral">@L["NotAssessed"]</span> } else { <AiEvidencePanel Evidence="@listing.AiEvidence" Confidence="@listing.AiConfidence" ModelVersion="@listing.ModelVersion" /> }<ExternalListingLink Url="@listing.SourceUrl" />
         @if (Auth.IsOwner) { <div class="owner-override"><input maxlength="500" aria-label="@L["Reason"]" placeholder="@L["Reason"]" @bind="overrideReason" /><div class="vote-actions"><button class="btn like" @onclick="() => Override(OverrideAction.Restore)">↺ @L["Restore"]</button><button class="btn dislike" @onclick="() => Override(OverrideAction.Reject)">× @L["Reject"]</button></div></div> }</article>
     </section>
+    @if (asbestosDialogOpen)
+    {
+        <div class="modal-backdrop" @onclick="CloseAsbestosDialog">
+            <section id="asbestos-confirm-dialog" class="modal-card asbestos-confirm" role="dialog" aria-modal="true" aria-labelledby="asbestos-confirm-title" aria-describedby="asbestos-confirm-description" data-testid="asbestos-confirm-dialog" aria-busy="@asbestosBusy.ToString().ToLowerInvariant()" @onclick:stopPropagation @onkeydown="AsbestosDialogKeyDown">
+                <h2 id="asbestos-confirm-title">@L["ConfirmAsbestosAssessment"]</h2>
+                <p id="asbestos-confirm-description">@L["ConfirmAsbestosBody"].Replace("{0}", listing.Address).Replace("{1}", AsbestosLabel(listing.EffectiveAsbestosRoofStatus)).Replace("{2}", PendingAsbestosLabel)</p>
+                <div class="filter-chips asbestos-options">
+                    @foreach (var status in Enum.GetValues<HouseConsensus.Shared.AsbestosRoofStatus>())
+                    {
+                        <button type="button" data-testid="asbestos-assessment-option" class="tag @(pendingAsbestos == status ? "selected" : "")" aria-pressed="@(pendingAsbestos == status ? "true" : "false")" @onclick="() => pendingAsbestos = status">@AsbestosLabel(status)</button>
+                    }
+                    <button type="button" data-testid="asbestos-assessment-option" class="tag @(pendingAsbestos is null ? "selected" : "")" aria-pressed="@(pendingAsbestos is null ? "true" : "false")" @onclick="() => pendingAsbestos = null">@L["UseAutomatedAssessment"]</button>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(asbestosError)) { <p role="alert" data-testid="asbestos-error">@asbestosError</p> }
+                <div class="modal-actions">
+                    <button type="button" class="btn ghost" data-testid="asbestos-cancel" disabled="@asbestosBusy" @onclick="CloseAsbestosDialog">@L["Cancel"]</button>
+                    <button type="button" class="btn primary" data-testid="asbestos-confirm" disabled="@asbestosBusy" @onclick="ConfirmAsbestosCorrection">@(asbestosBusy ? L["Saving"] : L["ConfirmAsbestosAssessment"])</button>
+                </div>
+            </section>
+        </div>
+    }
 }
 @code {
-    [Parameter] public Guid Id { get; set; } private ListingDto? listing; private string overrideReason = ""; private IDisposable? liveSubscription; private bool editingVoteNote; private string editVoteNote = "";
+    [Parameter] public Guid Id { get; set; }
+    private ListingDto? listing;
+    private string overrideReason = "";
+    private IDisposable? liveSubscription;
+    private bool editingVoteNote;
+    private string editVoteNote = "";
+    private ElementReference asbestosTrigger;
+    private bool asbestosDialogOpen, focusAsbestosDialog, asbestosBusy;
+    private HouseConsensus.Shared.AsbestosRoofStatus? pendingAsbestos;
+    private string asbestosError = "";
     protected override async Task OnInitializedAsync() { await Live.WatchAsync(Id); liveSubscription = Live.OnListingChanged(LiveChanged); await Load(); }
     private Guid? ViewerVotingIdentityId => Auth.User is null ? null : Auth.User.VotingIdentityId ?? Auth.User.Id;
     private VoteDto? LatestOwnVote => listing?.Votes.Where(x => (x.EffectiveMemberId ?? x.MemberId) == ViewerVotingIdentityId).OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id).FirstOrDefault();
@@ -64,5 +97,53 @@
     private void StartVoteNoteEdit(VoteDto vote) { editingVoteNote = true; editVoteNote = vote.Note ?? ""; }
     private void CancelVoteNoteEdit() { editingVoteNote = false; editVoteNote = ""; }
     private async Task SaveVoteNote() { using var response = await Api.EditVoteNote(Id, editVoteNote); await ApiClient.EnsureSuccess(response); CancelVoteNoteEdit(); await Load(); }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!focusAsbestosDialog || !asbestosDialogOpen) return;
+        focusAsbestosDialog = false;
+        await JS.InvokeVoidAsync("hc.dialogOpen", "asbestos-confirm-dialog");
+    }
+    private void OpenAsbestosDialog()
+    {
+        if (listing is null) return;
+        pendingAsbestos = listing.AsbestosRoofCorrection ?? listing.EffectiveAsbestosRoofStatus;
+        asbestosError = "";
+        asbestosDialogOpen = true;
+        focusAsbestosDialog = true;
+    }
+    private async Task CloseAsbestosDialog()
+    {
+        if (!asbestosDialogOpen || asbestosBusy) return;
+        asbestosDialogOpen = false;
+        await JS.InvokeVoidAsync("hc.dialogClose");
+        await asbestosTrigger.FocusAsync();
+    }
+    private async Task AsbestosDialogKeyDown(KeyboardEventArgs e) { if (e.Key == "Escape") await CloseAsbestosDialog(); }
+    private async Task ConfirmAsbestosCorrection()
+    {
+        asbestosBusy = true;
+        asbestosError = "";
+        try
+        {
+            using var response = await Api.SetAsbestosRoofCorrection(Id, pendingAsbestos);
+            await ApiClient.EnsureSuccess(response);
+            await Load();
+            asbestosBusy = false;
+            await CloseAsbestosDialog();
+        }
+        catch (HttpRequestException)
+        {
+            asbestosError = L["AsbestosUpdateFailed"];
+            asbestosBusy = false;
+        }
+    }
+    private string PendingAsbestosLabel => pendingAsbestos is { } status ? AsbestosLabel(status) : L["UseAutomatedAssessment"];
+    private string AsbestosLabel(HouseConsensus.Shared.AsbestosRoofStatus status) => L[status switch
+    {
+        HouseConsensus.Shared.AsbestosRoofStatus.Likely => "AsbestosLikely",
+        HouseConsensus.Shared.AsbestosRoofStatus.Possible => "AsbestosPossible",
+        HouseConsensus.Shared.AsbestosRoofStatus.NoIndication => "AsbestosNoIndication",
+        _ => "AsbestosUnknown",
+    }];
     public void Dispose() => liveSubscription?.Dispose();
 }

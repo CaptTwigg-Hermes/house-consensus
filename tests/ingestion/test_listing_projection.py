@@ -70,9 +70,22 @@ def test_projects_a_completed_native_source_record_without_legacy_exporter_table
     assert "stage_name = 'fetch'" in statements
     assert "INSERT INTO listings" in statements
     assert "INSERT INTO listing_ingestion_projections" in statements
+    assert "INSERT INTO asbestos_roof_assessments" in statements
+    assert "ON CONFLICT (listing_id, rule_version, source_fingerprint) DO NOTHING" in statements
     assert "export_runs" not in statements
     assert "consensus_exporter" not in statements
     assert connection.committed is True
+
+
+def test_failed_native_assessment_falls_back_to_unknown(monkeypatch) -> None:
+    import house_consensus_ingestion.projection as projection
+
+    monkeypatch.setattr(projection, "assess_asbestos_roof", lambda _: (_ for _ in ()).throw(RuntimeError("broken")))
+    result = projection._assess_safely({"roof_materials": ["Asbest"]})
+
+    assert result.status == "unknown"
+    assert result.rule_version == "asbestos-roof-v1"
+    assert result.source_fingerprint
 
 
 def test_rejects_an_uncompleted_or_missing_native_source_snapshot() -> None:

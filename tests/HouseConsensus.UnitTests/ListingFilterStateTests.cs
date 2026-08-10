@@ -61,6 +61,41 @@ public sealed class ListingFilterStateTests
     }
 
     [Fact]
+    public void Missing_asbestos_state_from_older_saved_filters_is_treated_as_unfiltered()
+    {
+        var state = new ListingFilterState { AsbestosRoofStatuses = null!, Municipalities = null!, VoteChoices = null! };
+        var listing = Listing("77777777-7777-7777-7777-777777777777") with { AutomatedAsbestosRoofStatus = AsbestosRoofStatus.Possible };
+
+        state.NormalizeSavedState();
+        Assert.True(state.Matches(listing));
+        Assert.Empty(state.Clone().AsbestosRoofStatuses);
+        Assert.Equal([VoteChoice.Like, VoteChoice.Dislike], state.VoteChoices);
+        Assert.Equal(0, state.ActiveCount);
+    }
+
+    [Fact]
+    public void Asbestos_filter_uses_effective_state_and_counts_group_once()
+    {
+        var likely = Listing("11111111-1111-1111-1111-111111111111") with { AutomatedAsbestosRoofStatus = AsbestosRoofStatus.Likely };
+        var corrected = Listing("22222222-2222-2222-2222-222222222222") with { AutomatedAsbestosRoofStatus = AsbestosRoofStatus.Likely, AsbestosRoofCorrection = AsbestosRoofStatus.NoIndication };
+        var unknown = Listing("33333333-3333-3333-3333-333333333333");
+        var filter = new ListingFilterState { AsbestosRoofStatuses = [AsbestosRoofStatus.Likely, AsbestosRoofStatus.Unknown] };
+
+        Assert.Equal([likely.Id, unknown.Id], filter.Apply([likely, corrected, unknown]).Select(x => x.Id));
+        Assert.Equal(1, filter.ActiveCount);
+
+        filter.OnlyAsbestosRoofHumanCorrected = true;
+        Assert.Empty(filter.Apply([likely, corrected, unknown]));
+        filter.AsbestosRoofStatuses = [AsbestosRoofStatus.NoIndication];
+        Assert.Equal([corrected.Id], filter.Apply([likely, corrected, unknown]).Select(x => x.Id));
+        Assert.Equal(2, filter.ActiveCount);
+
+        var clone = filter.Clone();
+        clone.AsbestosRoofStatuses.Clear();
+        Assert.Single(filter.AsbestosRoofStatuses);
+    }
+
+    [Fact]
     public void Quick_filters_and_postal_search_match_houseshopping_parity()
     {
         var listing = Listing("44444444-4444-4444-4444-444444444444");
