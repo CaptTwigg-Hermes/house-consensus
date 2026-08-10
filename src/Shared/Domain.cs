@@ -23,6 +23,7 @@ public sealed class Member
     public MemberRole Role { get; set; }
     public bool IsActive { get; private set; } = true;
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
+    public Guid VotingIdentityId { get; set; }
     public void Deactivate() => IsActive = false;
     public void Reactivate() => IsActive = true;
     public void SetLanguage(string language)
@@ -348,6 +349,16 @@ public static class ConsensusRules
         return members.All(id => latest.TryGetValue(id, out var choice) && choice == VoteChoice.Like);
     }
     public static IReadOnlyDictionary<Guid, Vote> LatestVotes(IEnumerable<Vote> votes) => votes.GroupBy(v => v.MemberId).ToDictionary(g => g.Key, g => g.OrderByDescending(v => v.CreatedAt).ThenByDescending(v => v.Id).First());
+    public static bool HasConsensus(IEnumerable<Guid> activeVotingIdentityIds, IEnumerable<Vote> votes, IReadOnlyDictionary<Guid, Guid> memberIdentities)
+    {
+        var identities = activeVotingIdentityIds.Distinct().ToArray();
+        if (identities.Length == 0) return false;
+        var latest = LatestVotes(votes, memberIdentities);
+        return identities.All(id => latest.TryGetValue(id, out var vote) && vote.Choice == VoteChoice.Like);
+    }
+    public static IReadOnlyDictionary<Guid, Vote> LatestVotes(IEnumerable<Vote> votes, IReadOnlyDictionary<Guid, Guid> memberIdentities) => votes
+        .GroupBy(v => memberIdentities.GetValueOrDefault(v.MemberId, v.MemberId))
+        .ToDictionary(g => g.Key, g => g.OrderByDescending(v => v.CreatedAt).ThenByDescending(v => v.Id).First());
 }
 public static class AiLearningRules
 {

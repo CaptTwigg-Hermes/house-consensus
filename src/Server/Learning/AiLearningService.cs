@@ -62,9 +62,12 @@ public sealed class AiLearningService(AppDbContext db, IAiRuleGenerator generato
 {
     public async Task<AiRuleProposal> CreateProposalAsync(Guid ownerId, CancellationToken ct)
     {
-        var notes = await db.Votes.AsNoTracking().Where(x => x.Note != null && x.Choice != VoteChoice.NotVoted)
+        var members = await db.Members.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.VotingIdentityId == Guid.Empty ? x.Id : x.VotingIdentityId, ct);
+        var noteVotes = await db.Votes.AsNoTracking().Where(x => x.Note != null && x.Choice != VoteChoice.NotVoted).ToListAsync(ct);
+        var notes = noteVotes.GroupBy(x => new { x.ListingId, Identity = members.GetValueOrDefault(x.MemberId, x.MemberId) })
+            .Select(x => x.OrderByDescending(v => v.CreatedAt).ThenByDescending(v => v.Id).First())
             .OrderByDescending(x => x.CreatedAt).Take(200)
-            .Select(x => new VoteNoteInput(x.Id, x.ListingId, x.MemberId, x.Choice, x.Tags, x.Note!)).ToListAsync(ct);
+            .Select(x => new VoteNoteInput(x.Id, x.ListingId, x.MemberId, x.Choice, x.Tags, x.Note!)).ToList();
         if (notes.Count == 0) throw new DomainException("No vote notes are available.");
         var generated = await generator.GenerateAsync(notes, ct);
         AiLearningRules.Validate(generated.RuleJson);

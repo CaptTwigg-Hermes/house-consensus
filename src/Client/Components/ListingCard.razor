@@ -84,7 +84,7 @@
     private bool HasScoreBreakdown => Listing.FamilyPrivacyScore.HasValue && Listing.KidsSpaceScore.HasValue && Listing.GardenScore.HasValue && Listing.SharedLivingScore.HasValue && Listing.PracticalScore.HasValue && Listing.FamilyPrivacyWeight.HasValue && Listing.KidsSpaceWeight.HasValue && Listing.GardenWeight.HasValue && Listing.SharedLivingWeight.HasValue && Listing.PracticalWeight.HasValue;
     private string TooltipId => $"score-tooltip-{Listing.Id:N}";
     private static string? VoteStyle(VoteDto vote) => vote.Choice == VoteChoice.Like
-        ? $"--avatar-color: {AvatarColor.Resolve(vote.MemberColor, vote.MemberId)}; background-color: var(--avatar-color)"
+        ? $"--avatar-color: {AvatarColor.Resolve(vote.MemberColor, vote.EffectiveMemberId ?? vote.MemberId)}; background-color: var(--avatar-color)"
         : null;
     private static RenderFragment ScoreRow(string label, double score, double weight) => builder =>
     {

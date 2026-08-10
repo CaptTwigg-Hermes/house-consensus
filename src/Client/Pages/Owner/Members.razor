@@ -6,11 +6,24 @@
 <header class="page-head"><div><p class="eyebrow">@L["Owner"]</p><h1>@L["Members"]</h1><p>@L["MembersIntro"]</p></div></header>
 @if (items is null) { <Loading /> } else
 {
-    <section class="member-list">@foreach (var member in items) { <article data-testid="member-row"><span class="avatar large" style="--avatar-color: @AvatarColor.Resolve(member.AvatarColor, member.Id); background-color: var(--avatar-color)">@Initials(member)</span><div><h2>@(string.IsNullOrWhiteSpace(member.DisplayName) ? member.Email.Split('@')[0] : member.DisplayName)</h2><p>@member.Email</p><span data-testid="member-status" class="badge @(member.IsActive ? "active" : "neutral")">@L[member.IsActive ? "Active" : "Inactive"]</span> <span data-testid="member-role" class="badge neutral">@L.Enum(member.Role)</span> <small>@member.Language.ToUpperInvariant()</small></div></article> }</section>
+    <button class="btn primary" data-testid="combine-identities-open" disabled="@(selected.Count < 2)" @onclick="OpenCombine">@L["CombineIdentities"]</button>
+    <section class="member-list">@foreach (var member in items) { <article data-testid="member-row"><input type="checkbox" aria-label="@member.Email" checked="@selected.Contains(member.Id)" @onchange="e => Select(member.Id, (bool)e.Value!)"/><span class="avatar large" style="--avatar-color: @AvatarColor.Resolve(member.AvatarColor, member.Id); background-color: var(--avatar-color)">@Initials(member)</span><div><h2>@Name(member)</h2><p>@member.Email</p><span data-testid="member-status" class="badge @(member.IsActive ? "active" : "neutral")">@L[member.IsActive ? "Active" : "Inactive"]</span> <span data-testid="member-role" class="badge neutral">@L.Enum(member.Role)</span> <small>@member.Language.ToUpperInvariant()</small>@if (!member.IsVotingPrimary) { <p data-testid="member-alias">@L["Aliases"] · @Name(items.Single(x => x.Id == member.VotingIdentityId)) <button class="btn ghost" @onclick="() => Separate(member.Id)">@L["Separate"]</button></p> }</div></article> }</section>
+    @if (showCombine) { <div class="modal-backdrop"><section role="dialog" aria-modal="true" data-testid="combine-dialog" class="modal"><h2>@L["ChoosePrimary"]</h2>@foreach (var member in items.Where(x => selected.Contains(x.Id))) { <label><input type="radio" name="primary" checked="@(primary == member.Id)" @onchange="() => primary = member.Id"/> @Name(member)</label> }<button class="btn" data-testid="combine-preview" @onclick="Preview">@L["PreviewChanges"]</button>@if (preview is not null) { <h3>@L["AffectedMembers"]</h3><ul>@foreach (var member in preview.AffectedMembers) { <li>@Name(member)</li> }</ul><h3>@L["ConflictingListings"]</h3><ul>@foreach (var conflict in preview.Conflicts) { <li>@conflict.Address</li> }</ul><button class="btn primary" data-testid="combine-confirm" @onclick="Confirm">@L["ConfirmCombination"]</button> }</section></div> }
 }
 </OwnerOnly>
 @code {
     private List<MemberDto>? items;
+    private readonly HashSet<Guid> selected = [];
+    private Guid primary;
+    private bool showCombine;
+    private VotingIdentityPreview? preview;
     protected override async Task OnInitializedAsync() => items = await Api.GetAsync<List<MemberDto>>("api/members") ?? [];
     private static string Initials(MemberDto m) => AvatarInitials.From(m.DisplayName, m.Email);
+    private static string Name(MemberDto m) => string.IsNullOrWhiteSpace(m.DisplayName) ? m.Email.Split('@')[0] : m.DisplayName;
+    private void Select(Guid id, bool value) { if (value) selected.Add(id); else selected.Remove(id); }
+    private void OpenCombine() { primary = selected.First(); preview = null; showCombine = true; }
+    private async Task Preview() => preview = await Api.PreviewVotingIdentity(primary, selected);
+    private async Task Confirm() { using var response = await Api.CombineVotingIdentity(primary, selected); await ApiClient.EnsureSuccess(response); await Reload(); showCombine = false; selected.Clear(); }
+    private async Task Separate(Guid id) { using var response = await Api.SeparateVotingIdentity(id); await ApiClient.EnsureSuccess(response); await Reload(); }
+    private async Task Reload() => items = await Api.GetAsync<List<MemberDto>>("api/members") ?? [];
 }

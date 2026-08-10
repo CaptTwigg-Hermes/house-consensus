@@ -23,8 +23,12 @@ public sealed record UpdateLanguage(string Language);
 public sealed record UpdateProfile(string DisplayName, string AvatarColor);
 public sealed record AuthModeDto(bool CloudflareAccess);
 public sealed record BuildVersionDto(string Version);
-public sealed record MemberDto(Guid Id, string Email, string DisplayName, string Language, MemberRole Role, bool IsActive, string AvatarColor = "");
-public sealed record VoteDto(long Id, Guid ListingId, Guid MemberId, VoteChoice Choice, ReasonTag[] Tags, DateTimeOffset CreatedAt, string? Note = null, string MemberInitials = "", string MemberColor = "", IReadOnlyCollection<VoteRatingDto>? Ratings = null, int Total = 0, int? OverallScore = null);
+public sealed record MemberDto(Guid Id, string Email, string DisplayName, string Language, MemberRole Role, bool IsActive, string AvatarColor = "", Guid? VotingIdentityId = null, bool IsVotingPrimary = true, IReadOnlyCollection<MemberAliasDto>? Aliases = null);
+public sealed record MemberAliasDto(Guid Id, string Email, string DisplayName, bool IsActive);
+public sealed record CombineVotingIdentities(Guid PrimaryMemberId, IReadOnlyCollection<Guid> MemberIds);
+public sealed record VotingIdentityConflict(Guid ListingId, string Address, IReadOnlyCollection<Guid> VotingMemberIds);
+public sealed record VotingIdentityPreview(IReadOnlyCollection<MemberDto> AffectedMembers, IReadOnlyCollection<VotingIdentityConflict> Conflicts);
+public sealed record VoteDto(long Id, Guid ListingId, Guid MemberId, VoteChoice Choice, ReasonTag[] Tags, DateTimeOffset CreatedAt, string? Note = null, string MemberInitials = "", string MemberColor = "", IReadOnlyCollection<VoteRatingDto>? Ratings = null, int Total = 0, int? OverallScore = null, Guid? EffectiveMemberId = null, string EffectiveMemberName = "", string? ViaMemberName = null);
 public sealed record ListingDto(
     Guid Id, string ExternalId, string Address, string? City, decimal? Price,
     double? FamilyFitScore, ListingState State, bool AiAssessed, double? AiConfidence,

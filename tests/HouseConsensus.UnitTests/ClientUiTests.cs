@@ -80,7 +80,7 @@ public sealed class ClientUiTests
         Assert.Contains("x.AvatarColor", program, StringComparison.Ordinal);
         Assert.Contains("AvatarColor.Resolve(member.AvatarColor, member.Id)", members, StringComparison.Ordinal);
         foreach (var source in new[] { detail, card, household })
-            Assert.Contains("AvatarColor.Resolve(vote.MemberColor, vote.MemberId)", source, StringComparison.Ordinal);
+            Assert.Contains("AvatarColor.Resolve(vote.MemberColor, vote.EffectiveMemberId ?? vote.MemberId)", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -185,7 +185,7 @@ public sealed class ClientUiTests
         var css = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/css/app.css"));
 
         Assert.Contains("--avatar-color: @AvatarColor.Resolve(member.AvatarColor, member.Id); background-color: var(--avatar-color)", members, StringComparison.Ordinal);
-        Assert.Contains("--avatar-color: @AvatarColor.Resolve(vote.MemberColor, vote.MemberId); background-color: var(--avatar-color)", detail, StringComparison.Ordinal);
+        Assert.Contains("--avatar-color: @AvatarColor.Resolve(vote.MemberColor, vote.EffectiveMemberId ?? vote.MemberId); background-color: var(--avatar-color)", detail, StringComparison.Ordinal);
         Assert.Contains(".avatar {\n  width: 32px;\n  height: 32px;\n  border-radius: 50%;\n  background: var(--avatar-color, var(--forest));", css, StringComparison.Ordinal);
     }
 
@@ -446,7 +446,7 @@ public sealed class ClientUiTests
 
         Assert.Contains("style=\"@VoteStyle(vote)\"", card, StringComparison.Ordinal);
         Assert.Contains("vote.Choice == VoteChoice.Like", card, StringComparison.Ordinal);
-        Assert.Contains("AvatarColor.Resolve(vote.MemberColor, vote.MemberId)", card, StringComparison.Ordinal);
+        Assert.Contains("AvatarColor.Resolve(vote.MemberColor, vote.EffectiveMemberId ?? vote.MemberId)", card, StringComparison.Ordinal);
         Assert.Contains("background-color: var(--avatar-color)", card, StringComparison.Ordinal);
     }
 

@@ -30,6 +30,33 @@ public sealed class ConsensusTests
     }
     [Fact] public void Empty_household_never_has_consensus() => Assert.False(ConsensusRules.HasConsensus([], []));
     [Fact]
+    public void Combined_accounts_count_once_and_newest_alias_vote_wins()
+    {
+        var primary = Guid.NewGuid(); var alias = Guid.NewGuid(); var other = Guid.NewGuid(); var house = Guid.NewGuid(); var at = DateTimeOffset.UtcNow;
+        var identities = new Dictionary<Guid, Guid> { [primary] = primary, [alias] = primary, [other] = other };
+        var votes = new[]
+        {
+            new Vote { Id = 1, ListingId = house, MemberId = primary, Choice = VoteChoice.Dislike, CreatedAt = at },
+            new Vote { Id = 2, ListingId = house, MemberId = alias, Choice = VoteChoice.Like, CreatedAt = at },
+            new Vote { Id = 3, ListingId = house, MemberId = other, Choice = VoteChoice.Like, CreatedAt = at }
+        };
+
+        Assert.True(ConsensusRules.HasConsensus([primary, primary, other], votes, identities));
+        Assert.Equal(alias, ConsensusRules.LatestVotes(votes, identities)[primary].MemberId);
+    }
+    [Fact]
+    public void Separating_alias_restores_its_vote_from_unchanged_history()
+    {
+        var primary = Guid.NewGuid(); var alias = Guid.NewGuid(); var at = DateTimeOffset.UtcNow;
+        var votes = new[] { new Vote { Id = 1, MemberId = primary, Choice = VoteChoice.Like, CreatedAt = at }, new Vote { Id = 2, MemberId = alias, Choice = VoteChoice.Dislike, CreatedAt = at.AddSeconds(1) } };
+        var combined = new Dictionary<Guid, Guid> { [primary] = primary, [alias] = primary };
+        var separated = new Dictionary<Guid, Guid> { [primary] = primary, [alias] = alias };
+
+        Assert.Single(ConsensusRules.LatestVotes(votes, combined));
+        Assert.Equal(2, ConsensusRules.LatestVotes(votes, separated).Count);
+        Assert.Equal(VoteChoice.Like, ConsensusRules.LatestVotes(votes, separated)[primary].Choice);
+    }
+    [Fact]
     public void Vote_note_is_optional_editable_and_audited()
     {
         var member = Guid.NewGuid(); var at = DateTimeOffset.UtcNow;
