@@ -55,7 +55,8 @@
 @code {
     [Parameter] public Guid Id { get; set; } private ListingDto? listing; private string overrideReason = ""; private IDisposable? liveSubscription; private bool editingVoteNote; private string editVoteNote = "";
     protected override async Task OnInitializedAsync() { await Live.WatchAsync(Id); liveSubscription = Live.OnListingChanged(LiveChanged); await Load(); }
-    private VoteDto? LatestOwnVote => listing?.Votes.Where(x => x.MemberId == Auth.User?.Id).OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id).FirstOrDefault();
+    private Guid? ViewerVotingIdentityId => Auth.User is null ? null : Auth.User.VotingIdentityId ?? Auth.User.Id;
+    private VoteDto? LatestOwnVote => listing?.Votes.Where(x => (x.EffectiveMemberId ?? x.MemberId) == ViewerVotingIdentityId).OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id).FirstOrDefault();
     private async Task Load() => listing = await Api.GetAsync<ListingDto>($"api/listings/{Id}");
     private async Task Withdraw() { using var response = await Api.WithdrawListing(Id); await ApiClient.EnsureSuccess(response); Nav.NavigateTo("browse"); }
     private void LiveChanged() => InvokeAsync(async () => { await Load(); StateHasChanged(); });

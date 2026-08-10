@@ -13,6 +13,7 @@ using HouseConsensus.Shared;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
@@ -55,7 +56,7 @@ var magicRequestPermitLimit = builder.Configuration.GetValue("Auth:MagicRequestP
 var magicConsumePermitLimit = builder.Configuration.GetValue("Auth:MagicConsumePermitLimit", 20);
 var listingLookupPermitLimit = builder.Configuration.GetValue("Listings:LookupPermitLimit", 12);
 builder.Services.AddRateLimiter(o => { o.RejectionStatusCode = StatusCodes.Status429TooManyRequests; o.AddPolicy("magic-request", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = magicRequestPermitLimit, Window = TimeSpan.FromMinutes(15), QueueLimit = 0 })); o.AddPolicy("magic-consume", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = magicConsumePermitLimit, Window = TimeSpan.FromMinutes(15), QueueLimit = 0 })); o.AddPolicy("listing-lookup", context => RateLimitPartition.GetFixedWindowLimiter(context.User.Identity?.IsAuthenticated == true ? context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "authenticated" : context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = listingLookupPermitLimit, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 })); });
-builder.Services.AddSignalR(); builder.Services.AddHealthChecks().AddDbContextCheck<AppDbContext>();
+builder.Services.AddSignalR(); builder.Services.AddHealthChecks().AddDbContextCheck<AppDbContext>(); builder.Services.AddDataProtection();
 builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddScoped<MagicLinkService>(); builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddMemoryCache(options => options.SizeLimit = 128 * 1024 * 1024); builder.Services.AddHttpClient<ListingImageService>(client => { client.Timeout = TimeSpan.FromSeconds(15); client.DefaultRequestHeaders.UserAgent.ParseAdd("HouseConsensus/1.0"); });
 builder.Services.AddHttpClient<BoligsidenListingLookup>(client => client.Timeout = TimeSpan.FromSeconds(20))
@@ -106,23 +107,40 @@ auth.MapPut("/profile", async (UpdateProfile request, ClaimsPrincipal user, AppD
 
 var members = app.MapGroup("/api/members").RequireAuthorization("owner");
 members.MapGet("/", async (AppDbContext db, CancellationToken ct) => (await db.Members.OrderBy(x => x.Email).ToListAsync(ct)).Select(ToMemberDto));
-members.MapPost("/voting-identities/preview", async (CombineVotingIdentities request, AppDbContext db, CancellationToken ct) =>
+members.MapPost("/voting-identities/preview", async (CombineVotingIdentities request, ClaimsPrincipal user, AppDbContext db, IDataProtectionProvider protection, TimeProvider clock, CancellationToken ct) =>
 {
+    await using var transaction = await db.Database.BeginTransactionAsync(ct); await LockVotingIdentities(db, ct);
     var affected = await ResolveCombinationMembers(request, db, ct); if (affected is null) return Results.BadRequest(new { error = "Choose a primary and complete, non-overlapping voting identities." });
     var ids = affected.Select(x => x.Id).ToArray();
     var conflicts = await db.Votes.Where(x => ids.Contains(x.MemberId)).GroupBy(x => x.ListingId).Where(x => x.Select(v => v.MemberId).Distinct().Count() > 1).Select(x => new { x.Key, MemberIds = x.Select(v => v.MemberId).Distinct().ToArray() }).ToListAsync(ct);
     var listingIds = conflicts.Select(x => x.Key).ToArray(); var addresses = await db.Listings.Where(x => listingIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.Address, ct);
-    return Results.Ok(new VotingIdentityPreview(affected.Select(ToMemberDto).ToArray(), conflicts.Select(x => new VotingIdentityConflict(x.Key, addresses.GetValueOrDefault(x.Key, ""), x.MemberIds)).ToArray()));
+    var snapshot = await VotingIdentitySnapshot(request, user.MemberId(), affected, clock.GetUtcNow().AddMinutes(10), db, ct);
+    var token = protection.CreateProtector("HouseConsensus.VotingIdentityPreview.v1").Protect(JsonSerializer.Serialize(snapshot));
+    await transaction.CommitAsync(ct);
+    return Results.Ok(new VotingIdentityPreview(affected.Select(ToMemberDto).ToArray(), conflicts.Select(x => new VotingIdentityConflict(x.Key, addresses.GetValueOrDefault(x.Key, ""), x.MemberIds)).ToArray(), token));
 });
-members.MapPost("/voting-identities/combine", async (CombineVotingIdentities request, AppDbContext db, IHubContext<ConsensusHub> hub, CancellationToken ct) =>
+members.MapPost("/voting-identities/combine", async (ConfirmVotingIdentities request, ClaimsPrincipal user, AppDbContext db, IDataProtectionProvider protection, TimeProvider clock, IHubContext<ConsensusHub> hub, CancellationToken ct) =>
 {
-    var affected = await ResolveCombinationMembers(request, db, ct); if (affected is null) return Results.BadRequest(new { error = "Choose a primary and complete, non-overlapping voting identities." });
+    if (string.IsNullOrWhiteSpace(request.PreviewToken)) return Results.BadRequest(new { error = "Preview is required." });
+    VotingIdentitySnapshotDto expected;
+    try { expected = JsonSerializer.Deserialize<VotingIdentitySnapshotDto>(protection.CreateProtector("HouseConsensus.VotingIdentityPreview.v1").Unprotect(request.PreviewToken))!; }
+    catch { return Results.BadRequest(new { error = "Preview token is invalid." }); }
+    var selection = new CombineVotingIdentities(request.PrimaryMemberId, request.MemberIds);
+    await using var transaction = await db.Database.BeginTransactionAsync(ct); await LockVotingIdentities(db, ct);
+    var affected = await ResolveCombinationMembers(selection, db, ct); if (affected is null) return Results.BadRequest(new { error = "Choose a primary and complete, non-overlapping voting identities." });
+    var current = await VotingIdentitySnapshot(selection, user.MemberId(), affected, expected.ExpiresAt, db, ct);
+    if (expected.ExpiresAt < clock.GetUtcNow() || JsonSerializer.Serialize(expected) != JsonSerializer.Serialize(current)) return Results.Conflict(new { error = "Preview is stale; review the changes again." });
     foreach (var member in affected) member.VotingIdentityId = request.PrimaryMemberId;
-    await db.SaveChangesAsync(ct); await hub.Clients.All.SendAsync("MembershipChanged", request.PrimaryMemberId, true, ct); return Results.NoContent();
+    await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); await hub.Clients.All.SendAsync("MembershipChanged", request.PrimaryMemberId, true, ct); return Results.NoContent();
 });
 members.MapPost("/{id:guid}/voting-identity/separate", async (Guid id, AppDbContext db, IHubContext<ConsensusHub> hub, CancellationToken ct) =>
 {
-    var member = await db.Members.FindAsync([id], ct); if (member is null) return Results.NotFound(); member.VotingIdentityId = member.Id; await db.SaveChangesAsync(ct); await hub.Clients.All.SendAsync("MembershipChanged", id, member.IsActive, ct); return Results.NoContent();
+    await using var transaction = await db.Database.BeginTransactionAsync(ct); await LockVotingIdentities(db, ct);
+    var member = await db.Members.SingleOrDefaultAsync(x => x.Id == id, ct); if (member is null) return Results.NotFound();
+    var identity = member.VotingIdentityId == Guid.Empty ? member.Id : member.VotingIdentityId;
+    if (identity == member.Id) return Results.BadRequest(new { error = "Member already has a separate voting identity." });
+    if (!await db.Members.AnyAsync(x => x.Id == identity && (x.VotingIdentityId == x.Id || x.VotingIdentityId == Guid.Empty), ct)) return Results.Conflict(new { error = "Voting identity group is invalid." });
+    member.VotingIdentityId = member.Id; await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); await hub.Clients.All.SendAsync("MembershipChanged", id, member.IsActive, ct); return Results.NoContent();
 });
 
 var listings = app.MapGroup("/api/listings").RequireAuthorization();
@@ -199,6 +217,7 @@ listings.MapPost("/{id:guid}/votes", async (Guid id, CastVote request, ClaimsPri
     {
         var vote = new Vote(id, user.MemberId(), (request.Ratings ?? []).Select(x => new VoteRating { Category = x.Category, Rating = x.Rating }), request.OverallScore, request.Note, clock.GetUtcNow());
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await LockVotingIdentities(db, ct);
         await LockListingMutation(id, db, ct);
         if (!await db.Listings.AnyAsync(x => x.Id == id && (x.State == ListingState.Active || x.State == ListingState.Restored), ct)) return Results.NotFound();
         db.Votes.Add(vote); await db.SaveChangesAsync(ct);
@@ -379,7 +398,15 @@ static async Task<List<Member>?> ResolveCombinationMembers(CombineVotingIdentiti
     var selected = await db.Members.Where(x => requested.Contains(x.Id)).ToListAsync(ct); if (selected.Count != requested.Length) return null;
     var groupIds = selected.Select(x => x.VotingIdentityId == Guid.Empty ? x.Id : x.VotingIdentityId).Distinct().ToArray();
     var affected = await db.Members.Where(x => groupIds.Contains(x.VotingIdentityId) || (x.VotingIdentityId == Guid.Empty && groupIds.Contains(x.Id))).ToListAsync(ct);
-    return affected.All(x => requested.Contains(x.Id)) ? affected : null;
+    return affected.All(x => requested.Contains(x.Id)) && affected.Any(x => x.Id == request.PrimaryMemberId) ? affected : null;
+}
+static async Task<VotingIdentitySnapshotDto> VotingIdentitySnapshot(CombineVotingIdentities request, Guid ownerId, List<Member> affected, DateTimeOffset expiresAt, AppDbContext db, CancellationToken ct)
+{
+    var ids = affected.Select(x => x.Id).Order().ToArray();
+    var memberState = affected.OrderBy(x => x.Id).Select(x => $"{x.Id:N}:{(x.VotingIdentityId == Guid.Empty ? x.Id : x.VotingIdentityId):N}").ToArray();
+    var votes = await db.Votes.AsNoTracking().Where(x => ids.Contains(x.MemberId)).OrderBy(x => x.Id).ToListAsync(ct);
+    var voteState = votes.Select(x => $"{x.Id}:{x.ListingId:N}:{x.MemberId:N}:{x.Choice}:{x.CreatedAt:O}").ToArray();
+    return new(ownerId, request.PrimaryMemberId, request.MemberIds.Append(request.PrimaryMemberId).Distinct().Order().ToArray(), memberState, voteState, expiresAt);
 }
 static async Task<IResult> ChangeComment(Guid id, ClaimsPrincipal user, AppDbContext db, IHubContext<ConsensusHub> hub, TimeProvider clock, string? body, bool delete, CancellationToken ct)
 {
@@ -412,6 +439,8 @@ static string Csv(string value)
     return $"\"{value.Replace("\"", "\"\"")}\"";
 }
 static async Task LockListingMutation(Guid id, AppDbContext db, CancellationToken ct) => await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({id.ToString()}, 0))", ct);
+static async Task LockVotingIdentities(AppDbContext db, CancellationToken ct) => await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(484055345)", ct);
 static async Task<bool> CanAccessListing(Guid id, ClaimsPrincipal user, AppDbContext db, CancellationToken ct) { var state = await db.Listings.Where(x => x.Id == id).Select(x => (ListingState?)x.State).SingleOrDefaultAsync(ct); return state.HasValue && (state != ListingState.Archived || user.IsInRole(MemberRole.Owner.ToString())); }
+public sealed record VotingIdentitySnapshotDto(Guid OwnerId, Guid PrimaryMemberId, Guid[] MemberIds, string[] MemberState, string[] VoteState, DateTimeOffset ExpiresAt);
 public static partial class Program { }
 public static class ClaimsExtensions { public static Guid MemberId(this ClaimsPrincipal user) => Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier) ?? throw new UnauthorizedAccessException()); }

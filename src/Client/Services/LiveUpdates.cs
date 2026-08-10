@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.SignalR.Client;
 
 namespace HouseConsensus.Client.Services;
 
-public sealed class LiveUpdates(NavigationManager navigation) : IAsyncDisposable
+public sealed class LiveUpdates(NavigationManager navigation, AuthState auth) : IAsyncDisposable
 {
     private HubConnection? hub;
     public event Action? Changed;
@@ -16,7 +16,7 @@ public sealed class LiveUpdates(NavigationManager navigation) : IAsyncDisposable
         hub = new HubConnectionBuilder().WithUrl(navigation.ToAbsoluteUri("hubs/consensus")).WithAutomaticReconnect().Build();
         hub.On<Guid, bool>("ConsensusChanged", (_, _) => Changed?.Invoke());
         hub.On<Guid, ListingState>("ListingStateChanged", (_, _) => Changed?.Invoke());
-        hub.On<Guid, bool>("MembershipChanged", (_, _) => Changed?.Invoke());
+        hub.On<Guid, bool>("MembershipChanged", (_, _) => MembershipChangedAsync());
         hub.Reconnected += _ => { Changed?.Invoke(); return Task.CompletedTask; };
         hub.Closed += _ => { Changed?.Invoke(); return Task.CompletedTask; };
         try { await hub.StartAsync(); } catch (HttpRequestException) { }
@@ -36,6 +36,12 @@ public sealed class LiveUpdates(NavigationManager navigation) : IAsyncDisposable
             hub.On<Guid, bool>("ConsensusChanged", (_, _) => callback()),
             hub.On<Guid, bool>("MembershipChanged", (_, _) => callback())
         ]);
+    }
+
+    public async Task MembershipChangedAsync()
+    {
+        await auth.RefreshAsync();
+        Changed?.Invoke();
     }
 
     private sealed class Subscriptions(IEnumerable<IDisposable> items) : IDisposable

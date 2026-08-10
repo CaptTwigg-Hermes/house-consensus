@@ -13,6 +13,28 @@ namespace HouseConsensus.UnitTests;
 public sealed class ClientUiTests
 {
     [Fact]
+    public async Task Membership_live_update_refreshes_authenticated_voting_identity_before_view_updates()
+    {
+        var memberId = Guid.NewGuid();
+        var identityId = Guid.NewGuid();
+        var handler = new BlockingAuthRefreshHandler(memberId, identityId);
+        var auth = new AuthState(new ApiClient(new HttpClient(handler) { BaseAddress = new Uri("https://example.test/") }), new CaptureJsRuntime());
+        var live = new LiveUpdates(new TestNavigationManager(), auth);
+        var changed = false;
+        live.Changed += () => changed = true;
+
+        var refresh = live.MembershipChangedAsync();
+        await handler.MeRequested.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        Assert.False(changed);
+
+        handler.ReleaseMe.SetResult();
+        await refresh;
+
+        Assert.True(changed);
+        Assert.Equal(identityId, auth.User?.VotingIdentityId);
+    }
+
+    [Fact]
     public void Authenticated_member_can_update_only_their_own_profile()
     {
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
@@ -539,6 +561,32 @@ public sealed class ClientUiTests
     }
 
     [Fact]
+    public void Personalized_vote_surfaces_use_effective_identity_but_note_editing_uses_raw_actor()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var household = File.ReadAllText(Path.Combine(root, "src/Client/Pages/HouseholdVotes.razor"));
+        var sorting = File.ReadAllText(Path.Combine(root, "src/Client/Pages/HouseholdVoteSorting.cs"));
+        var card = File.ReadAllText(Path.Combine(root, "src/Client/Components/ListingCard.razor"));
+        var detail = File.ReadAllText(Path.Combine(root, "src/Client/Pages/Detail.razor"));
+
+        Assert.Contains("ViewerVotingIdentityId", household, StringComparison.Ordinal);
+        Assert.Contains("vote.EffectiveMemberId ?? vote.MemberId", sorting, StringComparison.Ordinal);
+        Assert.Contains("ViewerVotingIdentityId", card, StringComparison.Ordinal);
+        Assert.Contains("ViewerVotingIdentityId", detail, StringComparison.Ordinal);
+        Assert.Contains("vote.MemberId == Auth.User?.Id", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("vote.EffectiveMemberId == Auth.User?.Id", detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Combined_identity_migration_is_discoverable_by_EF()
+    {
+        var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
+        var migration = File.ReadAllText(Path.Combine(root, "src/Server/Data/Migrations/202608100001_AddCombinedVotingIdentities.cs"));
+        Assert.Contains("DbContext(typeof(AppDbContext))", migration, StringComparison.Ordinal);
+        Assert.Contains("Migration(\"202608100001_AddCombinedVotingIdentities\")", migration, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Household_votes_page_has_a_visual_pulse_and_property_rich_cards()
     {
         var root = Path.GetFullPath("../../../../../", AppContext.BaseDirectory);
@@ -753,6 +801,28 @@ public sealed class ClientUiTests
             i18nSource, StringComparison.Ordinal);
         var css = File.ReadAllText(Path.Combine(root, "src/Client/wwwroot/css/app.css"));
         Assert.Matches(@"\.noise-level small > span:last-child\s*\{[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap", css);
+    }
+
+    private sealed class BlockingAuthRefreshHandler(Guid memberId, Guid identityId) : HttpMessageHandler
+    {
+        public TaskCompletionSource MeRequested { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseMe { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/api/auth/mode", StringComparison.Ordinal) == true)
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"cloudflareAccess\":false}", System.Text.Encoding.UTF8, "application/json") };
+            MeRequested.SetResult();
+            await ReleaseMe.Task.WaitAsync(cancellationToken);
+            var json = System.Text.Json.JsonSerializer.Serialize(new MemberDto(memberId, "alias@example.test", "Alias", "#123456", MemberRole.Member, true, "en", identityId, false));
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json") };
+        }
+    }
+
+    private sealed class TestNavigationManager : Microsoft.AspNetCore.Components.NavigationManager
+    {
+        public TestNavigationManager() => Initialize("https://example.test/", "https://example.test/");
+        protected override void NavigateToCore(string uri, Microsoft.AspNetCore.Components.NavigationOptions options) { }
     }
 
     private sealed class CloudflareUnauthenticatedHandler : HttpMessageHandler

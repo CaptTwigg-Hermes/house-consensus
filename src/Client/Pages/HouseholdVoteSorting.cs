@@ -13,15 +13,15 @@ public enum HouseholdVoteSort
 
 public static class HouseholdVoteSorting
 {
-    public static ListingDto[] Sort(IEnumerable<ListingDto> listings, Guid? viewerId, HouseholdVoteSort sort)
+    public static ListingDto[] Sort(IEnumerable<ListingDto> listings, Guid? viewerVotingIdentityId, HouseholdVoteSort sort)
     {
-        var visible = listings.Where(listing => OtherVotes(listing, viewerId).Any());
+        var visible = listings.Where(listing => OtherVotes(listing, viewerVotingIdentityId).Any());
         IOrderedEnumerable<ListingDto> ordered = sort switch
         {
             HouseholdVoteSort.MostPositive => visible
-                .OrderByDescending(listing => OtherVotes(listing, viewerId).Count(vote => vote.Choice == VoteChoice.Like))
-                .ThenBy(listing => OtherVotes(listing, viewerId).Count(vote => vote.Choice == VoteChoice.Dislike))
-                .ThenByDescending(listing => LatestActivity(listing, viewerId)),
+                .OrderByDescending(listing => OtherVotes(listing, viewerVotingIdentityId).Count(vote => vote.Choice == VoteChoice.Like))
+                .ThenBy(listing => OtherVotes(listing, viewerVotingIdentityId).Count(vote => vote.Choice == VoteChoice.Dislike))
+                .ThenByDescending(listing => LatestActivity(listing, viewerVotingIdentityId)),
             HouseholdVoteSort.FamilyFit => visible
                 .OrderByDescending(listing => listing.TrustedFamilyFitScore.HasValue)
                 .ThenByDescending(listing => listing.TrustedFamilyFitScore),
@@ -31,7 +31,7 @@ public static class HouseholdVoteSorting
             HouseholdVoteSort.PriceHigh => visible
                 .OrderByDescending(listing => listing.Price.HasValue)
                 .ThenByDescending(listing => listing.Price),
-            _ => visible.OrderByDescending(listing => LatestActivity(listing, viewerId))
+            _ => visible.OrderByDescending(listing => LatestActivity(listing, viewerVotingIdentityId))
         };
 
         return ordered
@@ -40,9 +40,9 @@ public static class HouseholdVoteSorting
             .ToArray();
     }
 
-    private static IEnumerable<VoteDto> OtherVotes(ListingDto listing, Guid? viewerId) =>
-        listing.Votes.Where(vote => vote.MemberId != viewerId);
+    private static IEnumerable<VoteDto> OtherVotes(ListingDto listing, Guid? viewerVotingIdentityId) =>
+        listing.Votes.Where(vote => (vote.EffectiveMemberId ?? vote.MemberId) != viewerVotingIdentityId);
 
-    private static DateTimeOffset LatestActivity(ListingDto listing, Guid? viewerId) =>
-        OtherVotes(listing, viewerId).Max(vote => vote.CreatedAt);
+    private static DateTimeOffset LatestActivity(ListingDto listing, Guid? viewerVotingIdentityId) =>
+        OtherVotes(listing, viewerVotingIdentityId).Max(vote => vote.CreatedAt);
 }

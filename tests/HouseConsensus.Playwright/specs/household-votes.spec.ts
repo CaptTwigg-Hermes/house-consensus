@@ -41,14 +41,15 @@ test('household votes presents shared feedback as a responsive visual dashboard'
     ]);
     expect(meResponse.ok()).toBeTruthy();
     expect(listingsResponse.ok()).toBeTruthy();
-    const me = await meResponse.json() as { id: string };
+    const me = await meResponse.json() as { id: string; votingIdentityId?: string };
     const listings = await listingsResponse.json() as Array<{
       id: string;
       address: string;
       price: number | null;
-      votes: Array<{ memberId: string }>;
+      votes: Array<{ memberId: string; effectiveMemberId?: string }>;
     }>;
-    const visibleListings = listings.filter((listing) => listing.votes.some((vote) => vote.memberId !== me.id));
+    const viewerIdentity = me.votingIdentityId ?? me.id;
+    const visibleListings = listings.filter((listing) => listing.votes.some((vote) => (vote.effectiveMemberId ?? vote.memberId) !== viewerIdentity));
     const visibleById = new Map(visibleListings.map((listing) => [listing.id.toLowerCase(), listing]));
     const renderedPriceOrder = await household.memberPage.getByTestId('household-vote-card')
       .locator('.household-vote-listing')

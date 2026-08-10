@@ -111,8 +111,9 @@ else
     private bool loading = true;
     private ListingDto[] listings = [];
     private HouseholdVoteSort sort = HouseholdVoteSort.LatestActivity;
-    private IEnumerable<VoteDto> OtherVotes(ListingDto listing) => listing.Votes.Where(v => v.MemberId != Auth.User?.Id);
-    private ListingDto[] Items => HouseholdVoteSorting.Sort(listings, Auth.User?.Id, sort);
+    private Guid? ViewerVotingIdentityId => Auth.User is null ? null : Auth.User.VotingIdentityId ?? Auth.User.Id;
+    private IEnumerable<VoteDto> OtherVotes(ListingDto listing) => listing.Votes.Where(v => (v.EffectiveMemberId ?? v.MemberId) != ViewerVotingIdentityId);
+    private ListingDto[] Items => HouseholdVoteSorting.Sort(listings, ViewerVotingIdentityId, sort);
     private int LikeCount => Items.Sum(LikeCountFor);
     private int NoteCount => Items.Sum(x => OtherVotes(x).Count(v => !string.IsNullOrWhiteSpace(v.Note)));
 

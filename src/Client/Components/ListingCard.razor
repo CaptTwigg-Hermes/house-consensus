@@ -74,7 +74,8 @@
     [Parameter, EditorRequired] public ListingDto Listing { get; set; } = default!;
     [Parameter] public bool ShowVoting { get; set; }
     [Parameter] public EventCallback OnVoted { get; set; }
-    private VoteDto? LatestOwnVote => Listing.Votes.Where(x => x.MemberId == Auth.User?.Id).OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id).FirstOrDefault();
+    private Guid? ViewerVotingIdentityId => Auth.User is null ? null : Auth.User.VotingIdentityId ?? Auth.User.Id;
+    private VoteDto? LatestOwnVote => Listing.Votes.Where(x => (x.EffectiveMemberId ?? x.MemberId) == ViewerVotingIdentityId).OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id).FirstOrDefault();
     private bool IsRecentlyNew => Listing.FirstSeenAt is { } firstSeen
         && firstSeen <= DateTimeOffset.UtcNow
         && firstSeen > DateTimeOffset.UtcNow.AddHours(-120);

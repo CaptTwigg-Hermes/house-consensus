@@ -73,6 +73,18 @@ public sealed class HouseholdVoteSortingTests
         Assert.Empty(HouseholdVoteSorting.Sort([listing], Viewer, HouseholdVoteSort.LatestActivity));
     }
 
+    [Fact]
+    public void Excludes_alias_votes_belonging_to_the_viewers_effective_identity()
+    {
+        var listing = Listing("Private alias", 1, 1, VoteChoice.Like, DateTimeOffset.UtcNow) with
+        {
+            Votes = [new VoteDto(1, Guid.NewGuid(), Guid.NewGuid(), VoteChoice.Like, [], DateTimeOffset.UtcNow,
+                EffectiveMemberId: Viewer)]
+        };
+
+        Assert.Empty(HouseholdVoteSorting.Sort([listing], Viewer, HouseholdVoteSort.LatestActivity));
+    }
+
     private static string[] Addresses(IEnumerable<ListingDto> listings) => listings.Select(x => x.Address).ToArray();
 
     private static ListingDto Listing(string address, decimal? price, double? fit, VoteChoice choice, DateTimeOffset created, int extraLikes = 0)

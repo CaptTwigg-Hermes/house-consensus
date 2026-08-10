@@ -495,6 +495,30 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Ai_learning_filters_not_voted_after_selecting_newest_effective_identity_vote()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = Db();
+        var owner = new Member { Email = "learning-history-owner@example.test", Role = MemberRole.Owner };
+        var alias = new Member { Email = "learning-history-alias@example.test", VotingIdentityId = owner.Id };
+        var other = new Member { Email = "learning-history-other@example.test" };
+        var cleared = new Listing { ExternalId = "cleared-learning-source", Address = "Cleared source" };
+        var retained = new Listing { ExternalId = "retained-learning-source", Address = "Retained source" };
+        db.AddRange(owner, alias, other, cleared, retained); await db.SaveChangesAsync(ct);
+        var at = DateTimeOffset.UtcNow;
+        db.Votes.AddRange(
+            new Vote(cleared.Id, owner.Id, VoteChoice.Dislike, [], "obsolete reason", at),
+            new Vote(cleared.Id, alias.Id, VoteChoice.NotVoted, [], "cleared", at.AddMinutes(1)),
+            new Vote(retained.Id, other.Id, VoteChoice.Dislike, [], "current reason", at.AddMinutes(2)));
+        await db.SaveChangesAsync(ct);
+
+        var proposal = await new AiLearningService(db, new FakeRuleGenerator(), TimeProvider.System).CreateProposalAsync(owner.Id, ct);
+        var notes = System.Text.Json.JsonSerializer.Deserialize<VoteNoteInput[]>(proposal.SupportingNotesJson)!;
+
+        Assert.Equal(retained.Id, Assert.Single(notes).ListingId);
+    }
+
+    [Fact]
     public async Task Ai_rule_approval_rejects_a_stale_impact_preview()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -740,6 +764,26 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Combined_identity_migration_backfills_legacy_members_and_preserves_vote_audit()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(ct);
+        await using (var command = new NpgsqlCommand("ALTER TABLE members DROP COLUMN IF EXISTS \"VotingIdentityId\"; DELETE FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '202608100001_AddCombinedVotingIdentities';", connection))
+            await command.ExecuteNonQueryAsync(ct);
+        var memberId = Guid.NewGuid(); var listingId = Guid.NewGuid(); var at = DateTimeOffset.UtcNow;
+        await using (var command = new NpgsqlCommand("INSERT INTO members (\"Id\", \"Email\", \"DisplayName\", \"AvatarColor\", \"Language\", \"Role\", \"IsActive\", \"CreatedAt\") VALUES (@id, 'legacy-backfill@example.test', '', '', 'en', 'member', true, @at); INSERT INTO listings (\"Id\", \"ExternalId\", \"Address\", \"State\", \"AiAssessed\", \"ImportedAt\") VALUES (@listing, 'legacy-backfill', 'Legacy', 'active', false, @at); INSERT INTO votes (\"ListingId\", \"MemberId\", \"Choice\", \"Tags\", \"CreatedAt\") VALUES (@listing, @id, 'like', ARRAY[]::reason_tag[], @at);", connection))
+        { command.Parameters.AddWithValue("id", memberId); command.Parameters.AddWithValue("listing", listingId); command.Parameters.AddWithValue("at", at); await command.ExecuteNonQueryAsync(ct); }
+
+        await using (var migrate = Db()) await migrate.Database.MigrateAsync(ct);
+        await using var verify = Db();
+        Assert.Equal(memberId, (await verify.Members.FindAsync([memberId], ct))!.VotingIdentityId);
+        var vote = await verify.Votes.SingleAsync(x => x.MemberId == memberId, ct);
+        Assert.Equal(listingId, vote.ListingId); Assert.Equal(at.ToUnixTimeMilliseconds(), vote.CreatedAt.ToUnixTimeMilliseconds());
+        Assert.Contains("202608100001_AddCombinedVotingIdentities", await verify.Database.GetAppliedMigrationsAsync(ct));
+    }
+
+    [Fact]
     public async Task Profile_endpoint_updates_only_the_authenticated_member_and_rejects_invalid_payloads()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -782,6 +826,60 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
         Assert.Equal("#6d28d9", (await verify.Members.FindAsync([current.Id], ct))?.AvatarColor);
         Assert.Equal("Other", (await verify.Members.FindAsync([other.Id], ct))?.DisplayName);
         Assert.Equal("", (await verify.Members.FindAsync([other.Id], ct))?.AvatarColor);
+    }
+
+    [Fact]
+    public async Task Combine_requires_current_server_preview_and_preserves_complete_groups()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var owner = new Member { Email = "identity-owner@example.test", Role = MemberRole.Owner };
+        var alias = new Member { Email = "identity-alias@example.test" };
+        var other = new Member { Email = "identity-other@example.test" };
+        var listing = new Listing { ExternalId = "identity-preview", Address = "Identity preview" };
+        await using (var setup = Db()) { setup.AddRange(owner, alias, other, listing); await setup.SaveChangesAsync(ct); }
+        await using var factory = new WebApplicationFactory<CloudflareAccessOptions>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Development"); builder.UseSetting("Debug:AutoLogin", "true"); builder.UseSetting("E2E:TestAuth", "true"); builder.UseSetting("E2E:SeedData", "true");
+            builder.UseSetting("ConnectionStrings:Database", _connectionString); builder.UseSetting("Database:AutoMigrate", "false"); builder.UseSetting("INITIAL_OWNER_EMAIL", "");
+        });
+        using var client = factory.CreateClient(); client.DefaultRequestHeaders.Add("X-House-Consensus-CSRF", "1"); client.DefaultRequestHeaders.Add(DebugAutoLoginMiddleware.E2EEmailHeader, owner.Email);
+        var selection = new CombineVotingIdentities(owner.Id, [owner.Id, alias.Id]);
+
+        var direct = await client.PostAsJsonAsync("/api/members/voting-identities/combine", selection, ct);
+        Assert.Equal(HttpStatusCode.BadRequest, direct.StatusCode);
+
+        var previewResponse = await client.PostAsJsonAsync("/api/members/voting-identities/preview", selection, ct);
+        Assert.True(previewResponse.IsSuccessStatusCode, await previewResponse.Content.ReadAsStringAsync(ct));
+        using var preview = System.Text.Json.JsonDocument.Parse(await previewResponse.Content.ReadAsStringAsync(ct));
+        var token = preview.RootElement.GetProperty("previewToken").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(token));
+
+        await using (var blocker = new NpgsqlConnection(_connectionString))
+        {
+            await blocker.OpenAsync(ct);
+            await using var blockerTransaction = await blocker.BeginTransactionAsync(ct);
+            await using (var takeLock = new NpgsqlCommand("SELECT pg_advisory_xact_lock(484055345)", blocker, blockerTransaction)) await takeLock.ExecuteNonQueryAsync(ct);
+            var staleTask = client.PostAsJsonAsync("/api/members/voting-identities/combine", new { selection.PrimaryMemberId, selection.MemberIds, PreviewToken = token }, ct);
+            await Task.Delay(200, ct);
+            Assert.False(staleTask.IsCompleted);
+            await using (var insert = new NpgsqlCommand("INSERT INTO votes (\"ListingId\", \"MemberId\", \"Choice\", \"Tags\", \"CreatedAt\") VALUES (@listing, @member, 'like', ARRAY[]::reason_tag[], @at)", blocker, blockerTransaction))
+            { insert.Parameters.AddWithValue("listing", listing.Id); insert.Parameters.AddWithValue("member", alias.Id); insert.Parameters.AddWithValue("at", DateTimeOffset.UtcNow); await insert.ExecuteNonQueryAsync(ct); }
+            await blockerTransaction.CommitAsync(ct);
+            var stale = await staleTask;
+            Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        }
+
+        var freshPreview = await (await client.PostAsJsonAsync("/api/members/voting-identities/preview", selection, ct)).Content.ReadFromJsonAsync<VotingIdentityPreview>(ct);
+        var combined = await client.PostAsJsonAsync("/api/members/voting-identities/combine", new ConfirmVotingIdentities(selection.PrimaryMemberId, selection.MemberIds, freshPreview!.PreviewToken), ct);
+        Assert.Equal(HttpStatusCode.NoContent, combined.StatusCode);
+        var incomplete = await client.PostAsJsonAsync("/api/members/voting-identities/preview", new CombineVotingIdentities(other.Id, [alias.Id, other.Id]), ct);
+        Assert.Equal(HttpStatusCode.BadRequest, incomplete.StatusCode);
+
+        var separated = await client.PostAsync($"/api/members/{alias.Id}/voting-identity/separate", JsonContent.Create(new { }), ct);
+        Assert.Equal(HttpStatusCode.NoContent, separated.StatusCode);
+        await using var verify = Db();
+        Assert.Equal(alias.Id, (await verify.Members.FindAsync([alias.Id], ct))!.VotingIdentityId);
+        Assert.Single(await verify.Votes.Where(x => x.MemberId == alias.Id).ToListAsync(ct));
     }
 
     [Fact]

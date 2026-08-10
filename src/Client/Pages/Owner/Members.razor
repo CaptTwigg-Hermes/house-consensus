@@ -23,7 +23,7 @@
     private void Select(Guid id, bool value) { if (value) selected.Add(id); else selected.Remove(id); }
     private void OpenCombine() { primary = selected.First(); preview = null; showCombine = true; }
     private async Task Preview() => preview = await Api.PreviewVotingIdentity(primary, selected);
-    private async Task Confirm() { using var response = await Api.CombineVotingIdentity(primary, selected); await ApiClient.EnsureSuccess(response); await Reload(); showCombine = false; selected.Clear(); }
+    private async Task Confirm() { using var response = await Api.CombineVotingIdentity(primary, selected, preview!.PreviewToken); if (response.StatusCode == System.Net.HttpStatusCode.Conflict) { await Preview(); return; } await ApiClient.EnsureSuccess(response); await Reload(); showCombine = false; selected.Clear(); }
     private async Task Separate(Guid id) { using var response = await Api.SeparateVotingIdentity(id); await ApiClient.EnsureSuccess(response); await Reload(); }
     private async Task Reload() => items = await Api.GetAsync<List<MemberDto>>("api/members") ?? [];
 }

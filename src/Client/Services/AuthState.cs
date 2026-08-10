@@ -14,6 +14,10 @@ public sealed class AuthState(ApiClient api, IJSRuntime js)
     public async Task InitializeAsync()
     {
         if (Ready) return;
+        await RefreshAsync();
+    }
+    public async Task RefreshAsync()
+    {
         try
         {
             CloudflareAccess = (await api.GetAsync<AuthModeDto>("api/auth/mode"))?.CloudflareAccess ?? false;

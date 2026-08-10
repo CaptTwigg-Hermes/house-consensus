@@ -1,9 +1,12 @@
+using HouseConsensus.Server.Data;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 namespace HouseConsensus.Server.Data.Migrations;
 
-public partial class AddCombinedVotingIdentities : Migration
+[DbContext(typeof(AppDbContext)), Migration("202608100001_AddCombinedVotingIdentities")]
+public sealed class AddCombinedVotingIdentities : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
