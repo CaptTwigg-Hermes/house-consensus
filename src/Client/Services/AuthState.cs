@@ -3,7 +3,7 @@ using Microsoft.JSInterop;
 
 namespace HouseConsensus.Client.Services;
 
-public sealed class AuthState(ApiClient api, IJSRuntime js)
+public sealed class AuthState(ApiClient api, IJSRuntime js, ClientDiagnostics? diagnostics = null)
 {
     public MemberDto? User { get; private set; }
     public bool Ready { get; private set; }
@@ -23,7 +23,11 @@ public sealed class AuthState(ApiClient api, IJSRuntime js)
             CloudflareAccess = (await api.GetAsync<AuthModeDto>("api/auth/mode"))?.CloudflareAccess ?? false;
             User = await api.GetAsync<MemberDto>("api/auth/me");
         }
-        catch (HttpRequestException) { User = null; }
+        catch (HttpRequestException ex)
+        {
+            User = null;
+            if (diagnostics is not null) await diagnostics.ReportAsync("auth.initialize", ex);
+        }
         if (User is not null) UiCulture.Apply(User.Language);
         Ready = true;
         Changed?.Invoke();

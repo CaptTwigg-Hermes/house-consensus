@@ -2,6 +2,8 @@ using System.Net.Mail;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using HouseConsensus.Shared;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HouseConsensus.Server.Auth;
 
@@ -10,8 +12,13 @@ public interface ICloudflareJwtValidator
     Task<string?> ValidateAsync(string? token, CancellationToken ct);
 }
 
-public sealed class CloudflareJwtValidator(HttpClient http, CloudflareAccessOptions options, TimeProvider clock) : ICloudflareJwtValidator
+public sealed class CloudflareJwtValidator(
+    HttpClient http,
+    CloudflareAccessOptions options,
+    TimeProvider clock,
+    ILogger<CloudflareJwtValidator>? logger = null) : ICloudflareJwtValidator
 {
+    private readonly ILogger<CloudflareJwtValidator> _logger = logger ?? NullLogger<CloudflareJwtValidator>.Instance;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private IReadOnlyDictionary<string, RSAParameters> _keys = new Dictionary<string, RSAParameters>();
     private DateTimeOffset _keysExpireAt;
@@ -57,6 +64,10 @@ public sealed class CloudflareJwtValidator(HttpClient http, CloudflareAccessOpti
         }
         catch (Exception ex) when (ex is JsonException or FormatException or CryptographicException or HttpRequestException or TaskCanceledException or InvalidOperationException or KeyNotFoundException)
         {
+            _logger.LogWarning(
+                new EventId(DiagnosticEventIds.CloudflareValidationFailed, nameof(DiagnosticEventIds.CloudflareValidationFailed)),
+                "Cloudflare Access assertion validation failed with {FailureType}",
+                ex.GetType().Name);
             return null;
         }
     }
@@ -89,6 +100,11 @@ public sealed class CloudflareJwtValidator(HttpClient http, CloudflareAccessOpti
                 throw new InvalidOperationException("Cloudflare JWKS contained no usable RSA signing keys.");
             _keys = fresh;
             _keysExpireAt = clock.GetUtcNow().AddHours(6);
+            _logger.LogInformation(
+                new EventId(DiagnosticEventIds.CloudflareKeysRefreshed, nameof(DiagnosticEventIds.CloudflareKeysRefreshed)),
+                "Refreshed {SigningKeyCount} Cloudflare Access signing keys; cache expires at {KeysExpireAt}",
+                fresh.Count,
+                _keysExpireAt);
             return fresh.TryGetValue(kid, out var found) ? found : null;
         }
         finally { _refreshLock.Release(); }

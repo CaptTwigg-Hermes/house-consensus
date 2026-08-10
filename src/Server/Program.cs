@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using HouseConsensus.Server.Auth;
 using HouseConsensus.Server.Data;
+using HouseConsensus.Server.Diagnostics;
 using HouseConsensus.Server.Listings;
 using HouseConsensus.Server.Learning;
 using HouseConsensus.Server.Scoring;
@@ -15,6 +16,8 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -22,6 +25,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using System.Threading.RateLimiting;
 using Serilog;
+using Serilog.Events;
 
 Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
@@ -47,7 +51,9 @@ DebugAutoLoginMiddleware.EnsureSafe(debugAutoLogin, builder.Environment.Environm
 DebugAutoLoginMiddleware.EnsureE2ETestAuthSafe(e2eTestAuth, debugAutoLogin, e2eSeedData, builder.Environment.EnvironmentName);
 var databaseConnectionString = builder.Configuration.GetConnectionString("Database") ?? "Host=postgres;Database=house_consensus;Username=house_consensus;Password=house_consensus";
 builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(databaseConnectionString, n => n.MapEnum<MemberRole>("member_role").MapEnum<VoteChoice>("vote_choice").MapEnum<ListingState>("listing_state").MapEnum<ReasonTag>("reason_tag").MapEnum<VoteCategory>("vote_category").MapEnum<CategoryRating>("category_rating").MapEnum<OverrideAction>("override_action")));
-builder.Services.AddScoped(_ => new PostgresManualScoringStore(databaseConnectionString));
+builder.Services.AddScoped(provider => new PostgresManualScoringStore(
+    databaseConnectionString,
+    provider.GetRequiredService<ILogger<PostgresManualScoringStore>>()));
 var cloudflareAccess = AuthenticationSetup.Add(builder.Services, builder.Configuration, builder.Environment.IsProduction());
 if (e2eTestAuth && !cloudflareAccess.Enabled) builder.Services.AddScoped<ICloudflareMemberService, CloudflareMemberService>();
 builder.Services.AddAuthorization(o => o.AddPolicy("owner", p => p.RequireClaim(ClaimTypes.Role, MemberRole.Owner.ToString())));
@@ -55,9 +61,17 @@ builder.Services.Configure<ForwardedHeadersOptions>(o => { o.ForwardedHeaders = 
 var magicRequestPermitLimit = builder.Configuration.GetValue("Auth:MagicRequestPermitLimit", 5);
 var magicConsumePermitLimit = builder.Configuration.GetValue("Auth:MagicConsumePermitLimit", 20);
 var listingLookupPermitLimit = builder.Configuration.GetValue("Listings:LookupPermitLimit", 12);
-builder.Services.AddRateLimiter(o => { o.RejectionStatusCode = StatusCodes.Status429TooManyRequests; o.AddPolicy("magic-request", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = magicRequestPermitLimit, Window = TimeSpan.FromMinutes(15), QueueLimit = 0 })); o.AddPolicy("magic-consume", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = magicConsumePermitLimit, Window = TimeSpan.FromMinutes(15), QueueLimit = 0 })); o.AddPolicy("listing-lookup", context => RateLimitPartition.GetFixedWindowLimiter(context.User.Identity?.IsAuthenticated == true ? context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "authenticated" : context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = listingLookupPermitLimit, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 })); });
+var clientDiagnosticPermitLimit = builder.Configuration.GetValue("Diagnostics:ClientErrorPermitLimit", 20);
+builder.Services.AddRateLimiter(o =>
+{
+    o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    o.AddPolicy("magic-request", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = magicRequestPermitLimit, Window = TimeSpan.FromMinutes(15), QueueLimit = 0 }));
+    o.AddPolicy("magic-consume", context => RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = magicConsumePermitLimit, Window = TimeSpan.FromMinutes(15), QueueLimit = 0 }));
+    o.AddPolicy("listing-lookup", context => RateLimitPartition.GetFixedWindowLimiter(context.User.Identity?.IsAuthenticated == true ? context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "authenticated" : context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = listingLookupPermitLimit, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    o.AddPolicy("client-diagnostics", context => RateLimitPartition.GetFixedWindowLimiter(context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "anonymous", _ => new FixedWindowRateLimiterOptions { PermitLimit = clientDiagnosticPermitLimit, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+});
 builder.Services.AddSignalR(); builder.Services.AddHealthChecks().AddDbContextCheck<AppDbContext>(); builder.Services.AddDataProtection();
-builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddScoped<MagicLinkService>(); builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
+builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddScoped<MagicLinkService>(); builder.Services.AddScoped<IEmailSender, SmtpEmailSender>(); builder.Services.AddSingleton<ClientDiagnosticSink>();
 builder.Services.AddMemoryCache(options => options.SizeLimit = 128 * 1024 * 1024); builder.Services.AddHttpClient<ListingImageService>(client => { client.Timeout = TimeSpan.FromSeconds(15); client.DefaultRequestHeaders.UserAgent.ParseAdd("HouseConsensus/1.0"); });
 builder.Services.AddHttpClient<BoligsidenListingLookup>(client => client.Timeout = TimeSpan.FromSeconds(20))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
@@ -68,7 +82,20 @@ else
 builder.Services.AddScoped<AiLearningService>();
 var app = builder.Build();
 app.UseForwardedHeaders();
-app.UseSerilogRequestLogging();
+app.UseSerilogRequestLogging(options =>
+{
+    options.GetLevel = (context, _, exception) => exception is not null || context.Response.StatusCode >= 500
+        ? LogEventLevel.Error
+        : context.Response.StatusCode >= 400
+            ? LogEventLevel.Warning
+            : IsRoutineRequest(context.Request.Path) ? LogEventLevel.Debug : LogEventLevel.Information;
+    options.EnrichDiagnosticContext = (diagnostics, context) =>
+    {
+        diagnostics.Set("TraceId", context.TraceIdentifier);
+        if (context.User.FindFirstValue(ClaimTypes.NameIdentifier) is { Length: > 0 } memberId)
+            diagnostics.Set("MemberId", memberId);
+    };
+});
 if (app.Environment.IsProduction()) { app.UseHsts(); if (!cloudflareAccess.Enabled) app.UseHttpsRedirection(); }
 app.UseExceptionHandler(e => e.Run(async c => { c.Response.StatusCode = 500; await c.Response.WriteAsJsonAsync(new { error = "An unexpected error occurred." }); }));
 app.UseBlazorFrameworkFiles();
@@ -82,6 +109,21 @@ app.UseStaticFiles(new StaticFileOptions
     }
 });
 app.Use(async (context, next) => { var unsafeApiRequest = context.Request.Path.StartsWithSegments("/api") && (HttpMethods.IsPost(context.Request.Method) || HttpMethods.IsPut(context.Request.Method) || HttpMethods.IsPatch(context.Request.Method) || HttpMethods.IsDelete(context.Request.Method)); if (unsafeApiRequest && context.Request.Headers["X-House-Consensus-CSRF"] != "1") { context.Response.StatusCode = StatusCodes.Status400BadRequest; await context.Response.WriteAsJsonAsync(new { error = "Missing same-origin request header." }); return; } await next(); });
+app.Use(async (context, next) =>
+{
+    const long clientDiagnosticMaximumBytes = 4 * 1024;
+    if (HttpMethods.IsPost(context.Request.Method) && context.Request.Path == "/api/diagnostics/client-errors")
+    {
+        if (context.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } sizeFeature)
+            sizeFeature.MaxRequestBodySize = clientDiagnosticMaximumBytes;
+        if (context.Request.ContentLength > clientDiagnosticMaximumBytes)
+        {
+            context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+            return;
+        }
+    }
+    await next();
+});
 app.UseAuthentication();
 if (debugAutoLogin) app.UseMiddleware<DebugAutoLoginMiddleware>();
 app.UseRateLimiter();
@@ -92,6 +134,21 @@ app.MapGet("/api/version", (HttpContext context) =>
     context.Response.Headers.CacheControl = "no-store";
     return Results.Ok(RunningBuildVersion());
 }).AllowAnonymous();
+app.MapPost("/api/diagnostics/client-errors", (
+    ClientErrorReport report,
+    ClaimsPrincipal user,
+    HttpContext context,
+    ClientDiagnosticSink sink) =>
+{
+    if (!ClientDiagnosticContract.IsArea(report.Area) ||
+        !ClientDiagnosticContract.IsExceptionType(report.ExceptionType) ||
+        !DiagnosticText.IsFingerprint(report.Fingerprint))
+        return Results.BadRequest(new { error = "Invalid diagnostic report." });
+    sink.Record(report, user.MemberId(), context.TraceIdentifier);
+    return Results.Accepted();
+}).RequireAuthorization()
+    .RequireRateLimiting("client-diagnostics")
+    .WithMetadata(new RequestSizeLimitAttribute(4 * 1024));
 
 var auth = app.MapGroup("/api/auth");
 auth.MapGet("/mode", () => Results.Ok(new AuthModeDto(cloudflareAccess.Enabled))).AllowAnonymous();
@@ -352,13 +409,45 @@ static async Task Bootstrap(WebApplication app)
 {
     await using var scope = app.Services.CreateAsyncScope(); var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     if (app.Configuration.GetValue("Database:AutoMigrate", true))
+    {
+        app.Logger.LogInformation(
+            new EventId(DiagnosticEventIds.BootstrapLifecycle, nameof(DiagnosticEventIds.BootstrapLifecycle)),
+            "Database migration starting");
         await db.Database.MigrateAsync();
+        app.Logger.LogInformation(
+            new EventId(DiagnosticEventIds.BootstrapLifecycle, nameof(DiagnosticEventIds.BootstrapLifecycle)),
+            "Database migration completed");
+    }
     await db.Database.OpenConnectionAsync();
     await ((NpgsqlConnection)db.Database.GetDbConnection()).ReloadTypesAsync();
-    var owner = MagicLinkService.Normalize(app.Configuration["INITIAL_OWNER_EMAIL"] ?? ""); if (!string.IsNullOrWhiteSpace(owner) && !await db.Members.AnyAsync()) { db.Members.Add(new Member { Email = owner, Role = MemberRole.Owner }); await db.SaveChangesAsync(); }
-    if (!app.Environment.IsProduction() && app.Configuration.GetValue("E2E:SeedData", false)) await E2EDataSeeder.SeedAsync(db);
+    app.Logger.LogInformation(
+        new EventId(DiagnosticEventIds.BootstrapLifecycle, nameof(DiagnosticEventIds.BootstrapLifecycle)),
+        "Database connection opened and PostgreSQL types reloaded");
+    var owner = MagicLinkService.Normalize(app.Configuration["INITIAL_OWNER_EMAIL"] ?? "");
+    if (!string.IsNullOrWhiteSpace(owner) && !await db.Members.AnyAsync())
+    {
+        var member = new Member { Email = owner, Role = MemberRole.Owner };
+        db.Members.Add(member);
+        await db.SaveChangesAsync();
+        app.Logger.LogInformation(
+            new EventId(DiagnosticEventIds.BootstrapLifecycle, nameof(DiagnosticEventIds.BootstrapLifecycle)),
+            "Initial owner provisioned as member {MemberId}",
+            member.Id);
+    }
+    if (!app.Environment.IsProduction() && app.Configuration.GetValue("E2E:SeedData", false))
+    {
+        await E2EDataSeeder.SeedAsync(db);
+        app.Logger.LogInformation(
+            new EventId(DiagnosticEventIds.BootstrapLifecycle, nameof(DiagnosticEventIds.BootstrapLifecycle)),
+            "E2E seed data completed");
+    }
 }
 static bool IsEmail(string value) => System.Net.Mail.MailAddress.TryCreate(value, out var parsed) && parsed.Address == value.Trim();
+static bool IsRoutineRequest(PathString path) =>
+    path.StartsWithSegments("/health") ||
+    path.StartsWithSegments("/_framework") ||
+    path.StartsWithSegments("/images") ||
+    path.Value is "/favicon.ico" or "/app.css" or "/service-worker.js" or "/service-worker-assets.js" or "/manifest.webmanifest";
 static async Task SignIn(HttpContext c, Member m) { var claims = new[] { new Claim(ClaimTypes.NameIdentifier, m.Id.ToString()), new Claim(ClaimTypes.Email, m.Email), new Claim(ClaimTypes.Role, m.Role.ToString()) }; await c.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme)), new AuthenticationProperties { IsPersistent = true, ExpiresUtc = DateTimeOffset.UtcNow.AddDays(30) }); }
 static MemberDto ToMemberDto(Member m) => new(m.Id, m.Email, m.DisplayName, m.Language, m.Role, m.IsActive, AvatarColor.Resolve(m.AvatarColor, m.Id), m.VotingIdentityId == Guid.Empty ? m.Id : m.VotingIdentityId, m.VotingIdentityId == Guid.Empty || m.VotingIdentityId == m.Id);
 static VoteDto ToVoteDto(Vote v, string memberInitials = "", string memberColor = "", Guid? effectiveId = null, string effectiveName = "", string? viaName = null) => new(v.Id, v.ListingId, v.MemberId, v.Choice, v.Tags, v.CreatedAt, v.Note, memberInitials, memberColor, v.Ratings.Select(x => new VoteRatingDto(x.Category, x.Rating)).ToArray(), v.Total, v.OverallScore, effectiveId ?? v.MemberId, effectiveName, viaName);

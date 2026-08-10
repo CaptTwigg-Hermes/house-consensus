@@ -1,4 +1,6 @@
 using System.Text.Json;
+using HouseConsensus.Shared;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using NpgsqlTypes;
 
@@ -16,8 +18,11 @@ public sealed record ManualScoringLease(
 public sealed record ManualScoringCompletion(double FamilyFitScore, string CommuteJson, string AiEvidenceJson);
 
 /// <summary>PostgreSQL-backed, lease-fenced persistence boundary for manual scoring workers.</summary>
-public sealed class PostgresManualScoringStore(string connectionString)
+public sealed class PostgresManualScoringStore(
+    string connectionString,
+    ILogger<PostgresManualScoringStore>? logger = null)
 {
+    private readonly ILogger<PostgresManualScoringStore> _logger = logger ?? NullLogger<PostgresManualScoringStore>.Instance;
     private readonly string _connectionString = string.IsNullOrWhiteSpace(connectionString)
         ? throw new ArgumentException("A PostgreSQL connection string is required.", nameof(connectionString))
         : connectionString;
@@ -50,7 +55,13 @@ WHERE manual_scoring_jobs."CompletedAt" IS NULL AND manual_scoring_jobs."Termina
         command.Parameters.AddWithValue("id", Guid.NewGuid()); command.Parameters.AddWithValue("listingId", listingId);
         command.Parameters.AddWithValue("externalId", sourceExternalId); command.Parameters.AddWithValue("canonicalUrl", sourceCanonicalUrl);
         command.Parameters.AddWithValue("requestedAt", requestedAt);
-        await command.ExecuteNonQueryAsync(ct);
+        var affected = await command.ExecuteNonQueryAsync(ct);
+        _logger.Log(
+            affected == 1 ? LogLevel.Information : LogLevel.Warning,
+            new EventId(DiagnosticEventIds.ManualScoringLifecycle, nameof(DiagnosticEventIds.ManualScoringLifecycle)),
+            "Manual scoring enqueue for listing {ListingId} affected {AffectedRows} row(s)",
+            listingId,
+            affected);
     }
 
     public async Task<ManualScoringLease?> ClaimNextAsync(DateTimeOffset now, TimeSpan leaseDuration, CancellationToken ct = default)
@@ -82,7 +93,15 @@ RETURNING job."Id", job."ListingId", job."SourceExternalId", job."SourceCanonica
         command.Parameters.Add(new NpgsqlParameter("leaseDuration", NpgsqlDbType.Interval) { Value = leaseDuration });
         await using var reader = await command.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) return null;
-        return new ManualScoringLease(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetString(3), reader.GetFieldValue<DateTimeOffset>(4), reader.GetInt64(5), reader.GetFieldValue<DateTimeOffset>(6));
+        var lease = new ManualScoringLease(reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetString(3), reader.GetFieldValue<DateTimeOffset>(4), reader.GetInt64(5), reader.GetFieldValue<DateTimeOffset>(6));
+        _logger.LogInformation(
+            new EventId(DiagnosticEventIds.ManualScoringLifecycle, nameof(DiagnosticEventIds.ManualScoringLifecycle)),
+            "Claimed manual scoring job {JobId} for listing {ListingId} at fence {LeaseFence}; lease expires {LeaseExpiresAt}",
+            lease.JobId,
+            lease.ListingId,
+            lease.LeaseFence,
+            lease.LeaseExpiresAt);
+        return lease;
     }
 
     public async Task<bool> RecordCompletionAsync(ManualScoringLease lease, ManualScoringCompletion completion, DateTimeOffset completedAt, CancellationToken ct = default)
@@ -116,14 +135,32 @@ WHERE listing."Id" = finalized_job."ListingId";
 """, connection);
         command.Parameters.AddWithValue("completedAt", completedAt); command.Parameters.AddWithValue("id", lease.JobId); command.Parameters.AddWithValue("leaseFence", lease.LeaseFence);
         command.Parameters.AddWithValue("familyFitScore", completion.FamilyFitScore); command.Parameters.AddWithValue("commuteJson", completion.CommuteJson); command.Parameters.AddWithValue("aiEvidenceJson", completion.AiEvidenceJson);
-        return await command.ExecuteNonQueryAsync(ct) == 1;
+        var accepted = await command.ExecuteNonQueryAsync(ct) == 1;
+        _logger.Log(
+            accepted ? LogLevel.Information : LogLevel.Warning,
+            new EventId(DiagnosticEventIds.ManualScoringLifecycle, nameof(DiagnosticEventIds.ManualScoringLifecycle)),
+            "Manual scoring completion for job {JobId}, listing {ListingId}, fence {LeaseFence} was {CompletionOutcome}",
+            lease.JobId,
+            lease.ListingId,
+            lease.LeaseFence,
+            accepted ? "accepted" : "rejected");
+        return accepted;
     }
 
-    public Task<bool> RecordFailureAsync(ManualScoringLease lease, string errorCode, string errorMessage, DateTimeOffset attemptedAt, DateTimeOffset? retryAt, bool terminal, CancellationToken ct = default)
+    public async Task<bool> RecordFailureAsync(ManualScoringLease lease, string errorCode, string errorMessage, DateTimeOffset attemptedAt, DateTimeOffset? retryAt, bool terminal, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(errorCode); ArgumentException.ThrowIfNullOrWhiteSpace(errorMessage);
         if (terminal != !retryAt.HasValue) throw new ArgumentException("Terminal failures must not have a retry time, and retryable failures must have one.", nameof(retryAt));
-        return FinalizeAsync(lease, attemptedAt, errorCode, errorMessage, retryAt, terminal, ct);
+        var accepted = await FinalizeAsync(lease, attemptedAt, errorCode, errorMessage, retryAt, terminal, ct);
+        _logger.LogWarning(
+            new EventId(DiagnosticEventIds.ManualScoringLifecycle, nameof(DiagnosticEventIds.ManualScoringLifecycle)),
+            "Manual scoring failure for job {JobId}, listing {ListingId}, fence {LeaseFence}, terminal {Terminal} was {FailureOutcome}",
+            lease.JobId,
+            lease.ListingId,
+            lease.LeaseFence,
+            terminal,
+            accepted ? "accepted" : "rejected");
+        return accepted;
     }
 
     private static void ValidateCompletion(ManualScoringCompletion completion)

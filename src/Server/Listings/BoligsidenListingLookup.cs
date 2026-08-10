@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using HouseConsensus.Shared;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace HouseConsensus.Server.Listings;
 
@@ -15,15 +16,22 @@ public sealed partial class BoligsidenListingLookup
     private readonly HttpClient _http;
     private readonly Uri _dawaEndpoint;
     private readonly Uri _boligsidenEndpoint;
+    private readonly ILogger<BoligsidenListingLookup> _logger;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
-    public BoligsidenListingLookup(HttpClient http) : this(http, DefaultDawaEndpoint, DefaultBoligsidenEndpoint) { }
+    public BoligsidenListingLookup(HttpClient http, ILogger<BoligsidenListingLookup> logger)
+        : this(http, DefaultDawaEndpoint, DefaultBoligsidenEndpoint, logger) { }
 
-    public BoligsidenListingLookup(HttpClient http, Uri dawaEndpoint, Uri boligsidenEndpoint)
+    public BoligsidenListingLookup(
+        HttpClient http,
+        Uri dawaEndpoint,
+        Uri boligsidenEndpoint,
+        ILogger<BoligsidenListingLookup>? logger = null)
     {
         _http = http;
         _dawaEndpoint = EnsureBase(dawaEndpoint);
         _boligsidenEndpoint = EnsureBase(boligsidenEndpoint);
+        _logger = logger ?? NullLogger<BoligsidenListingLookup>.Instance;
     }
 
     public Task<ManualListingPreview?> ResolveAsync(string? sourceUrl, CancellationToken ct)
@@ -101,14 +109,32 @@ public sealed partial class BoligsidenListingLookup
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             request.Headers.UserAgent.ParseAdd("HouseConsensus/1.0");
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-            if (!response.IsSuccessStatusCode || response.Content.Headers.ContentLength > MaximumResponseBytes) return null;
+            if (!response.IsSuccessStatusCode || response.Content.Headers.ContentLength > MaximumResponseBytes)
+            {
+                _logger.LogWarning(
+                    new EventId(DiagnosticEventIds.ListingLookupFailed, nameof(DiagnosticEventIds.ListingLookupFailed)),
+                    "Listing lookup upstream {Upstream} rejected response: status {StatusCode}, declared bytes {ContentLength}",
+                    Upstream(uri),
+                    (int)response.StatusCode,
+                    response.Content.Headers.ContentLength);
+                return null;
+            }
             await response.Content.LoadIntoBufferAsync(MaximumResponseBytes, ct);
             return await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         }
-        catch (HttpRequestException) { return null; }
-        catch (JsonException) { return null; }
-        catch (TaskCanceledException) when (!ct.IsCancellationRequested) { return null; }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException || ex is TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                new EventId(DiagnosticEventIds.ListingLookupFailed, nameof(DiagnosticEventIds.ListingLookupFailed)),
+                "Listing lookup upstream {Upstream} failed with {FailureType}",
+                Upstream(uri),
+                ex.GetType().Name);
+            return null;
+        }
     }
+
+    private string Upstream(Uri uri) =>
+        string.Equals(uri.Host, _dawaEndpoint.Host, StringComparison.OrdinalIgnoreCase) ? "DAWA" : "Boligsiden";
 
     private static ManualListingPreview? Map(JsonElement detail, string caseId)
     {
