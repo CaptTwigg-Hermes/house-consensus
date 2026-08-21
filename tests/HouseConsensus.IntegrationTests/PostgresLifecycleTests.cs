@@ -30,7 +30,7 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
         var externalDatabase = !string.IsNullOrWhiteSpace(_connectionString);
         if (!externalDatabase)
         {
-            _postgres = new PostgreSqlBuilder().WithImage("postgres:17-alpine").WithDatabase("hc").WithUsername("hc").WithPassword("hc-test-password").Build();
+            _postgres = new PostgreSqlBuilder("postgres:17-alpine").WithDatabase("hc").WithUsername("hc").WithPassword("hc-test-password").Build();
             await _postgres.StartAsync();
             _connectionString = _postgres.GetConnectionString();
         }
@@ -1008,8 +1008,9 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
             await queueConnection.OpenAsync(ct);
             await using var queueCommand = new NpgsqlCommand("SELECT \"NextAttemptAt\" FROM manual_scoring_jobs WHERE \"ListingId\" = @listingId", queueConnection);
             queueCommand.Parameters.AddWithValue("listingId", created.ListingId);
-            var nextAttemptAt = (DateTimeOffset?)await queueCommand.ExecuteScalarAsync(ct);
-            Assert.NotNull(nextAttemptAt);
+            await using var queueReader = await queueCommand.ExecuteReaderAsync(ct);
+            Assert.True(await queueReader.ReadAsync(ct));
+            var nextAttemptAt = queueReader.GetFieldValue<DateTimeOffset>(0);
             Assert.True(nextAttemptAt <= DateTimeOffset.UtcNow.AddSeconds(5));
         }
         var beforeActivity = await client.GetFromJsonAsync<ListingDto>($"/api/listings/{created.ListingId}", ct);
