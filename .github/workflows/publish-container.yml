@@ -3,6 +3,8 @@ name: Publish container
 on:
   push:
     branches: [main]
+  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,7 +15,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  native-python-release-gates:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: house_consensus_ci_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d house_consensus_ci_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:5432/house_consensus_ci_test
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+      - name: Check operational wrapper syntax
+        run: sh -n scripts/run-native-ingestion.sh scripts/run-native-manual-scoring.sh
+      - name: Test native ingestion and operational wrappers
+        run: uv run --project ingestion --extra test pytest -q tests/ingestion
+      - name: Test transitional exporter
+        run: uv run --project exporter --extra test pytest -q tests/exporter
+      - name: Test native manual scoring
+        run: uv run --project manual_scoring --extra 'postgres,test' pytest -q manual_scoring/tests
+
   publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: native-python-release-gates
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

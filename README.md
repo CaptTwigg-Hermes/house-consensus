@@ -1,6 +1,6 @@
 # House Consensus
 
-Private invite-only household house-evaluation app. This monorepo contains a .NET 10 hosted Blazor WebAssembly client, ASP.NET Core API/Cloudflare Access auth/SignalR server, PostgreSQL persistence, Python houseshopping exporter, and Playwright tests. `SPEC.md` is authoritative.
+Private invite-only household house-evaluation app. This monorepo contains a .NET 10 hosted Blazor WebAssembly client, ASP.NET Core API/Cloudflare Access auth/SignalR server, PostgreSQL persistence, native Python workers, a transitional Python exporter, and Playwright tests. `SPEC.md` is authoritative.
 
 ## Local stack
 
@@ -22,8 +22,9 @@ Owner-triggered AI learning defaults to the trusted LAN Ollama endpoint at `192.
 ```sh
 docker build -f Dockerfile.test -t house-consensus-test .
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock house-consensus-test
-TEST_DATABASE_URL='postgresql://user:password@host:5434/house_consensus_test' \
-  uv run --project exporter --with pytest --with pytest-asyncio --with 'psycopg[binary]' --with httpx pytest -q tests/exporter
+TEST_DATABASE_URL='postgresql://user:***@host:5434/house_consensus_test' uv run --project ingestion --extra test pytest -q tests/ingestion
+TEST_DATABASE_URL='postgresql://user:***@host:5434/house_consensus_test' uv run --project exporter --extra test pytest -q tests/exporter
+TEST_DATABASE_URL='postgresql://user:***@host:5434/house_consensus_test' uv run --project manual_scoring --extra 'postgres,test' pytest -q manual_scoring/tests
 HOUSE_CONSENSUS_TEST_DATABASE_URL='Host=host;Port=5434;Database=house_consensus_dotnet_test;Username=user;Password=password' \
   dotnet test HouseConsensus.slnx -c Release
 docker compose -f tests/HouseConsensus.Playwright/compose.e2e.yml up --build --abort-on-container-exit --exit-code-from playwright
@@ -33,35 +34,19 @@ External integration databases are reset by the tests and their names must conta
 
 See `tests/HouseConsensus.Playwright/README.md` and `exporter/README.md`.
 
-## Houseshopping integration
+## Native worker operations
 
-The application database is external to Compose. Import the real houseshopping SQLite data into the same PostgreSQL database used by the app with:
+Repository-owned wrappers run ingestion and one manual-scoring claim from an
+explicit House Consensus checkout. They load credentials from the process
+environment or a protected House Consensus environment file, serialize each
+worker with a non-blocking lock, pass worker output through unchanged, and
+return the worker's exact exit status.
 
-On Windows/PowerShell, use the wrapper that stages the SQLite file on local disk before mounting it into Docker Desktop (Docker cannot bind-mount a UNC path):
-
-```powershell
-.\scripts\import-houses.ps1
-```
-
-On Linux, run:
-
-```sh
-docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile tools run --rm --build importer
-```
-
-The importer reads `../houseshopping/state/house.db` by default. Pass `-SourceDb` to the PowerShell wrapper or set `HOUSESHOPPING_DB` on Linux when the SQLite file is elsewhere. Re-running the importer is safe and refreshes listings idempotently.
-
-`/workspace/houseshopping` runs `export_consensus` after publish in an isolated subprocess when `CONSENSUS_EXPORT=1` is configured. That stage is non-fatal, logs failure to stderr, and leaves existing alert stdout and pipeline status unchanged.
-
-Record a listing independently verified as delisted before the next export. This transaction writes the durable tombstone and archives any current listing; future imports serialize on the same external ID and skip it:
-
-```sh
-uv run --project exporter house-consensus-export \
-  --database-url "$CONSENSUS_DATABASE_URL" \
-  --tombstone-external-id "SOURCE_EXTERNAL_ID" \
-  --tombstone-source-url "https://example.invalid/original-listing" \
-  --verification-method http_404
-```
+The wrappers do not install or alter a scheduler. Follow
+[`docs/native-operations-cutover.md`](docs/native-operations-cutover.md) for
+preflight, backup and restore proof, scheduler cutover, verification, rollback,
+and controlled retirement. The exporter remains available until a separate
+change proves that every required consumer has a native replacement.
 
 ## Production image and Dockge Compose
 
