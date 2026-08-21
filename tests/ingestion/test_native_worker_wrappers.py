@@ -143,3 +143,19 @@ def test_manual_wrapper_rejects_database_url_argument(
     assert "database credentials must come from the environment" in result.stderr
     assert "secret-sentinel" not in result.stderr
     assert not Path(env["UV_ARGS_FILE"]).exists()
+
+
+@pytest.mark.parametrize(
+    ("target", "entrypoint"),
+    [
+        ("ingestion-worker", "run-native-ingestion.sh"),
+        ("manual-scoring-worker", "run-native-manual-scoring.sh"),
+    ],
+)
+def test_release_dockerfile_exposes_immutable_worker_targets(
+    target: str, entrypoint: str
+) -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text()
+
+    assert f" AS {target}" in dockerfile
+    assert f'ENTRYPOINT ["/app/scripts/{entrypoint}"]' in dockerfile
