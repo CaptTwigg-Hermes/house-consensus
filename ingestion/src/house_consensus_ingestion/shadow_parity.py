@@ -7,18 +7,18 @@ import sqlite3
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, Self
 
 
 class _Cursor(Protocol):
-    def __enter__(self) -> _Cursor: ...
+    def __enter__(self) -> Self: ...
     def __exit__(self, *args: object) -> None: ...
     def execute(self, statement: str, parameters: tuple[object, ...] | None = None) -> None: ...
     def fetchall(self) -> list[tuple[object, ...]]: ...
 
 
 class _Connection(Protocol):
-    def __enter__(self) -> _Connection: ...
+    def __enter__(self) -> Self: ...
     def __exit__(self, *args: object) -> None: ...
     def cursor(self) -> _Cursor: ...
 
@@ -90,18 +90,17 @@ def _load_completed_legacy_scope(path: Path, source_scope: str) -> dict[str, Pro
 
 
 def _load_native_projection(connection_factory: Callable[[], _Connection], source_system: str, source_scope: str) -> dict[str, ProjectionRecord]:
-    with connection_factory() as connection:
-        with connection.cursor() as cursor:
-            cursor.execute("SET TRANSACTION READ ONLY")
-            cursor.execute(
+    with connection_factory() as connection, connection.cursor() as cursor:
+        cursor.execute("SET TRANSACTION READ ONLY")
+        cursor.execute(
                 """SELECT p.source_record_id, l."ExternalId", l."Address", l."City", l."Price", l."SourceUrl"
                 FROM listing_ingestion_projections p
                 JOIN listings l ON l."Id" = p.listing_id
                 WHERE p.source_system = %s AND p.source_scope = %s
                 ORDER BY p.source_record_id""",
                 (source_system, source_scope),
-            )
-            rows = cursor.fetchall()
+        )
+        rows = cursor.fetchall()
     records: dict[str, ProjectionRecord] = {}
     for source_id, external_id, address, city, price, source_url in rows:
         source_id = str(source_id)

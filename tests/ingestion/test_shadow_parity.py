@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from typing import Self
 
 
 def _completed_legacy_snapshot(path: Path, *, source_url: str = "https://example.test/case-42") -> None:
@@ -17,7 +18,7 @@ class Cursor:
     def __init__(self) -> None:
         self.statements: list[tuple[str, tuple[object, ...] | None]] = []
 
-    def __enter__(self) -> Cursor:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_: object) -> None:
@@ -34,7 +35,7 @@ class Connection:
     def __init__(self) -> None:
         self.cursor_instance = Cursor()
 
-    def __enter__(self) -> Connection:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_: object) -> None:
