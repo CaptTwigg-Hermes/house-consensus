@@ -119,7 +119,11 @@ def test_projection_failure_leaves_a_terminal_failed_run_and_a_reconcilable_snap
 
     class Fetcher:
         def fetch(self):
-            return RawFetchSnapshot(records=raw_records, run_snapshot=snapshot)
+            return RawFetchSnapshot(
+                records=raw_records,
+                run_snapshot=snapshot,
+                source_config_sha256="a" * 64,
+            )
 
     class FailingProjector:
         def project_completed_snapshot(self, *, source_snapshot_id: str, projected_at: datetime) -> int:

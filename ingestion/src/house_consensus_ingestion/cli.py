@@ -7,6 +7,9 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+import psycopg
+from consensus_exporter.postgres import PostgresExporter
+
 from .adapters import ProductionAdapterConfig, build_production_pipeline
 from .boligsiden import BoligsidenFetcher, BoligsidenSourceConfig
 from .classification import ClassificationConfig
@@ -14,7 +17,7 @@ from .identity import build_snapshot
 from .orchestration import NativeIngestionOrchestrator
 from .pipeline import NativeCasePipeline
 from .postgres import PostgresRunWriter
-from .projection import PostgresListingProjectionWriter
+from .projection import ExporterBackedPostgresListingProjector
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -23,7 +26,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--boligsiden", action="store_true")
     parser.add_argument("--source-system", default="house-consensus-ingestion")
-    parser.add_argument("--source-scope", default="boligsiden.dk/open-cases")
+    parser.add_argument("--source-scope", default="tofamiliehus")
     parser.add_argument("--records-json")
     parser.add_argument("--municipality", action="append", default=[])
     parser.add_argument("--address-type", action="append", default=[])
@@ -52,10 +55,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not database_url:
             parser.error("DATABASE_URL is required for --execute")
         adapter_config = ProductionAdapterConfig.from_env()
-        import psycopg
         factory = lambda: psycopg.connect(adapter_config.database_url)
         run_writer = PostgresRunWriter(factory)
-        projector = PostgresListingProjectionWriter(factory)
+        projector = ExporterBackedPostgresListingProjector(
+            connection_factory=factory,
+            exporter_factory=lambda source_scope: PostgresExporter(
+                adapter_config.database_url,
+                source_scope=source_scope,
+            ),
+        )
         pipeline = build_production_pipeline(
             adapter_config,
             classification=ClassificationConfig(

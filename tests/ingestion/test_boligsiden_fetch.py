@@ -89,6 +89,24 @@ def test_config_exposes_canonical_boligsiden_source_namespace_and_query() -> Non
     ]
 
 
+def test_source_configuration_identity_is_canonical_and_filter_sensitive() -> None:
+    from house_consensus_ingestion.boligsiden import BoligsidenSourceConfig
+
+    configured = config()
+    same = BoligsidenSourceConfig(
+        municipalities=("101",), address_types=("villa",),
+        price_min=1_000_000, price_max=2_000_000,
+    )
+    changed = BoligsidenSourceConfig(
+        municipalities=("101",), address_types=("villa",),
+        price_min=1_000_000, price_max=3_000_000,
+    )
+
+    assert len(configured.source_config_sha256) == 64
+    assert configured.source_config_sha256 == same.source_config_sha256
+    assert configured.source_config_sha256 != changed.source_config_sha256
+
+
 def test_fetch_uses_repeated_plural_municipalities_in_each_address_type_partition() -> None:
     from house_consensus_ingestion.boligsiden import (
         BoligsidenFetcher,

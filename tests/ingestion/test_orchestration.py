@@ -74,6 +74,7 @@ def raw_fetch():
             source_scope="boligsiden.dk/open-cases",
             records=records,
         ),
+        source_config_sha256="a" * 64,
     )
 
 
@@ -135,6 +136,7 @@ def test_native_lifecycle_projects_before_terminal_success() -> None:
     assert result.projected_count == 1
     assert [call[0] for call in writer.calls] == ["started", "snapshot", "stage", "stage", "stage", "terminal"]
     snapshot_payload = writer.calls[1][3]
+    assert snapshot_payload["source_config_sha256"] == "a" * 64
     assert snapshot_payload["records"] == [dict(raw_fetch().records[0])]
     assert snapshot_payload["projection_records"] == [{
         "external_id": "case-42", "address": "Example Road 42, 2100 Copenhagen", "city": "Copenhagen", "price": 2_500_000,

@@ -34,7 +34,11 @@ def test_boligsiden_dry_run_uses_native_orchestrator_without_database(monkeypatc
     from house_consensus_ingestion.identity import build_snapshot
 
     records = ({"caseID": "42", "address": {"roadName": "Example Road", "houseNumber": "42", "cityName": "Copenhagen"}, "priceCash": 2_500_000},)
-    fetched = RawFetchSnapshot(records=records, run_snapshot=build_snapshot(source_scope="boligsiden.dk/open-cases", records=records))
+    fetched = RawFetchSnapshot(
+        records=records,
+        run_snapshot=build_snapshot(source_scope="boligsiden.dk/open-cases", records=records),
+        source_config_sha256="a" * 64,
+    )
 
     class Fetcher:
         def __init__(self, config):
@@ -57,6 +61,7 @@ def test_boligsiden_execute_builds_explicit_production_pipeline(monkeypatch, cap
     production_pipeline = object()
 
     class Config:
+        database_url = "postgresql://example.test/app"
         price_min = 1_000_000
         price_max = 3_000_000
 
@@ -77,6 +82,7 @@ def test_boligsiden_execute_builds_explicit_production_pipeline(monkeypatch, cap
     class Orchestrator:
         def __init__(self, *, fetcher, pipeline, run_writer, projector):
             observed["pipeline"] = pipeline
+            observed["projector"] = type(projector).__name__
 
         def run(self, **kwargs):
             return Result()
@@ -85,11 +91,14 @@ def test_boligsiden_execute_builds_explicit_production_pipeline(monkeypatch, cap
     monkeypatch.setattr(cli, "ProductionAdapterConfig", Config)
     monkeypatch.setattr(cli, "build_production_pipeline", lambda config, classification: production_pipeline)
     monkeypatch.setattr(cli, "PostgresRunWriter", lambda factory: object())
-    monkeypatch.setattr(cli, "PostgresListingProjectionWriter", lambda factory: object())
     monkeypatch.setattr(cli, "NativeIngestionOrchestrator", Orchestrator)
 
     assert cli.main([
         "--boligsiden", "--execute", "--municipality", "101", "--address-type", "villa",
         "--price-min", "1000000", "--price-max", "3000000",
     ]) == 0
-    assert observed == {"config": True, "pipeline": production_pipeline}
+    assert observed == {
+        "config": True,
+        "pipeline": production_pipeline,
+        "projector": "ExporterBackedPostgresListingProjector",
+    }

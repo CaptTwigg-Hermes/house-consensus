@@ -5,6 +5,7 @@ import json
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -60,6 +61,21 @@ class BoligsidenSourceConfig:
             ("page", str(page)),
         ]
 
+    @property
+    def source_config_sha256(self) -> str:
+        payload = {
+            "address_types": sorted(self.address_types),
+            "allow_empty": self.allow_empty,
+            "endpoint": self.endpoint,
+            "municipalities": sorted(self.municipalities),
+            "price_max": self.price_max,
+            "price_min": self.price_min,
+            "source_scope": self.source_scope,
+            "source_system": self.source_system,
+        }
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return sha256(canonical.encode()).hexdigest()
+
 
 @dataclass(frozen=True)
 class RawFetchSnapshot:
@@ -67,6 +83,7 @@ class RawFetchSnapshot:
 
     records: tuple[Mapping[str, Any], ...]
     run_snapshot: RunSnapshot
+    source_config_sha256: str
 
 
 class BoligsidenFetcher:
@@ -105,6 +122,7 @@ class BoligsidenFetcher:
                         source_scope=self._config.source_scope,
                         records=records,
                     ),
+                    source_config_sha256=self._config.source_config_sha256,
                 )
             except BoligsidenFetchError as error:
                 last_error = error

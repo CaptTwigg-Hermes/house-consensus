@@ -110,6 +110,7 @@ class NativeIngestionOrchestrator:
                 "source_system": snapshot.source_system,
                 "source_scope": snapshot.source_scope,
                 "manifest_sha256": snapshot.manifest_sha256,
+                "source_config_sha256": fetched.source_config_sha256,
                 "snapshot_count": snapshot.snapshot_count,
             }
             failed_stage = "fetch"
