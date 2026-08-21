@@ -1,10 +1,10 @@
 """Validated, deterministic raw fetches from Boligsiden's public case search."""
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 import json
 import time
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -48,18 +48,17 @@ class BoligsidenSourceConfig:
         if not self.endpoint.startswith("https://api.boligsiden.dk/"):
             raise ValueError("endpoint must be the Boligsiden public API")
 
-    def query(self, *, page: int, municipality: str | None = None, address_type: str | None = None) -> dict[str, str]:
+    def query(self, *, page: int, address_type: str | None = None) -> list[tuple[str, str]]:
         if page < 1:
             raise ValueError("page must be positive")
-        municipality = municipality or _only(self.municipalities, "municipality")
         address_type = address_type or _only(self.address_types, "address type")
-        return {
-            "municipality": municipality,
-            "addressType": address_type,
-            "priceMin": str(self.price_min),
-            "priceMax": str(self.price_max),
-            "page": str(page),
-        }
+        return [
+            ("addressTypes", address_type),
+            *(("municipalities", municipality) for municipality in self.municipalities),
+            ("priceMin", str(self.price_min)),
+            ("priceMax", str(self.price_max)),
+            ("page", str(page)),
+        ]
 
 
 @dataclass(frozen=True)
@@ -114,23 +113,24 @@ class BoligsidenFetcher:
     def _fetch_sweep(self) -> tuple[Mapping[str, Any], ...]:
         records: list[Mapping[str, Any]] = []
         seen_ids: set[str] = set()
-        for municipality in self._config.municipalities:
-            for address_type in self._config.address_types:
-                partition = self._fetch_partition(municipality, address_type)
-                for record in partition:
-                    case_id = _case_id(record)
-                    if case_id in seen_ids:
-                        raise BoligsidenFetchError(f"duplicate Boligsiden case id {case_id!r}")
-                    seen_ids.add(case_id)
-                    records.append(record)
+        for address_type in self._config.address_types:
+            partition = self._fetch_partition(address_type)
+            for record in partition:
+                case_id = _case_id(record)
+                if case_id in seen_ids:
+                    # A listing may legitimately be returned for more than one
+                    # configured address type. Keep the first deterministic row.
+                    continue
+                seen_ids.add(case_id)
+                records.append(dict(record))
         return tuple(sorted(records, key=lambda record: _case_id(record)))
 
-    def _fetch_partition(self, municipality: str, address_type: str) -> list[Mapping[str, Any]]:
+    def _fetch_partition(self, address_type: str) -> list[Mapping[str, Any]]:
         expected_total: int | None = None
         records: list[Mapping[str, Any]] = []
         page = 1
         while expected_total is None or len(records) < expected_total:
-            payload = self._request_json(self._url(page, municipality, address_type))
+            payload = self._request_json(self._url(page, address_type))
             total, cases = _page(payload)
             if expected_total is None:
                 expected_total = total
@@ -138,14 +138,20 @@ class BoligsidenFetcher:
                 raise BoligsidenFetchError("Boligsiden pagination total changed during sweep")
             if len(records) + len(cases) > expected_total:
                 raise BoligsidenFetchError("Boligsiden page exceeds declared cardinality")
-            records.extend(cases)
             if not cases and len(records) != expected_total:
                 raise BoligsidenFetchError("Boligsiden pagination ended before declared cardinality")
+            existing_ids = {_case_id(record) for record in records}
+            for case in cases:
+                case_id = _case_id(case)
+                if case_id in existing_ids:
+                    raise BoligsidenFetchError(f"duplicate Boligsiden case id {case_id!r} in address-type sweep")
+                existing_ids.add(case_id)
+            records.extend(cases)
             page += 1
         return records
 
-    def _url(self, page: int, municipality: str, address_type: str) -> str:
-        return f"{self._config.endpoint}?{urlencode(self._config.query(page=page, municipality=municipality, address_type=address_type))}"
+    def _url(self, page: int, address_type: str) -> str:
+        return f"{self._config.endpoint}?{urlencode(self._config.query(page=page, address_type=address_type))}"
 
     def _request_json(self, url: str) -> Mapping[str, Any]:
         last_error: Exception | None = None
@@ -210,5 +216,5 @@ class _HttpResponse:
 
 def _http_get(url: str, timeout: float) -> _HttpResponse:
     request = Request(url, headers={"Accept": "application/json", "User-Agent": "HouseConsensusIngestion/1.0"})
-    with urlopen(request, timeout=timeout) as response:  # noqa: S310 - endpoint is canonical and validated
+    with urlopen(request, timeout=timeout) as response:
         return _HttpResponse(status=response.status, body=response.read())

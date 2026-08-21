@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -82,10 +83,56 @@ def test_config_exposes_canonical_boligsiden_source_namespace_and_query() -> Non
     assert configured.source_system == "house-consensus-ingestion"
     assert configured.source_scope == "boligsiden.dk/open-cases"
     assert configured.endpoint == "https://api.boligsiden.dk/search/cases"
-    assert configured.query(page=2) == {
-        "municipality": "101", "addressType": "villa", "priceMin": "1000000",
-        "priceMax": "2000000", "page": "2",
-    }
+    assert configured.query(page=2) == [
+        ("addressTypes", "villa"), ("municipalities", "101"),
+        ("priceMin", "1000000"), ("priceMax", "2000000"), ("page", "2"),
+    ]
+
+
+def test_fetch_uses_repeated_plural_municipalities_in_each_address_type_partition() -> None:
+    from house_consensus_ingestion.boligsiden import (
+        BoligsidenFetcher,
+        BoligsidenSourceConfig,
+    )
+
+    configured = BoligsidenSourceConfig(
+        municipalities=("101", "147"), address_types=("villa", "farm"),
+        price_min=1_000_000, price_max=2_000_000,
+    )
+    transport = Transport([
+        Response(page(total=1, cases=[{"caseID": "villa-1"}])),
+        Response(page(total=1, cases=[{"caseID": "farm-1"}])),
+    ])
+
+    BoligsidenFetcher(configured, transport=transport, sleep=lambda _: None).fetch()
+
+    queries = [parse_qs(urlparse(url).query) for url, _ in transport.calls]
+    assert queries == [
+        {"addressTypes": ["villa"], "municipalities": ["101", "147"],
+         "priceMin": ["1000000"], "priceMax": ["2000000"], "page": ["1"]},
+        {"addressTypes": ["farm"], "municipalities": ["101", "147"],
+         "priceMin": ["1000000"], "priceMax": ["2000000"], "page": ["1"]},
+    ]
+
+
+def test_fetch_deduplicates_a_case_returned_by_multiple_address_type_partitions() -> None:
+    from house_consensus_ingestion.boligsiden import (
+        BoligsidenFetcher,
+        BoligsidenSourceConfig,
+    )
+
+    configured = BoligsidenSourceConfig(
+        municipalities=("101",), address_types=("villa", "farm"),
+        price_min=1_000_000, price_max=2_000_000,
+    )
+    transport = Transport([
+        Response(page(total=1, cases=[{"caseID": "shared", "addressType": "villa"}])),
+        Response(page(total=1, cases=[{"caseID": "shared", "addressType": "farm"}])),
+    ])
+
+    snapshot = BoligsidenFetcher(configured, transport=transport, sleep=lambda _: None).fetch()
+
+    assert snapshot.records == ({"caseID": "shared", "addressType": "villa"},)
 
 
 def test_fetch_retries_transient_http_failure_with_configured_timeout() -> None:
@@ -122,7 +169,10 @@ def test_fetch_returns_deterministic_raw_snapshot_after_complete_pagination() ->
     ids=["total-changes", "duplicate-id", "blank-id"],
 )
 def test_fetch_retries_one_full_sweep_when_pagination_contract_is_invalid(responses: list[object]) -> None:
-    from house_consensus_ingestion.boligsiden import BoligsidenFetchError, BoligsidenFetcher
+    from house_consensus_ingestion.boligsiden import (
+        BoligsidenFetcher,
+        BoligsidenFetchError,
+    )
 
     repeated_responses = responses + responses
     transport = Transport(repeated_responses)
@@ -134,7 +184,10 @@ def test_fetch_retries_one_full_sweep_when_pagination_contract_is_invalid(respon
 
 
 def test_fetch_rejects_an_empty_default_search_like_the_legacy_fetch_stage() -> None:
-    from house_consensus_ingestion.boligsiden import BoligsidenFetchError, BoligsidenFetcher
+    from house_consensus_ingestion.boligsiden import (
+        BoligsidenFetcher,
+        BoligsidenFetchError,
+    )
 
     transport = Transport([Response(page(total=0, cases=[])), Response(page(total=0, cases=[]))])
 
@@ -147,7 +200,10 @@ def test_fetch_rejects_an_empty_default_search_like_the_legacy_fetch_stage() -> 
 def test_fetch_does_not_retry_permanent_http_errors() -> None:
     from urllib.error import HTTPError
 
-    from house_consensus_ingestion.boligsiden import BoligsidenFetchError, BoligsidenFetcher
+    from house_consensus_ingestion.boligsiden import (
+        BoligsidenFetcher,
+        BoligsidenFetchError,
+    )
 
     error = lambda: HTTPError("https://api.boligsiden.dk/search/cases", 404, "not found", {}, None)
     transport = Transport([error(), error()])

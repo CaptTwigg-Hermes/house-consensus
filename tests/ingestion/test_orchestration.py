@@ -46,6 +46,18 @@ class Projector:
         return 1
 
 
+class Pipeline:
+    def process(self, cases):
+        from house_consensus_ingestion.pipeline import PipelineResult
+
+        records = tuple(dict(case) for case in cases)
+        return PipelineResult(
+            records=records,
+            matched_count=len(records),
+            stage_outcomes={"classification": {"records": len(records), "matched": len(records)}},
+        )
+
+
 def raw_fetch():
     from house_consensus_ingestion.boligsiden import RawFetchSnapshot
     from house_consensus_ingestion.identity import build_snapshot
@@ -77,7 +89,10 @@ def test_maps_live_boligsiden_case_id_address_object_and_price_cash_to_projectio
 
 
 def test_rejects_malformed_live_boligsiden_address_or_price_before_any_native_write() -> None:
-    from house_consensus_ingestion.orchestration import BoligsidenProjectionRecordError, boligsiden_projection_record
+    from house_consensus_ingestion.orchestration import (
+        BoligsidenProjectionRecordError,
+        boligsiden_projection_record,
+    )
 
     with pytest.raises(BoligsidenProjectionRecordError, match="address"):
         boligsiden_projection_record({"caseID": "case-42", "address": {}, "priceCash": 2_500_000})
@@ -93,7 +108,7 @@ def test_dry_run_fetches_validates_and_reports_without_native_database_or_projec
     fetcher = Fetcher(raw_fetch())
     writer = Writer()
     projector = Projector()
-    result = NativeIngestionOrchestrator(fetcher=fetcher, run_writer=writer, projector=projector).run(
+    result = NativeIngestionOrchestrator(fetcher=fetcher, pipeline=Pipeline(), run_writer=writer, projector=projector).run(
         dry_run=True,
         requested_at=datetime(2026, 8, 7, tzinfo=UTC),
     )
@@ -111,14 +126,14 @@ def test_native_lifecycle_projects_before_terminal_success() -> None:
 
     writer = Writer()
     projector = Projector()
-    result = NativeIngestionOrchestrator(fetcher=Fetcher(raw_fetch()), run_writer=writer, projector=projector).run(
+    result = NativeIngestionOrchestrator(fetcher=Fetcher(raw_fetch()), pipeline=Pipeline(), run_writer=writer, projector=projector).run(
         dry_run=False,
         requested_at=datetime(2026, 8, 7, tzinfo=UTC),
     )
 
     assert result.dry_run is False
     assert result.projected_count == 1
-    assert [call[0] for call in writer.calls] == ["started", "snapshot", "stage", "stage", "terminal"]
+    assert [call[0] for call in writer.calls] == ["started", "snapshot", "stage", "stage", "stage", "terminal"]
     snapshot_payload = writer.calls[1][3]
     assert snapshot_payload["records"] == [dict(raw_fetch().records[0])]
     assert snapshot_payload["projection_records"] == [{
@@ -126,7 +141,8 @@ def test_native_lifecycle_projects_before_terminal_success() -> None:
     }]
     assert writer.calls[2][3] == "succeeded"
     assert writer.calls[3][3] == "succeeded"
-    assert writer.calls[4][2] == "succeeded"
+    assert writer.calls[4][3] == "succeeded"
+    assert writer.calls[5][2] == "succeeded"
     assert projector.calls == [("00000000-0000-0000-0000-000000000011", datetime(2026, 8, 7, tzinfo=UTC))]
 
 
@@ -139,7 +155,7 @@ def test_terminal_failure_is_persisted_when_snapshot_write_fails() -> None:
 
     writer = FailingWriter()
     with pytest.raises(RuntimeError, match="disk full"):
-        NativeIngestionOrchestrator(fetcher=Fetcher(raw_fetch()), run_writer=writer, projector=Projector()).run(
+        NativeIngestionOrchestrator(fetcher=Fetcher(raw_fetch()), pipeline=Pipeline(), run_writer=writer, projector=Projector()).run(
             dry_run=False,
             requested_at=datetime(2026, 8, 7, tzinfo=UTC),
         )
@@ -155,7 +171,7 @@ def test_exact_retry_of_a_terminal_run_is_a_no_op_after_provenance_is_verified(t
     writer = Writer(existing_run_status=terminal_status)
     projector = Projector()
 
-    result = NativeIngestionOrchestrator(fetcher=Fetcher(raw_fetch()), run_writer=writer, projector=projector).run(
+    result = NativeIngestionOrchestrator(fetcher=Fetcher(raw_fetch()), pipeline=Pipeline(), run_writer=writer, projector=projector).run(
         dry_run=False,
         requested_at=datetime(2026, 8, 7, tzinfo=UTC),
     )
@@ -176,9 +192,9 @@ def test_projection_failure_marks_the_running_run_failed_before_it_can_succeed()
     writer = Writer()
     with pytest.raises(RuntimeError, match="listing lock timeout"):
         NativeIngestionOrchestrator(
-            fetcher=Fetcher(raw_fetch()), run_writer=writer, projector=FailingProjector()
+            fetcher=Fetcher(raw_fetch()), pipeline=Pipeline(), run_writer=writer, projector=FailingProjector()
         ).run(dry_run=False, requested_at=datetime(2026, 8, 7, tzinfo=UTC))
 
-    assert [call[0] for call in writer.calls] == ["started", "snapshot", "stage", "stage", "terminal"]
+    assert [call[0] for call in writer.calls] == ["started", "snapshot", "stage", "stage", "stage", "terminal"]
     assert writer.calls[-2][3:5] == ("failed", {"error": "listing lock timeout"})
     assert writer.calls[-1][2] == "failed"

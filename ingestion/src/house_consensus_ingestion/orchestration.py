@@ -1,14 +1,15 @@
 """Native Boligsiden fetch, audit, lifecycle, and listing-projection orchestration."""
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
 import math
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
 from .boligsiden import RawFetchSnapshot
 from .identity import RunSnapshot
+from .pipeline import PipelineResult
 
 
 class BoligsidenProjectionRecordError(ValueError):
@@ -17,6 +18,10 @@ class BoligsidenProjectionRecordError(ValueError):
 
 class Fetcher(Protocol):
     def fetch(self) -> RawFetchSnapshot: ...
+
+
+class CasePipeline(Protocol):
+    def process(self, cases: Iterable[Mapping[str, Any]]) -> PipelineResult: ...
 
 
 class RunWriter(Protocol):
@@ -38,9 +43,19 @@ class IngestionResult:
     snapshot_count: int
     projected_count: int
     run_status: str
+    matched_count: int | None
 
 
 def boligsiden_projection_record(case: Mapping[str, Any]) -> dict[str, Any]:
+    if isinstance(case.get("address"), str):
+        external_id = _text(case.get("external_id") or case.get("id") or case.get("caseID"), "external_id")
+        address = _text(case.get("address"), "address")
+        price = case.get("price") if "price" in case else case.get("price_dkk")
+        if isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price < 0:
+            raise BoligsidenProjectionRecordError("normalized price must be a non-negative number")
+        result = dict(case)
+        result.update(external_id=external_id, address=address, price=price)
+        return result
     case_id = _text(case.get("caseID"), "caseID")
     address = case.get("address")
     if not isinstance(address, Mapping):
@@ -60,32 +75,44 @@ def boligsiden_projection_record(case: Mapping[str, Any]) -> dict[str, Any]:
 class NativeIngestionOrchestrator:
     """Runs a complete immutable native ingestion slice; dry runs never write."""
 
-    def __init__(self, *, fetcher: Fetcher, run_writer: RunWriter, projector: Projector) -> None:
+    def __init__(self, *, fetcher: Fetcher, pipeline: CasePipeline, run_writer: RunWriter, projector: Projector) -> None:
         self._fetcher = fetcher
+        self._pipeline = pipeline
         self._run_writer = run_writer
         self._projector = projector
 
     def run(self, *, dry_run: bool, requested_at: datetime) -> IngestionResult:
         fetched = self._fetcher.fetch()
-        projection_records = [boligsiden_projection_record(case) for case in fetched.records]
         snapshot = fetched.run_snapshot
         if dry_run:
-            return IngestionResult(True, snapshot.run_id, snapshot.manifest_sha256, snapshot.snapshot_count, 0, "dry_run")
+            processed = self._pipeline.process(fetched.records)
+            for case in processed.records:
+                boligsiden_projection_record(case)
+            return IngestionResult(
+                True, snapshot.run_id, snapshot.manifest_sha256, snapshot.snapshot_count, 0, "dry_run",
+                processed.matched_count,
+            )
 
-        payload = {
-            "records": [dict(case) for case in fetched.records],
-            "projection_records": projection_records,
-            "source_system": snapshot.source_system,
-            "source_scope": snapshot.source_scope,
-            "manifest_sha256": snapshot.manifest_sha256,
-            "snapshot_count": snapshot.snapshot_count,
-        }
         run_status = self._run_writer.write_started_run(snapshot=snapshot, requested_at=requested_at)
         if run_status != "running":
-            return IngestionResult(False, snapshot.run_id, snapshot.manifest_sha256, snapshot.snapshot_count, 0, run_status)
+            return IngestionResult(
+                False, snapshot.run_id, snapshot.manifest_sha256, snapshot.snapshot_count, 0, run_status, None,
+            )
 
-        failed_stage = "fetch"
+        failed_stage = "pipeline"
         try:
+            processed = self._pipeline.process(fetched.records)
+            projection_records = [boligsiden_projection_record(case) for case in processed.records]
+            payload = {
+                "raw_records": [dict(case) for case in fetched.records],
+                "records": [dict(case) for case in processed.records],
+                "projection_records": projection_records,
+                "source_system": snapshot.source_system,
+                "source_scope": snapshot.source_scope,
+                "manifest_sha256": snapshot.manifest_sha256,
+                "snapshot_count": snapshot.snapshot_count,
+            }
+            failed_stage = "fetch"
             source_snapshot_id = self._run_writer.write_source_snapshot(
                 snapshot=snapshot, source_name="boligsiden-search-cases", payload=payload, captured_at=requested_at,
             )
@@ -94,6 +121,12 @@ class NativeIngestionOrchestrator:
                 outcome={"record_count": snapshot.snapshot_count, "source_snapshot_id": source_snapshot_id},
                 started_at=requested_at, completed_at=requested_at,
             )
+            for stage_name, outcome in processed.stage_outcomes.items():
+                failed_stage = stage_name
+                self._run_writer.write_stage_outcome(
+                    snapshot=snapshot, stage_name=stage_name, stage_status="succeeded", outcome=outcome,
+                    started_at=requested_at, completed_at=requested_at,
+                )
             failed_stage = "projection"
             projected_count = self._projector.project_completed_snapshot(
                 source_snapshot_id=source_snapshot_id, projected_at=requested_at,
@@ -113,7 +146,10 @@ class NativeIngestionOrchestrator:
             finally:
                 self._run_writer.complete_run(snapshot=snapshot, run_status="failed", completed_at=requested_at)
             raise
-        return IngestionResult(False, snapshot.run_id, snapshot.manifest_sha256, snapshot.snapshot_count, projected_count, "succeeded")
+        return IngestionResult(
+            False, snapshot.run_id, snapshot.manifest_sha256, snapshot.snapshot_count, projected_count,
+            "succeeded", processed.matched_count,
+        )
 
 
 def _text(value: object, field: str) -> str:

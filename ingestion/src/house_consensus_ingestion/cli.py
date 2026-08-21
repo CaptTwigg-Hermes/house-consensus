@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, datetime
 import json
 import os
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 from .boligsiden import BoligsidenFetcher, BoligsidenSourceConfig
+from .classification import ClassificationConfig
 from .identity import build_snapshot
 from .orchestration import NativeIngestionOrchestrator
+from .pipeline import NativeCasePipeline
 from .postgres import PostgresRunWriter
 from .projection import PostgresListingProjectionWriter
 
@@ -56,12 +58,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_writer = _DryRunWriter()
         projector = _DryRunProjector()
     result = NativeIngestionOrchestrator(
-        fetcher=BoligsidenFetcher(config), run_writer=run_writer, projector=projector,
+        fetcher=BoligsidenFetcher(config),
+        pipeline=NativeCasePipeline(classification=ClassificationConfig(
+            price_min=config.price_min, price_max=config.price_max,
+        )),
+        run_writer=run_writer, projector=projector,
     ).run(dry_run=arguments.dry_run, requested_at=datetime.now(UTC))
     print(json.dumps({
         "dry_run": result.dry_run, "source_system": config.source_system, "source_scope": config.source_scope,
         "snapshot_count": result.snapshot_count, "manifest_sha256": result.manifest_sha256,
         "run_id": result.run_id, "projected_count": result.projected_count,
+        "matched_count": result.matched_count, "run_status": result.run_status,
     }, sort_keys=True))
     return 0
 

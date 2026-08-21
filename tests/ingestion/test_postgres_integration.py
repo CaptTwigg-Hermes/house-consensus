@@ -4,10 +4,8 @@ from pathlib import Path
 
 import psycopg
 import pytest
-
 from house_consensus_ingestion.identity import build_snapshot
 from house_consensus_ingestion.postgres import PostgresRunWriter
-
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = ROOT / "exporter/src/consensus_exporter/schema.sql"
@@ -104,8 +102,10 @@ def test_native_lifecycle_snapshot_and_projection_round_trip_on_postgres(databas
 
 def test_projection_failure_leaves_a_terminal_failed_run_and_a_reconcilable_snapshot(database_url):
     from house_consensus_ingestion.boligsiden import RawFetchSnapshot
-    from house_consensus_ingestion.projection import PostgresListingProjectionWriter
+    from house_consensus_ingestion.classification import ClassificationConfig
     from house_consensus_ingestion.orchestration import NativeIngestionOrchestrator
+    from house_consensus_ingestion.pipeline import NativeCasePipeline
+    from house_consensus_ingestion.projection import PostgresListingProjectionWriter
 
     raw_records = ({
         "caseID": "case-42",
@@ -128,6 +128,7 @@ def test_projection_failure_leaves_a_terminal_failed_run_and_a_reconcilable_snap
     with pytest.raises(RuntimeError, match="listing lock timeout"):
         NativeIngestionOrchestrator(
             fetcher=Fetcher(),
+            pipeline=NativeCasePipeline(classification=ClassificationConfig(price_max=3_000_000)),
             run_writer=PostgresRunWriter(lambda: psycopg.connect(database_url)),
             projector=FailingProjector(),
         ).run(dry_run=False, requested_at=now)
@@ -138,7 +139,12 @@ def test_projection_failure_leaves_a_terminal_failed_run_and_a_reconcilable_snap
         assert conn.execute(
             "SELECT stage_name, stage_status FROM ingestion_stage_outcomes WHERE run_id=%s ORDER BY outcome_id",
             (snapshot.run_id,),
-        ).fetchall() == [("fetch", "succeeded"), ("projection", "failed")]
+        ).fetchall() == [
+            ("fetch", "succeeded"),
+            ("classification", "succeeded"),
+            ("scoring", "succeeded"),
+            ("projection", "failed"),
+        ]
         source_snapshot_id = conn.execute(
             "SELECT snapshot_id FROM ingestion_source_snapshots WHERE run_id=%s", (snapshot.run_id,)
         ).fetchone()[0]
