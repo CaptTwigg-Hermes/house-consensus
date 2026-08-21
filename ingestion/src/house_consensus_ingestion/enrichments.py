@@ -103,7 +103,49 @@ class VisionEnricher:
             else:
                 hits += 1
             record.update(result)
+            _merge_two_family_vision(record)
         return {"enriched": len(records), "fresh": fresh, "cache_hits": hits}
+
+
+_CONFIDENCE_ORDER = {"none": 0, "possible": 1, "likely": 2, "confirmed": 3}
+
+
+def _merge_two_family_vision(record: dict[str, Any]) -> None:
+    """Apply the former pipeline's auditable post-selection vision merge."""
+    if record.get("vision_run_status") != "ok":
+        return
+    layout = record.get("vision_multigen_layout")
+    confidence = record.get("vision_confidence")
+    if layout not in {"strong", "possible", "unlikely"} or confidence not in {"medium", "high"}:
+        return
+    current = str(record.get("two_family_confidence") or "none")
+    reasons = [
+        reason for reason in record.get("two_family_reasons") or []
+        if not str(reason).casefold().startswith("vision")
+    ]
+    bits: list[str] = []
+    if record.get("vision_separate_entrance") is True:
+        bits.append("separate entrance")
+    if record.get("vision_second_kitchen") is True:
+        bits.append("second kitchen")
+    split = record.get("vision_split_type")
+    if split in {"horizontal", "vertical", "side_by_side"}:
+        bits.append(f"{split} split")
+    stairs = record.get("vision_staircase_count")
+    if isinstance(stairs, int) and not isinstance(stairs, bool) and stairs >= 2:
+        bits.append(f"{stairs} staircases")
+    evidence = ", ".join(bits) or "multi-generational layout signals"
+    if layout == "strong":
+        target = "confirmed" if _CONFIDENCE_ORDER.get(current, 0) >= _CONFIDENCE_ORDER["likely"] else "likely"
+        reason = f"vision: strong two-family layout — {evidence}"
+    elif layout == "possible":
+        target = current if _CONFIDENCE_ORDER.get(current, 0) >= _CONFIDENCE_ORDER["possible"] else "possible"
+        reason = f"vision: possible two-family layout — {evidence}"
+    else:
+        target = {"confirmed": "likely", "likely": "possible"}.get(current, current)
+        reason = f"vision: layout reads as single household ({confidence} confidence) — {evidence}"
+    record["two_family_confidence"] = target
+    record["two_family_reasons"] = [*reasons, reason]
 
 
 class CommuteEnricher:

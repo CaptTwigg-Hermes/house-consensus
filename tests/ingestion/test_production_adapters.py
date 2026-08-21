@@ -23,6 +23,36 @@ def test_floorplan_recovery_accepts_only_explicit_labels_and_safe_urls():
     assert recover({"caseUrl": "https://broker.example/listing"}) == ["https://broker.example/plan.jpg"]
 
 
+def test_commute_router_accepts_brouter_numeric_strings() -> None:
+    from house_consensus_ingestion.adapters import CommuteRouter, RoutingConfig
+
+    def get_json(url: str, _timeout: float):
+        if "osrm" in url:
+            return {"code": "Ok", "routes": [{"duration": 1200, "distance": 10000}]}
+        if "brouter" in url:
+            return {
+                "features": [
+                    {"properties": {"total-time": "3061", "track-length": "17448"}}
+                ]
+            }
+        return {
+            "itineraries": [
+                {"duration": 1800, "transfers": 1, "legs": [{"mode": "TRAIN"}]}
+            ]
+        }
+
+    result = CommuteRouter(
+        RoutingConfig(
+            osrm_endpoint="https://osrm.example/route",
+            brouter_endpoint="https://brouter.example/route",
+            transit_endpoint="https://transit.example/plan",
+        ),
+        get_json=get_json,
+    ).route((55.6, 12.4), (55.7, 12.5))
+
+    assert result["bike"] == {"min": 51, "km": 17.4}
+
+
 def test_production_configuration_requires_fail_closed_inputs():
     from house_consensus_ingestion.adapters import ProductionAdapterConfig
 

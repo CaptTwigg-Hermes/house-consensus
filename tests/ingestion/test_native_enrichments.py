@@ -64,6 +64,34 @@ def test_vision_failure_is_not_cached() -> None:
     assert cache.puts == []
 
 
+def test_vision_merges_legacy_multigen_confidence_after_selection() -> None:
+    from house_consensus_ingestion.enrichments import VisionEnricher
+
+    record = {
+        "id": "1",
+        "two_family_confidence": "confirmed",
+        "two_family_reasons": ["heuristic", "vision: stale"],
+    }
+    enricher = VisionEnricher(
+        cache=MemoryCache(),
+        recover_floorplans=lambda _: [],
+        analyze=lambda _: {
+            "vision_run_status": "ok",
+            "vision_confidence": "high",
+            "vision_multigen_layout": "unlikely",
+        },
+        model="vision-v1",
+    )
+
+    enricher.enrich([record])
+
+    assert record["two_family_confidence"] == "likely"
+    assert record["two_family_reasons"] == [
+        "heuristic",
+        "vision: layout reads as single household (high confidence) — multi-generational layout signals",
+    ]
+
+
 def test_commute_routes_each_destination_once_and_marks_missing_coordinates_unavailable() -> None:
     from house_consensus_ingestion.enrichments import CommuteEnricher
 

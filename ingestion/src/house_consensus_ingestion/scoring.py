@@ -53,7 +53,8 @@ def _privacy(record: dict[str, Any]) -> tuple[float, list[str]]:
         points += 35; notes.append("separate entrance (+35)")
     if kitchen is True:
         points += 25; notes.append("second kitchen (+25)")
-    independent = separate is True or kitchen is True or split in {"horizontal", "vertical", "side_by_side"}
+    two_dwellings = _boolean(record.get("vision_two_dwellings"))
+    independent = separate is True or kitchen is True or split in {"horizontal", "vertical", "side_by_side"} or two_dwellings is True
     if connection is True:
         points -= 15; notes.append("internal connection (-15)")
     elif connection is False and independent:
@@ -65,6 +66,13 @@ def _privacy(record: dict[str, Any]) -> tuple[float, list[str]]:
         points += 12; notes.append("two en-suites (+12)")
     elif ensuite is not None and _integer(ensuite) == 1:
         points += 5; notes.append("one en-suite (+5)")
+    bathrooms = _integer(record.get("vision_bathroom_count"))
+    if bathrooms == 0 and "housing_area_m2" not in record:
+        bathrooms = _integer(record.get("numberOfBathrooms"))
+    if ensuite is None and bathrooms >= 3:
+        points += 8; notes.append(f"numberOfBathrooms={bathrooms} as fallback (+8)")
+    elif ensuite is None and bathrooms == 2:
+        points += 4; notes.append("numberOfBathrooms=2 as fallback (+4)")
     if _integer(record.get("vision_staircase_count")) >= 2:
         points += 8; notes.append("multiple staircases (+8)")
     return _clamp(points), notes
@@ -82,7 +90,11 @@ def _kids(record: dict[str, Any]) -> tuple[float, list[str]]:
         points += 8; notes.append("multiple floors (+8)")
     if _boolean(record.get("vision_has_terrace") or record.get("hasTerrace")) is True:
         points += 5; notes.append("terrace (+5)")
-    if _integer(record.get("vision_storage_count")) > 0:
+    storage = _boolean(record.get("storage"))
+    if storage is None:
+        count = record.get("vision_storage_count")
+        storage = count is not None and _integer(count) > 0
+    if storage is True:
         points += 10; notes.append("storage (+10)")
     if _boolean(record.get("vision_utility_room")) is True:
         points += 5; notes.append("utility (+5)")
@@ -118,9 +130,7 @@ def _shared(record: dict[str, Any]) -> tuple[float, list[str]]:
     if isinstance(dining, (int, float)) and not isinstance(dining, bool):
         if dining >= 8: points += 20
         elif dining >= 6: points += 12
-    elif _text(dining) == "large": points += 20
-    elif _text(dining) == "medium": points += 12
-    if kitchen in {"large", "xl", "stor", "island"}: points += 20
+    if kitchen in {"large", "xl", "stor"}: points += 20
     elif kitchen in {"medium", "medium-large", "mellom"}: points += 12
     points += {"excellent": 10, "good": 6, "fair": 2}.get(condition, 0)
     if open_plan is None and not kitchen:
@@ -140,14 +150,14 @@ def _practical(record: dict[str, Any]) -> tuple[float, list[str]]:
     if ground is True: points += 15; notes.append("ground-floor bedroom (+15)")
     elif ground is None and floors == 1: points += 10
     noise = _text(record.get("noise_status"))
-    points += {"quiet": 25, "moderate": 10, "loud": -10, "noisy": -10}.get(noise, 0)
+    points += {"quiet": 25, "moderate": 10, "loud": -10}.get(noise, 0)
     if noise: notes.append(f"noise={noise}")
-    toilets = _integer(record.get("numberOfToilets") or record.get("vision_bathroom_count"))
-    if not toilets:
+    toilets = 0 if "housing_area_m2" in record else _integer(record.get("numberOfToilets"))
+    if not toilets and "housing_area_m2" not in record:
         address = record.get("address")
         buildings = address.get("buildings") if isinstance(address, dict) else None
         first = buildings[0] if isinstance(buildings, list) and buildings and isinstance(buildings[0], dict) else {}
-        toilets = _integer(first.get("numberOfToilets") or first.get("numberOfBathrooms"))
+        toilets = _integer(first.get("numberOfToilets"))
     if toilets >= 3: points += 15
     elif toilets == 2: points += 8
     energy = _text(record.get("energy_label") or record.get("energyLabel")).replace(" ", "")
@@ -157,7 +167,8 @@ def _practical(record: dict[str, Any]) -> tuple[float, list[str]]:
 
 def family_score(record: dict[str, Any]) -> dict[str, Any]:
     confidence = _text(record.get("vision_confidence"))
-    privacy_available = record.get("vision_run_status") == "ok" and confidence in {"medium", "high"} and any(
+    status = record.get("vision_run_status") or record.get("vision_status")
+    privacy_available = status == "ok" and confidence in {"medium", "high"} and any(
         record.get(key) is not None for key in ("vision_separate_entrance", "vision_second_kitchen", "vision_internal_connection", "vision_split_type", "vision_en_suite_count", "vision_staircase_count", "vision_bathroom_count")
     )
     privacy, privacy_notes = _privacy(record) if privacy_available else (None, ["privacy not assessed"])

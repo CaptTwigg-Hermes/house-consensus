@@ -98,9 +98,15 @@ def http_post_json(url: str, payload: dict[str, Any], timeout: float) -> Mapping
 
 
 def _positive_number(value: Any, name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+    if isinstance(value, bool):
         raise UpstreamResponseError(f"{name} must be a positive finite number")
-    return float(value)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise UpstreamResponseError(f"{name} must be a positive finite number") from error
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise UpstreamResponseError(f"{name} must be a positive finite number")
+    return parsed
 
 
 class BoligsidenCaseClient:
@@ -362,6 +368,7 @@ class OllamaVisionAnalyzer:
 _VISION_PROMPT = """Analyze these images of one Danish home. Return one JSON object only.
 Never infer details that are not visible; use null when uncertain. Fields:
 vision_separate_entrance, vision_second_kitchen, vision_internal_connection,
+vision_multigen_layout (strong|possible|unlikely|null),
 vision_split_type (horizontal|vertical|side_by_side|none|null),
 vision_staircase_count, vision_en_suite_count, vision_bathroom_count,
 vision_bedroom_count, vision_ground_floor_bedroom, vision_utility_room,
@@ -602,6 +609,8 @@ def _validated_vision(payload: Mapping[str, Any]) -> dict[str, Any]:
         result[name] = value.strip()[:1000] if isinstance(value, str) and value.strip() else None
     confidence = payload.get("vision_confidence")
     result["vision_confidence"] = confidence if confidence in {"high", "medium", "low", "none"} else "none"
+    layout = payload.get("vision_multigen_layout")
+    result["vision_multigen_layout"] = layout if layout in {"strong", "possible", "unlikely"} else None
     return result
 
 
