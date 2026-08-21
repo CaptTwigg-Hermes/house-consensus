@@ -70,6 +70,8 @@ def _load_completed_legacy_scope(path: Path, source_scope: str) -> dict[str, Pro
         raise ShadowParityError(f"completed legacy snapshot {run_id!r} contains {len(rows)} of {expected_count} declared cases")
     records: dict[str, ProjectionRecord] = {}
     for fallback_id, case_payload, match_payload in rows:
+        if not match_payload:
+            continue
         raw = json.loads(case_payload)
         raw.setdefault("caseID", fallback_id)
         match = json.loads(match_payload) if match_payload else {}

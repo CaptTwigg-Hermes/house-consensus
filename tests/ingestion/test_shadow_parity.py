@@ -65,6 +65,35 @@ def test_shadow_parity_compares_completed_legacy_scope_to_native_projection_read
     assert "DELETE" not in statements
 
 
+def test_shadow_parity_compares_only_legacy_selected_matches(tmp_path: Path) -> None:
+    from house_consensus_ingestion.shadow_parity import run_shadow_parity
+
+    legacy = tmp_path / "legacy.db"
+    _completed_legacy_snapshot(legacy)
+    with sqlite3.connect(legacy) as connection:
+        connection.execute(
+            "update pipeline_runs set case_count = 2 where run_id = 'completed'"
+        )
+        connection.execute(
+            "insert into pipeline_snapshot_items values (?, ?, ?, ?)",
+            (
+                "completed",
+                "case-unmatched",
+                json.dumps({"caseID": "case-unmatched"}),
+                None,
+            ),
+        )
+
+    result = run_shadow_parity(
+        sqlite_path=legacy,
+        source_system="house-consensus-ingestion",
+        source_scope="tofamiliehus",
+        connection_factory=Connection,
+    )
+
+    assert result.source_ids == ("case-42",)
+
+
 
 def test_shadow_parity_treats_outer_source_url_whitespace_as_canonical_equivalent(tmp_path: Path) -> None:
     from house_consensus_ingestion.shadow_parity import run_shadow_parity
