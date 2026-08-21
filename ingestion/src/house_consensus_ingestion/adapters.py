@@ -390,6 +390,8 @@ class ProductionAdapterConfig:
     routing: RoutingConfig = field(default_factory=RoutingConfig)
     boligsiden_cases_endpoint: str = "https://api.boligsiden.dk/cases"
     boligsiden_addresses_endpoint: str = "https://api.boligsiden.dk/addresses"
+    database_statement_timeout_seconds: float = 120.0
+    database_lock_timeout_seconds: float = 10.0
 
     @classmethod
     def from_env(cls, environment: Mapping[str, str] | None = None) -> ProductionAdapterConfig:
@@ -425,6 +427,8 @@ class ProductionAdapterConfig:
             ),
             boligsiden_cases_endpoint=env.get("CONSENSUS_BOLIGSIDEN_CASES_ENDPOINT", "https://api.boligsiden.dk/cases"),
             boligsiden_addresses_endpoint=env.get("CONSENSUS_BOLIGSIDEN_ADDRESSES_ENDPOINT", "https://api.boligsiden.dk/addresses"),
+            database_statement_timeout_seconds=_env_float(env, "CONSENSUS_DATABASE_STATEMENT_TIMEOUT_SECONDS", 120),
+            database_lock_timeout_seconds=_env_float(env, "CONSENSUS_DATABASE_LOCK_TIMEOUT_SECONDS", 10),
         )
 
 
@@ -490,11 +494,19 @@ def _build_enrichers(
     post_json: JsonPost = http_post_json,
 ) -> tuple[Any, ...]:
     if cache is None:
-        connection_factory = connection_factory or _psycopg_factory(config.database_url)
+        connection_factory = connection_factory or postgres_connection_factory(
+            config.database_url,
+            statement_timeout_seconds=config.database_statement_timeout_seconds,
+            lock_timeout_seconds=config.database_lock_timeout_seconds,
+        )
         postgres_cache = PostgresJsonCache(connection_factory)
         postgres_cache.ensure_schema()
         cache = postgres_cache
-    noise_connection_factory = noise_connection_factory or _psycopg_factory(config.noise_database_url)
+    noise_connection_factory = noise_connection_factory or postgres_connection_factory(
+        config.noise_database_url,
+        statement_timeout_seconds=config.database_statement_timeout_seconds,
+        lock_timeout_seconds=config.database_lock_timeout_seconds,
+    )
     router = CommuteRouter(config.routing, get_json=get_json)
     return (
         PostGISNoiseEnricher(noise_connection_factory),
@@ -515,11 +527,24 @@ def _build_enrichers(
     )
 
 
-def _psycopg_factory(database_url: str) -> Callable[[], Any]:
+def postgres_connection_factory(
+    database_url: str,
+    *,
+    statement_timeout_seconds: float = 120.0,
+    lock_timeout_seconds: float = 10.0,
+) -> Callable[[], Any]:
+    statement_timeout = round(_positive_config(statement_timeout_seconds, "database statement timeout") * 1000)
+    lock_timeout = round(_positive_config(lock_timeout_seconds, "database lock timeout") * 1000)
+    connect_timeout = max(1, min(60, math.ceil(lock_timeout_seconds)))
+
     def connect() -> Any:
         import psycopg
 
-        return psycopg.connect(database_url)
+        return psycopg.connect(
+            database_url,
+            connect_timeout=connect_timeout,
+            options=f"-c statement_timeout={statement_timeout} -c lock_timeout={lock_timeout}",
+        )
 
     return connect
 

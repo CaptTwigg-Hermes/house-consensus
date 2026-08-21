@@ -64,6 +64,8 @@ def test_boligsiden_execute_builds_explicit_production_pipeline(monkeypatch, cap
 
     class Config:
         database_url = "postgresql://example.test/app"
+        database_statement_timeout_seconds = 120
+        database_lock_timeout_seconds = 10
         price_min = 1_000_000
         price_max = 3_000_000
 

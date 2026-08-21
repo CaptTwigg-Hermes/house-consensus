@@ -7,10 +7,13 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-import psycopg
 from consensus_exporter.postgres import PostgresExporter
 
-from .adapters import ProductionAdapterConfig, build_production_pipeline
+from .adapters import (
+    ProductionAdapterConfig,
+    build_production_pipeline,
+    postgres_connection_factory,
+)
 from .boligsiden import BoligsidenFetcher, BoligsidenSourceConfig
 from .classification import ClassificationConfig
 from .identity import build_snapshot
@@ -59,7 +62,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not database_url:
             parser.error("DATABASE_URL is required for --execute")
         adapter_config = ProductionAdapterConfig.from_env()
-        factory = lambda: psycopg.connect(adapter_config.database_url)
+        factory = postgres_connection_factory(
+            adapter_config.database_url,
+            statement_timeout_seconds=adapter_config.database_statement_timeout_seconds,
+            lock_timeout_seconds=adapter_config.database_lock_timeout_seconds,
+        )
         run_writer = PostgresRunWriter(factory)
         projector = ExporterBackedPostgresListingProjector(
             connection_factory=factory,

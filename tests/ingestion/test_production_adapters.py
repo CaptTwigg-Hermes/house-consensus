@@ -53,6 +53,33 @@ def test_commute_router_accepts_brouter_numeric_strings() -> None:
     assert result["bike"] == {"min": 51, "km": 17.4}
 
 
+def test_postgres_factory_bounds_lock_and_statement_waits(monkeypatch) -> None:
+    import psycopg
+    from house_consensus_ingestion.adapters import postgres_connection_factory
+
+    observed = {}
+    marker = object()
+
+    def connect(database_url, **options):
+        observed.update(database_url=database_url, **options)
+        return marker
+
+    monkeypatch.setattr(psycopg, "connect", connect)
+
+    result = postgres_connection_factory(
+        "postgresql://db/house",
+        statement_timeout_seconds=120,
+        lock_timeout_seconds=10,
+    )()
+
+    assert result is marker
+    assert observed == {
+        "database_url": "postgresql://db/house",
+        "connect_timeout": 10,
+        "options": "-c statement_timeout=120000 -c lock_timeout=10000",
+    }
+
+
 def test_production_configuration_requires_fail_closed_inputs():
     from house_consensus_ingestion.adapters import ProductionAdapterConfig
 
