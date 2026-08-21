@@ -230,6 +230,14 @@ listings.MapPost("/", async (CreateManualListing request, ClaimsPrincipal user, 
                 existing.ManualScoringRequestedAt ??= clock.GetUtcNow();
                 existing.ManualScoringError = null;
                 await db.SaveChangesAsync(ct);
+                await scoringStore.EnqueueAsync(
+                    (NpgsqlConnection)db.Database.GetDbConnection(),
+                    (NpgsqlTransaction)transaction.GetDbTransaction(),
+                    existing.Id,
+                    ManualListing.ScoringExternalId(existing.ExternalId, fetched?.ExternalId),
+                    existing.CanonicalUrl!,
+                    existing.ManualScoringRequestedAt.Value,
+                    ct);
             }
             await transaction.CommitAsync(ct);
             return Results.Ok(new ManualListingResult(existing.Id, true));
@@ -248,7 +256,14 @@ listings.MapPost("/", async (CreateManualListing request, ClaimsPrincipal user, 
         }
         db.Listings.Add(listing);
         await db.SaveChangesAsync(ct);
-        await scoringStore.EnqueueAsync((NpgsqlConnection)db.Database.GetDbConnection(), (NpgsqlTransaction)transaction.GetDbTransaction(), listing.Id, listing.ExternalId, listing.CanonicalUrl!, listing.ManualScoringRequestedAt!.Value, ct);
+        await scoringStore.EnqueueAsync(
+            (NpgsqlConnection)db.Database.GetDbConnection(),
+            (NpgsqlTransaction)transaction.GetDbTransaction(),
+            listing.Id,
+            ManualListing.ScoringExternalId(listing.ExternalId, fetched?.ExternalId),
+            listing.CanonicalUrl!,
+            listing.ManualScoringRequestedAt!.Value,
+            ct);
         await transaction.CommitAsync(ct);
         await hub.Clients.All.SendAsync("ListingStateChanged", listing.Id, listing.State, ct);
         return Results.Created($"/api/listings/{listing.Id}", new ManualListingResult(listing.Id, false));

@@ -460,6 +460,8 @@ public static class ManualListing
     public const int MaxNormalizedAddressLength = 500;
     public const decimal MaxAskingPrice = 999_999_999_999.99m;
     private static readonly HashSet<string> Tracking = new(StringComparer.OrdinalIgnoreCase) { "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "gclid", "fbclid" };
+    public static string ScoringExternalId(string listingExternalId, string? resolvedExternalId) =>
+        string.IsNullOrWhiteSpace(resolvedExternalId) ? listingExternalId : resolvedExternalId;
     public static string NormalizeUrl(string value)
     {
         if (!Uri.TryCreate(value?.Trim(), UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps || string.IsNullOrWhiteSpace(uri.Host) || !string.IsNullOrEmpty(uri.UserInfo)) throw new DomainException("A valid HTTPS URL is required.");

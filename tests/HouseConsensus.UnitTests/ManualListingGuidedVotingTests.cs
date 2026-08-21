@@ -33,6 +33,11 @@ public sealed class ManualListingTests
     [Fact] public void Canonical_url_rejects_embedded_credentials() => Assert.Throws<DomainException>(() => ManualListing.NormalizeUrl("https://user:secret@example.dk/home"));
         [Fact] public void Address_normalization_is_case_and_whitespace_insensitive() => Assert.Equal("nørregade 12, 8000 aarhus c", ManualListing.NormalizeAddress("  Nørregade   12,  8000 Aarhus C "));
     [Fact] public void Persistence_boundaries_reject_oversized_normalized_values() { Assert.Throws<DomainException>(() => ManualListing.NormalizeAddress(new string('a', 501))); Assert.Throws<DomainException>(() => ManualListing.NormalizeAddress("a" + new string(' ', 600) + "b")); Assert.Throws<DomainException>(() => ManualListing.NormalizeUrl("https://example.dk/" + new string('a', 2049))); }
+    [Theory]
+    [InlineData("manual:listing", "case-123", "case-123")]
+    [InlineData("manual:listing", null, "manual:listing")]
+    [InlineData("manual:listing", " ", "manual:listing")]
+    public void Scoring_source_prefers_resolved_case_identity(string listingExternalId, string? resolvedExternalId, string expected) => Assert.Equal(expected, ManualListing.ScoringExternalId(listingExternalId, resolvedExternalId));
     [Fact] public void Manual_protection_blocks_automated_state_changes() { var listing = Listing.CreateManual("https://example.dk/home", "Address 1", Guid.NewGuid(), DateTimeOffset.UtcNow); listing.ApplyImportDecision(true); listing.ApplyLearningDecision("feedback-v1", true); listing.Archive(DateTimeOffset.UtcNow, automated: true); Assert.Equal(ListingState.Active, listing.State); Assert.True(listing.ManualLifecycleProtected); Assert.Null(listing.FamilyFitScore); }
 }
 

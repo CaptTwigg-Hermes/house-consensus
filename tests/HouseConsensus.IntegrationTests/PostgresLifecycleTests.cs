@@ -997,11 +997,21 @@ public sealed class PostgresLifecycleTests : IAsyncLifetime
             var pending = await clearRequest.Listings.SingleAsync(x => x.Id == created!.ListingId, ct);
             pending.ManualScoringRequestedAt = null;
             await clearRequest.SaveChangesAsync(ct);
+            await clearRequest.Database.ExecuteSqlInterpolatedAsync($"UPDATE manual_scoring_jobs SET \"NextAttemptAt\" = {DateTimeOffset.UtcNow.AddDays(1)} WHERE \"ListingId\" = {created.ListingId}", ct);
         }
         var duplicateResponse = await client.PostAsJsonAsync("/api/listings", new CreateManualListing("https://example.dk/home", "testvej 1"), ct);
         var duplicate = await duplicateResponse.Content.ReadFromJsonAsync<ManualListingResult>(ct);
         Assert.Equal(HttpStatusCode.Created, createdResponse.StatusCode); Assert.NotNull(created); Assert.False(created.Existing);
         Assert.Equal(HttpStatusCode.OK, duplicateResponse.StatusCode); Assert.Equal(created.ListingId, duplicate?.ListingId); Assert.True(duplicate?.Existing);
+        await using (var queueConnection = new NpgsqlConnection(_connectionString))
+        {
+            await queueConnection.OpenAsync(ct);
+            await using var queueCommand = new NpgsqlCommand("SELECT \"NextAttemptAt\" FROM manual_scoring_jobs WHERE \"ListingId\" = @listingId", queueConnection);
+            queueCommand.Parameters.AddWithValue("listingId", created.ListingId);
+            var nextAttemptAt = (DateTimeOffset?)await queueCommand.ExecuteScalarAsync(ct);
+            Assert.NotNull(nextAttemptAt);
+            Assert.True(nextAttemptAt <= DateTimeOffset.UtcNow.AddSeconds(5));
+        }
         var beforeActivity = await client.GetFromJsonAsync<ListingDto>($"/api/listings/{created.ListingId}", ct);
         Assert.True(beforeActivity?.CanWithdraw); Assert.False(beforeActivity?.CanArchive);
 
