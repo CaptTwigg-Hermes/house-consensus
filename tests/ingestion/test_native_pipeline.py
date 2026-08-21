@@ -80,3 +80,22 @@ def test_pipeline_runs_enrichment_before_scoring_and_fails_closed():
 
     with pytest.raises(RuntimeError, match="offline"):
         NativeCasePipeline(classification=ClassificationConfig(), enrichers=[Broken()]).process([case()])
+
+
+def test_pipeline_fails_closed_when_required_enricher_reports_incomplete_records():
+    from house_consensus_ingestion.classification import ClassificationConfig
+    from house_consensus_ingestion.pipeline import (
+        NativeCasePipeline,
+        RequiredEnrichmentError,
+    )
+
+    class Incomplete:
+        name = "commute"
+
+        def enrich(self, records):
+            return {"enriched": len(records), "incomplete": 1}
+
+    with pytest.raises(RequiredEnrichmentError, match="commute.*incomplete"):
+        NativeCasePipeline(
+            classification=ClassificationConfig(), enrichers=[Incomplete()]
+        ).process([case()])

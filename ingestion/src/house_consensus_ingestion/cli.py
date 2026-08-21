@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from .adapters import ProductionAdapterConfig, build_production_pipeline
 from .boligsiden import BoligsidenFetcher, BoligsidenSourceConfig
 from .classification import ClassificationConfig
 from .identity import build_snapshot
@@ -50,18 +51,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         database_url = os.environ.get("DATABASE_URL")
         if not database_url:
             parser.error("DATABASE_URL is required for --execute")
+        adapter_config = ProductionAdapterConfig.from_env()
         import psycopg
-        factory = lambda: psycopg.connect(database_url)
+        factory = lambda: psycopg.connect(adapter_config.database_url)
         run_writer = PostgresRunWriter(factory)
         projector = PostgresListingProjectionWriter(factory)
+        pipeline = build_production_pipeline(
+            adapter_config,
+            classification=ClassificationConfig(
+                price_min=config.price_min,
+                price_max=config.price_max,
+            ),
+        )
     else:
         run_writer = _DryRunWriter()
         projector = _DryRunProjector()
+        pipeline = NativeCasePipeline(classification=ClassificationConfig(
+            price_min=config.price_min, price_max=config.price_max,
+        ))
     result = NativeIngestionOrchestrator(
         fetcher=BoligsidenFetcher(config),
-        pipeline=NativeCasePipeline(classification=ClassificationConfig(
-            price_min=config.price_min, price_max=config.price_max,
-        )),
+        pipeline=pipeline,
         run_writer=run_writer, projector=projector,
     ).run(dry_run=arguments.dry_run, requested_at=datetime.now(UTC))
     print(json.dumps({

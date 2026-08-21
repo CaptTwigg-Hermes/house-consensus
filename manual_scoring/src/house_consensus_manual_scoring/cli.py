@@ -6,12 +6,12 @@ import argparse
 import importlib
 import json
 import os
+from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from .postgres_store import PostgresManualScoringStore
 from .worker import ManualScoringWorker
-
 
 StoreFactory = Callable[[str, timedelta], Any]
 
@@ -35,8 +35,22 @@ def validate_components(source_resolver: Any, scoring_pipeline: Any) -> None:
 def main(argv: Sequence[str] | None = None, *, store_factory: StoreFactory | None = None) -> int:
     parser = argparse.ArgumentParser(description="Claim and score one durable manual-scoring job.")
     parser.add_argument("--database-url", default=os.environ.get("CONSENSUS_DATABASE_URL"))
-    parser.add_argument("--source-resolver", required=True, metavar="MODULE:FACTORY")
-    parser.add_argument("--scoring-pipeline", required=True, metavar="MODULE:FACTORY")
+    parser.add_argument(
+        "--source-resolver",
+        default=os.environ.get(
+            "CONSENSUS_SOURCE_RESOLVER",
+            "house_consensus_manual_scoring.adapters:build_source_resolver",
+        ),
+        metavar="MODULE:FACTORY",
+    )
+    parser.add_argument(
+        "--scoring-pipeline",
+        default=os.environ.get(
+            "CONSENSUS_SCORING_PIPELINE",
+            "house_consensus_manual_scoring.adapters:build_scoring_pipeline",
+        ),
+        metavar="MODULE:FACTORY",
+    )
     parser.add_argument("--lease-seconds", type=int, default=300)
     arguments = parser.parse_args(argv)
     if not arguments.database_url:

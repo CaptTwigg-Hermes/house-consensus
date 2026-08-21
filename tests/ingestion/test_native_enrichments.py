@@ -83,8 +83,8 @@ def test_commute_routes_each_destination_once_and_marks_missing_coordinates_unav
     second = enricher.enrich([{"id": "3", "latitude": 55.7, "longitude": 12.5}])
 
     assert routes == [((55.7, 12.5), (55.8, 12.6))]
-    assert first == {"enriched": 2, "fresh": 1, "cache_hits": 0}
-    assert second == {"enriched": 1, "fresh": 0, "cache_hits": 1}
+    assert first == {"enriched": 2, "fresh": 1, "cache_hits": 0, "incomplete": 1}
+    assert second == {"enriched": 1, "fresh": 0, "cache_hits": 1, "incomplete": 0}
     assert records[0]["commute"]["destinations"]["work"]["label"] == "Work"
     assert records[1]["commute"] == {"status": "unavailable", "reason": "missing_coordinates", "destinations": {}}
 
@@ -107,8 +107,8 @@ def test_sold_history_normalizes_and_reuses_address_bound_cache() -> None:
     second = enricher.enrich([second_record])
 
     assert calls == ["address-1"]
-    assert first == {"enriched": 1, "fresh": 1, "cache_hits": 0}
-    assert second == {"enriched": 1, "fresh": 0, "cache_hits": 1}
+    assert first == {"enriched": 1, "fresh": 1, "cache_hits": 0, "incomplete": 0}
+    assert second == {"enriched": 1, "fresh": 0, "cache_hits": 1, "incomplete": 0}
     assert second_record["sold_history"] == [{
         "date": "2024-01-01", "amount_dkk": 4_000_000, "per_m2": 20_000, "type": "normal",
     }]
@@ -162,8 +162,8 @@ def test_postgis_noise_preserves_source_status_and_uses_lon_lat_order(road_row: 
     outcome = PostGISNoiseEnricher(lambda: connection).enrich([record])
 
     statement, parameters = connection.cursor_instance.executed[0]
-    assert "ST_Intersects" in statement
-    assert parameters == (12.5, 55.7)
+    assert "ST_Covers" in statement
+    assert parameters == ("", 12.5, 55.7)
     assert record["noise_status"] == expected
     assert record["noise_sources"]["ROAD"]["Lden"]["status"] == road_row[2]
     assert outcome["enriched"] == 1

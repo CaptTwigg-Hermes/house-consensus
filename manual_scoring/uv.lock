@@ -12,9 +12,27 @@ wheels = [
 ]
 
 [[package]]
+name = "house-consensus-ingestion"
+version = "0.1.0"
+source = { editable = "../ingestion" }
+dependencies = [
+    { name = "psycopg", extra = ["binary"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=8,<10" },
+]
+provides-extras = ["test"]
+
+[[package]]
 name = "house-consensus-manual-scoring"
 version = "0.1.0"
 source = { editable = "." }
+dependencies = [
+    { name = "house-consensus-ingestion" },
+]
 
 [package.optional-dependencies]
 postgres = [
@@ -26,6 +44,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "house-consensus-ingestion", editable = "../ingestion" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2,<4" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8,<10" },
 ]

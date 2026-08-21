@@ -30,6 +30,10 @@ class NativeCasePipeline:
         self._classification = classification
         self._enrichers = tuple(enrichers)
 
+    @property
+    def enrichers(self) -> tuple[Enricher, ...]:
+        return self._enrichers
+
     def process(self, cases: Iterable[Mapping[str, Any]]) -> PipelineResult:
         records = classify_cases(cases, self._classification)
         matches = [record for record in records if record["non_ai_passed"]]
@@ -38,8 +42,16 @@ class NativeCasePipeline:
         }
         for enricher in self._enrichers:
             try:
-                outcomes[enricher.name] = dict(enricher.enrich(matches))
+                outcome = dict(enricher.enrich(matches))
+                if outcome.get("incomplete"):
+                    raise RequiredEnrichmentError(
+                        f"required enrichment {enricher.name} reported "
+                        f"{outcome['incomplete']} incomplete record(s)"
+                    )
+                outcomes[enricher.name] = outcome
             except Exception as error:
+                if isinstance(error, RequiredEnrichmentError):
+                    raise
                 raise RequiredEnrichmentError(f"required enrichment {enricher.name} failed: {error}") from error
         for record in matches:
             score = family_score(record)

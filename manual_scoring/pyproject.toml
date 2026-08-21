@@ -3,7 +3,7 @@ name = "house-consensus-manual-scoring"
 version = "0.1.0"
 description = "Native manual-scoring worker domain for House Consensus"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["house-consensus-ingestion==0.1.0"]
 
 [project.scripts]
 house-consensus-manual-scorer = "house_consensus_manual_scoring.cli:main"
@@ -18,3 +18,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/house_consensus_manual_scoring"]
+
+[tool.uv.sources]
+house-consensus-ingestion = { path = "../ingestion", editable = true }
