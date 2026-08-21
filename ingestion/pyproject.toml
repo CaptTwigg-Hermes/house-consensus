@@ -3,7 +3,10 @@ name = "house-consensus-ingestion"
 version = "0.1.0"
 description = "Direct PostgreSQL ingestion worker foundation for House Consensus"
 requires-python = ">=3.11"
-dependencies = ["psycopg[binary]>=3.2,<4"]
+dependencies = ["house-consensus-exporter", "psycopg[binary]>=3.2,<4"]
+
+[tool.uv.sources]
+house-consensus-exporter = { path = "../exporter" }
 
 [project.scripts]
 house-consensus-ingest = "house_consensus_ingestion.cli:main"

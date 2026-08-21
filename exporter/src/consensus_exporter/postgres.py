@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import math
 import re
 import socket
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
-import ipaddress
 
 import psycopg
 from psycopg import sql
@@ -650,6 +650,7 @@ class PostgresExporter:
         fetched_at: datetime | None = None,
         source_config_sha256: str | None = None,
         dry_run: bool = False,
+        projection_recorder: Callable[[object, ExportCase, uuid.UUID], None] | None = None,
     ) -> ExportResult:
         fetched_at = fetched_at or datetime.now(timezone.utc)
         if source_config_sha256 is not None and re.fullmatch(r"[0-9a-f]{64}", source_config_sha256) is None:
@@ -965,6 +966,8 @@ class PostgresExporter:
                         learning_version,
                     ),
                 ).fetchone()[0]
+                if projection_recorder is not None:
+                    projection_recorder(conn, case, listing_id)
                 if (
                     _table_exists(conn, "spatial_ref_sys")
                     and conn.execute(

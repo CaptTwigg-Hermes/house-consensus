@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 from typing import Any
 
 _AI_FAILURES = {
@@ -194,7 +194,9 @@ class ExportCase:
                 "lng",
                 default=coordinates.get("lon") or coordinates.get("lng"),
             ),
-            source_url=_first(merged, "maegler_url", "caseUrl", "link", "url"),
+            source_url=_first(
+                merged, "maegler_url", "source_url", "caseUrl", "link", "url"
+            ),
             family_score=_score(_first(merged, "family_score")),
             non_ai_passed=non_ai_passed,
             ai_status=ai_status,
