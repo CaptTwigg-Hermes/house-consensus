@@ -43,6 +43,8 @@ def test_boligsiden_dry_run_uses_native_orchestrator_without_database(monkeypatc
     class Fetcher:
         def __init__(self, config):
             assert config.municipalities == ("101",)
+            assert config.price_min == 0
+            assert config.price_max == 5_000_000
         def fetch(self):
             return fetched
 
@@ -89,7 +91,14 @@ def test_boligsiden_execute_builds_explicit_production_pipeline(monkeypatch, cap
 
     monkeypatch.setenv("DATABASE_URL", "postgresql://example.test/app")
     monkeypatch.setattr(cli, "ProductionAdapterConfig", Config)
-    monkeypatch.setattr(cli, "build_production_pipeline", lambda config, classification: production_pipeline)
+    def build_pipeline(config, classification):
+        observed["classification_prices"] = (
+            classification.price_min,
+            classification.price_max,
+        )
+        return production_pipeline
+
+    monkeypatch.setattr(cli, "build_production_pipeline", build_pipeline)
     monkeypatch.setattr(cli, "PostgresRunWriter", lambda factory: object())
     monkeypatch.setattr(cli, "NativeIngestionOrchestrator", Orchestrator)
 
@@ -99,6 +108,7 @@ def test_boligsiden_execute_builds_explicit_production_pipeline(monkeypatch, cap
     ]) == 0
     assert observed == {
         "config": True,
+        "classification_prices": (1_000_000, 3_000_000),
         "pipeline": production_pipeline,
         "projector": "ExporterBackedPostgresListingProjector",
     }

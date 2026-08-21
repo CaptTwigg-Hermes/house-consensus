@@ -32,6 +32,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--address-type", action="append", default=[])
     parser.add_argument("--price-min", type=int)
     parser.add_argument("--price-max", type=int)
+    parser.add_argument("--fetch-price-pad", type=int, default=2_000_000)
     arguments = parser.parse_args(argv)
     if arguments.dry_run == arguments.execute:
         parser.error("choose exactly one of --dry-run or --execute")
@@ -44,10 +45,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--records-json cannot be used with --boligsiden")
     if not arguments.municipality or not arguments.address_type or arguments.price_min is None or arguments.price_max is None:
         parser.error("--boligsiden requires --municipality, --address-type, --price-min, and --price-max")
+    if arguments.fetch_price_pad < 0:
+        parser.error("--fetch-price-pad must be non-negative")
 
     config = BoligsidenSourceConfig(
         municipalities=tuple(arguments.municipality), address_types=tuple(arguments.address_type),
-        price_min=arguments.price_min, price_max=arguments.price_max,
+        price_min=max(0, arguments.price_min - arguments.fetch_price_pad),
+        price_max=arguments.price_max + arguments.fetch_price_pad,
         source_system=arguments.source_system, source_scope=arguments.source_scope,
     )
     if arguments.execute:
@@ -67,15 +71,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         pipeline = build_production_pipeline(
             adapter_config,
             classification=ClassificationConfig(
-                price_min=config.price_min,
-                price_max=config.price_max,
+                price_min=arguments.price_min,
+                price_max=arguments.price_max,
             ),
         )
     else:
         run_writer = _DryRunWriter()
         projector = _DryRunProjector()
         pipeline = NativeCasePipeline(classification=ClassificationConfig(
-            price_min=config.price_min, price_max=config.price_max,
+            price_min=arguments.price_min, price_max=arguments.price_max,
         ))
     result = NativeIngestionOrchestrator(
         fetcher=BoligsidenFetcher(config),
