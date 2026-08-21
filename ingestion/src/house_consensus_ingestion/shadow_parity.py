@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import argparse
+import json
+import sqlite3
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-import json
 from pathlib import Path
-import sqlite3
 from typing import Any, Protocol
 
 

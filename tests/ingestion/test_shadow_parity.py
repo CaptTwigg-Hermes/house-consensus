@@ -113,7 +113,10 @@ def test_shadow_parity_treats_outer_source_url_whitespace_as_canonical_equivalen
 
 def test_shadow_parity_reports_projection_field_differences(tmp_path: Path) -> None:
     import pytest
-    from house_consensus_ingestion.shadow_parity import ShadowParityError, run_shadow_parity
+    from house_consensus_ingestion.shadow_parity import (
+        ShadowParityError,
+        run_shadow_parity,
+    )
 
     legacy = tmp_path / "legacy.db"
     _completed_legacy_snapshot(legacy)
@@ -127,7 +130,10 @@ def test_shadow_parity_reports_projection_field_differences(tmp_path: Path) -> N
 
 def test_shadow_parity_reports_genuine_source_url_differences(tmp_path: Path) -> None:
     import pytest
-    from house_consensus_ingestion.shadow_parity import ShadowParityError, run_shadow_parity
+    from house_consensus_ingestion.shadow_parity import (
+        ShadowParityError,
+        run_shadow_parity,
+    )
 
     legacy = tmp_path / "legacy.db"
     _completed_legacy_snapshot(legacy)

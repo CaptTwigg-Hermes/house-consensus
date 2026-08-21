@@ -3,10 +3,10 @@ from __future__ import annotations
 import fcntl
 import os
 import subprocess
-import tomllib
 from pathlib import Path
 
 import pytest
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = {
