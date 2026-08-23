@@ -393,3 +393,38 @@ def test_same_payload_from_distinct_sources_has_distinct_immutable_snapshot_ids(
             ("boligsiden-listing-details", second),
             ("boligsiden-search-cases", first),
         ]
+
+
+def test_native_noise_worker_grant_migration_is_least_privilege_on_postgres(database_url):
+    migration = ROOT / "src/Server/Data/Migrations/202608230002_GrantNativeNoiseWorkerAccess.cs"
+    text = migration.read_text()
+    sql = text.split('migrationBuilder.Sql("""', 1)[1].split('""");', 1)[0]
+    runtime_role = "house_consensus"
+    unrelated_role = "native_noise_unrelated"
+
+    with psycopg.connect(database_url, autocommit=True) as connection:
+        connection.execute("DROP SCHEMA IF EXISTS noise CASCADE")
+        connection.execute("DROP TABLE IF EXISTS public.property_noise_samples")
+        connection.execute(f"DROP ROLE IF EXISTS {unrelated_role}")
+        connection.execute(
+            f"DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{runtime_role}') THEN CREATE ROLE {runtime_role}; END IF; END $$"
+        )
+        connection.execute(f"CREATE ROLE {unrelated_role}")
+        # Clean bootstrap: native noise objects are not yet provisioned.
+        connection.execute(sql)
+        assert connection.execute("SELECT to_regnamespace('noise') IS NULL").fetchone() == (True,)
+
+        connection.execute("CREATE SCHEMA noise")
+        connection.execute("CREATE TABLE noise.noise_source (id bigint primary key)")
+        connection.execute("CREATE TABLE noise.noise_areas (feature_uid text primary key)")
+        connection.execute("CREATE TABLE public.property_noise_samples (property_id text primary key)")
+        connection.execute(sql)
+
+        assert connection.execute("SELECT has_schema_privilege(%s, 'noise', 'USAGE')", (runtime_role,)).fetchone() == (True,)
+        assert connection.execute("SELECT has_table_privilege(%s, 'noise.noise_source', 'SELECT')", (runtime_role,)).fetchone() == (True,)
+        assert connection.execute("SELECT has_table_privilege(%s, 'noise.noise_areas', 'SELECT')", (runtime_role,)).fetchone() == (True,)
+        assert connection.execute("SELECT has_table_privilege(%s, 'public.property_noise_samples', 'SELECT,INSERT,UPDATE')", (runtime_role,)).fetchone() == (True,)
+        assert connection.execute("SELECT has_table_privilege(%s, 'noise.noise_areas', 'INSERT,UPDATE,DELETE')", (runtime_role,)).fetchone() == (False,)
+        assert connection.execute("SELECT has_table_privilege(%s, 'public.property_noise_samples', 'DELETE')", (runtime_role,)).fetchone() == (False,)
+        assert connection.execute("SELECT has_schema_privilege(%s, 'noise', 'USAGE')", (unrelated_role,)).fetchone() == (False,)
+        assert connection.execute("SELECT has_table_privilege('public', 'noise.noise_areas', 'SELECT')").fetchone() == (False,)
