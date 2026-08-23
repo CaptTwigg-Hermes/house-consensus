@@ -194,3 +194,44 @@ def test_retry_and_terminal_failure_leave_later_work_claimable() -> None:
         cursor.execute('SELECT "AttemptCount", "TerminalFailureAt", "NextAttemptAt", "LastErrorCode" FROM manual_scoring_jobs WHERE "Id" = %s', (terminal.job_id,))
         attempts, terminal_at, next_attempt_at, error_code = cursor.fetchone()
     assert attempts == 1 and terminal_at is not None and next_attempt_at is None and error_code == "ambiguous"
+
+
+
+def test_default_cli_terminalizes_synthetic_job_without_source_request(
+    durable_manual_queue_schema: str, monkeypatch, capsys
+) -> None:
+    from house_consensus_manual_scoring import adapters
+    from house_consensus_manual_scoring.cli import main
+
+    listing_id = add_listing()
+    enqueue(listing_id, "manual:unresolved", datetime.now(timezone.utc))
+    calls: list[str] = []
+
+    def unexpected_fetch(self, case_id: str):
+        calls.append(case_id)
+        raise AssertionError("synthetic identity must not reach Boligsiden")
+
+    monkeypatch.setattr(adapters.BoligsidenCaseClient, "fetch_case", unexpected_fetch)
+    monkeypatch.setenv("DATABASE_URL", durable_manual_queue_schema)
+    monkeypatch.setenv("CONSENSUS_NOISE_DATABASE_URL", durable_manual_queue_schema)
+    monkeypatch.setenv("CONSENSUS_OLLAMA_HOST", "http://ollama.invalid:11434")
+    monkeypatch.setenv("CONSENSUS_OLLAMA_MODEL", "test-model")
+    monkeypatch.setenv(
+        "CONSENSUS_COMMUTE_DESTINATIONS",
+        '{"home":{"label":"Home","latitude":55.0,"longitude":12.0}}',
+    )
+
+    assert main(["--database-url", durable_manual_queue_schema]) == 0
+    assert capsys.readouterr().out.strip() == '{"status": "failed"}'
+    assert calls == []
+    with psycopg.connect(durable_manual_queue_schema) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            '''SELECT "TerminalFailureAt", "NextAttemptAt", "LastErrorCode", "LastErrorMessage"
+               FROM manual_scoring_jobs WHERE "ListingId" = %s''',
+            (listing_id,),
+        )
+        terminal_at, retry_at, code, message = cursor.fetchone()
+    assert terminal_at is not None
+    assert retry_at is None
+    assert code == "source_identity_ambiguous"
+    assert "valid real case ID" in message

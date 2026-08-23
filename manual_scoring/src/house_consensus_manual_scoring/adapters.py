@@ -24,7 +24,7 @@ class BoligsidenSourceResolver:
     def resolve(self, identity: SourceIdentity) -> dict[str, Any]:
         case_id = identity.external_id.strip()
         canonical_url = identity.canonical_url.strip()
-        if not case_id or len(case_id) > 128:
+        if not case_id or len(case_id) > 128 or case_id.casefold().startswith("manual:"):
             raise AmbiguousSourceIdentity("claimed source has no valid real case ID")
         parsed = urlparse(canonical_url)
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
