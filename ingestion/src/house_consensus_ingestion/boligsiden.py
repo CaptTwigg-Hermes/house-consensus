@@ -202,6 +202,8 @@ def _page(payload: Mapping[str, Any]) -> tuple[int, list[Mapping[str, Any]]]:
     cases = payload.get("cases")
     if isinstance(total, bool) or not isinstance(total, int) or total < 0:
         raise BoligsidenFetchError("Boligsiden response has no valid totalHits")
+    if total == 0 and cases is None:
+        return 0, []
     if not isinstance(cases, list) or not all(isinstance(case, Mapping) for case in cases):
         raise BoligsidenFetchError("Boligsiden response has no valid cases array")
     copied = [dict(case) for case in cases]

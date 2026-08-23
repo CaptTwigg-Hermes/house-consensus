@@ -153,6 +153,25 @@ def test_fetch_deduplicates_a_case_returned_by_multiple_address_type_partitions(
     assert snapshot.records == ({"caseID": "shared", "addressType": "villa"},)
 
 
+def test_fetch_accepts_an_empty_address_type_partition_returned_as_null_cases() -> None:
+    from house_consensus_ingestion.boligsiden import BoligsidenFetcher, BoligsidenSourceConfig
+
+    configured = BoligsidenSourceConfig(
+        municipalities=("101",), address_types=("villa", "double house"),
+        price_min=1_000_000, price_max=2_000_000,
+    )
+    transport = Transport([
+        Response(page(total=1, cases=[{"caseID": "villa-1"}])),
+        Response({"totalHits": 0, "cases": None}),
+        Response(page(total=1, cases=[{"caseID": "villa-1"}])),
+        Response({"totalHits": 0, "cases": None}),
+    ])
+
+    snapshot = BoligsidenFetcher(configured, transport=transport, sleep=lambda _: None).fetch()
+
+    assert snapshot.records == ({"caseID": "villa-1"},)
+
+
 def test_fetch_retries_transient_http_failure_with_configured_timeout() -> None:
     from house_consensus_ingestion.boligsiden import BoligsidenFetcher
 
