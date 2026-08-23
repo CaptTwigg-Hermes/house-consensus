@@ -18,9 +18,14 @@ class Fetcher:
 
 
 class Writer:
-    def __init__(self, *, existing_run_status: str = "running") -> None:
+    def __init__(
+        self, *, existing_run_status: str = "running", existing_source_snapshot_id: str | None = None,
+        existing_projection_status: str | None = None,
+    ) -> None:
         self.calls: list[tuple[str, object]] = []
         self.existing_run_status = existing_run_status
+        self.existing_source_snapshot_id = existing_source_snapshot_id
+        self.existing_projection_status = existing_projection_status
 
     def write_started_run(self, *, snapshot, requested_at) -> str:
         self.calls.append(("started", snapshot, requested_at))
@@ -30,11 +35,41 @@ class Writer:
         self.calls.append(("snapshot", snapshot, source_name, payload, captured_at))
         return "00000000-0000-0000-0000-000000000011"
 
+    def source_snapshot_id(self, *, snapshot, source_name):
+        self.calls.append(("source_snapshot", snapshot, source_name))
+        return self.existing_source_snapshot_id
+
+    def run_projection_once(self, *, snapshot, source_snapshot_id, projected_at, project):
+        self.calls.append(("projection_once", snapshot, source_snapshot_id))
+        if self.existing_projection_status == "succeeded":
+            return 0
+        try:
+            projected_count = project()
+        except BaseException as error:
+            self.write_projection_outcome(
+                snapshot=snapshot, source_snapshot_id=source_snapshot_id, projection_status="failed",
+                outcome={"error": str(error)}, started_at=projected_at, completed_at=projected_at,
+            )
+            raise
+        self.write_projection_outcome(
+            snapshot=snapshot, source_snapshot_id=source_snapshot_id, projection_status="succeeded",
+            outcome={"projected_count": projected_count}, started_at=projected_at, completed_at=projected_at,
+        )
+        return projected_count
+
+
     def write_stage_outcome(self, *, snapshot, stage_name, stage_status, outcome, started_at, completed_at) -> None:
         self.calls.append(("stage", snapshot, stage_name, stage_status, outcome, started_at, completed_at))
 
     def complete_run(self, *, snapshot, run_status, completed_at) -> None:
         self.calls.append(("terminal", snapshot, run_status, completed_at))
+
+    def write_projection_outcome(
+        self, *, snapshot, source_snapshot_id, projection_status, outcome, started_at, completed_at
+    ) -> None:
+        self.calls.append(
+            ("projection", snapshot, source_snapshot_id, projection_status, outcome, started_at, completed_at)
+        )
 
 
 class Projector:
@@ -122,7 +157,7 @@ def test_dry_run_fetches_validates_and_reports_without_native_database_or_projec
     assert projector.calls == []
 
 
-def test_native_lifecycle_projects_before_terminal_success() -> None:
+def test_native_lifecycle_terminalizes_source_before_projecting() -> None:
     from house_consensus_ingestion.orchestration import NativeIngestionOrchestrator
 
     writer = Writer()
@@ -134,7 +169,7 @@ def test_native_lifecycle_projects_before_terminal_success() -> None:
 
     assert result.dry_run is False
     assert result.projected_count == 1
-    assert [call[0] for call in writer.calls] == ["started", "snapshot", "stage", "stage", "stage", "terminal"]
+    assert [call[0] for call in writer.calls] == ["started", "snapshot", "stage", "stage", "terminal", "projection_once", "projection"]
     snapshot_payload = writer.calls[1][3]
     assert snapshot_payload["source_config_sha256"] == "a" * 64
     assert snapshot_payload["records"] == [dict(raw_fetch().records[0])]
@@ -143,8 +178,8 @@ def test_native_lifecycle_projects_before_terminal_success() -> None:
     }]
     assert writer.calls[2][3] == "succeeded"
     assert writer.calls[3][3] == "succeeded"
-    assert writer.calls[4][3] == "succeeded"
-    assert writer.calls[5][2] == "succeeded"
+    assert writer.calls[4][2] == "succeeded"
+    assert writer.calls[6][3:5] == ("succeeded", {"projected_count": 1})
     assert projector.calls == [("00000000-0000-0000-0000-000000000011", datetime(2026, 8, 7, tzinfo=UTC))]
 
 
@@ -180,11 +215,12 @@ def test_exact_retry_of_a_terminal_run_is_a_no_op_after_provenance_is_verified(t
 
     assert result.run_status == terminal_status
     assert result.projected_count == 0
-    assert [call[0] for call in writer.calls] == ["started"]
+    expected_calls = ["started", "source_snapshot"] if terminal_status == "succeeded" else ["started"]
+    assert [call[0] for call in writer.calls] == expected_calls
     assert projector.calls == []
 
 
-def test_projection_failure_marks_the_running_run_failed_before_it_can_succeed() -> None:
+def test_projection_failure_preserves_completed_source_and_records_separate_failure() -> None:
     from house_consensus_ingestion.orchestration import NativeIngestionOrchestrator
 
     class FailingProjector(Projector):
@@ -197,6 +233,43 @@ def test_projection_failure_marks_the_running_run_failed_before_it_can_succeed()
             fetcher=Fetcher(raw_fetch()), pipeline=Pipeline(), run_writer=writer, projector=FailingProjector()
         ).run(dry_run=False, requested_at=datetime(2026, 8, 7, tzinfo=UTC))
 
-    assert [call[0] for call in writer.calls] == ["started", "snapshot", "stage", "stage", "stage", "terminal"]
-    assert writer.calls[-2][3:5] == ("failed", {"error": "listing lock timeout"})
-    assert writer.calls[-1][2] == "failed"
+    assert [call[0] for call in writer.calls] == ["started", "snapshot", "stage", "stage", "terminal", "projection_once", "projection"]
+    assert writer.calls[4][2] == "succeeded"
+    assert writer.calls[-1][3:5] == ("failed", {"error": "listing lock timeout"})
+
+
+def test_completed_source_retry_retries_an_unprojected_snapshot_without_reopening_it() -> None:
+    from house_consensus_ingestion.orchestration import NativeIngestionOrchestrator
+
+    writer = Writer(
+        existing_run_status="succeeded",
+        existing_source_snapshot_id="00000000-0000-0000-0000-000000000011",
+    )
+    projector = Projector()
+    result = NativeIngestionOrchestrator(
+        fetcher=Fetcher(raw_fetch()), pipeline=Pipeline(), run_writer=writer, projector=projector
+    ).run(dry_run=False, requested_at=datetime(2026, 8, 7, tzinfo=UTC))
+
+    assert result.run_status == "succeeded"
+    assert result.projected_count == 1
+    assert [call[0] for call in writer.calls] == ["started", "source_snapshot", "projection_once", "projection"]
+    assert projector.calls == [("00000000-0000-0000-0000-000000000011", datetime(2026, 8, 7, tzinfo=UTC))]
+
+
+def test_completed_source_retry_is_a_no_op_after_a_durable_successful_projection() -> None:
+    from house_consensus_ingestion.orchestration import NativeIngestionOrchestrator
+
+    writer = Writer(
+        existing_run_status="succeeded",
+        existing_source_snapshot_id="00000000-0000-0000-0000-000000000011",
+        existing_projection_status="succeeded",
+    )
+    projector = Projector()
+    result = NativeIngestionOrchestrator(
+        fetcher=Fetcher(raw_fetch()), pipeline=Pipeline(), run_writer=writer, projector=projector
+    ).run(dry_run=False, requested_at=datetime(2026, 8, 7, tzinfo=UTC))
+
+    assert result.run_status == "succeeded"
+    assert result.projected_count == 0
+    assert [call[0] for call in writer.calls] == ["started", "source_snapshot", "projection_once"]
+    assert projector.calls == []

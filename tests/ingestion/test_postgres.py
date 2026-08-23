@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -129,3 +130,64 @@ def test_run_writer_persists_native_snapshot_stage_outcome_and_terminal_status()
     assert "UPDATE ingestion_runs" in statements
     assert "run_status = %s" in statements
     assert "run_status = 'running'" in statements
+
+
+def test_run_writer_persists_projection_outcome_after_completed_source_run() -> None:
+    from house_consensus_ingestion.identity import build_snapshot
+    from house_consensus_ingestion.postgres import PostgresRunWriter
+
+    snapshot = build_snapshot(source_scope="boligsiden.dk/open-cases", records=[{"caseID": "42"}])
+    connection = Connection()
+    writer = PostgresRunWriter(lambda: connection)
+    now = datetime(2026, 8, 7, tzinfo=UTC)
+
+    writer.write_projection_outcome(
+        snapshot=snapshot, source_snapshot_id="00000000-0000-0000-0000-000000000011",
+        projection_status="failed", outcome={"error": "listing lock timeout"},
+        started_at=now, completed_at=now,
+    )
+
+    statements = connection.cursor_instance.executed
+    assert "FOR NO KEY UPDATE OF r" in statements[0][0]
+    statement, parameters = statements[1]
+    assert "INSERT INTO ingestion_projection_outcomes" in statement
+    assert "MAX(attempt)" in statement
+    assert "ingestion_stage_outcomes" not in statement
+    assert parameters[0] == snapshot.run_id
+    assert parameters[1] == "00000000-0000-0000-0000-000000000011"
+    assert parameters[2] == "failed"
+    assert connection.committed is True
+
+
+def test_projection_outcome_migration_keeps_completed_source_audit_separate_from_child_facts() -> None:
+    migration = (Path(__file__).parents[2] / "src/Server/Data/Migrations/202608230001_AddIngestionProjectionOutcomes.cs").read_text()
+
+    assert "CREATE TABLE IF NOT EXISTS ingestion_projection_outcomes" in migration
+    assert "source_snapshot_id uuid NOT NULL" in migration
+    assert "projection_status IN ('succeeded','failed')" in migration
+    assert "enforce_ingestion_child_fact_parent_running" not in migration
+    assert "GRANT SELECT, INSERT ON ingestion_projection_outcomes TO house_consensus" in migration
+    bootstrap_schema = (Path(__file__).parents[2] / "exporter/src/consensus_exporter/schema.sql").read_text()
+    assert "CREATE TABLE IF NOT EXISTS ingestion_projection_outcomes" in bootstrap_schema
+    assert "enforce_ingestion_projection_outcome_source" in bootstrap_schema
+
+
+def test_run_writer_rejects_projection_outcomes_for_a_non_succeeded_source_run() -> None:
+    from house_consensus_ingestion.identity import build_snapshot
+    from house_consensus_ingestion.postgres import IngestionProjectionLifecycleError, PostgresRunWriter
+
+    snapshot = build_snapshot(source_scope="boligsiden.dk/open-cases", records=[{"caseID": "42"}])
+    writer = PostgresRunWriter(lambda: Connection(result=None))
+
+    with pytest.raises(IngestionProjectionLifecycleError, match="completed succeeded source"):
+        writer.write_projection_outcome(
+            snapshot=snapshot, source_snapshot_id="00000000-0000-0000-0000-000000000011",
+            projection_status="failed", outcome={"error": "listing lock timeout"},
+            started_at=datetime(2026, 8, 7, tzinfo=UTC), completed_at=datetime(2026, 8, 7, tzinfo=UTC),
+        )
+
+
+def test_projection_gate_uses_a_non_conflicting_parent_lock_for_the_separate_projector_connection() -> None:
+    source = (Path(__file__).parents[2] / "ingestion/src/house_consensus_ingestion/postgres.py").read_text()
+    assert "FOR NO KEY UPDATE OF r" in source
+    assert "FOR UPDATE OF r" not in source

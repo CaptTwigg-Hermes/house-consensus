@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
@@ -27,8 +27,17 @@ class CasePipeline(Protocol):
 class RunWriter(Protocol):
     def write_started_run(self, *, snapshot: RunSnapshot, requested_at: datetime) -> str: ...
     def write_source_snapshot(self, *, snapshot: RunSnapshot, source_name: str, payload: Mapping[str, Any], captured_at: datetime) -> str: ...
+    def source_snapshot_id(self, *, snapshot: RunSnapshot, source_name: str) -> str | None: ...
+    def run_projection_once(
+        self, *, snapshot: RunSnapshot, source_snapshot_id: str, projected_at: datetime,
+        project: Callable[[], int],
+    ) -> int: ...
     def write_stage_outcome(self, *, snapshot: RunSnapshot, stage_name: str, stage_status: str, outcome: Mapping[str, Any], started_at: datetime, completed_at: datetime) -> None: ...
     def complete_run(self, *, snapshot: RunSnapshot, run_status: str, completed_at: datetime) -> None: ...
+    def write_projection_outcome(
+        self, *, snapshot: RunSnapshot, source_snapshot_id: str, projection_status: str,
+        outcome: Mapping[str, Any], started_at: datetime, completed_at: datetime,
+    ) -> None: ...
 
 
 class Projector(Protocol):
@@ -95,6 +104,18 @@ class NativeIngestionOrchestrator:
 
         run_status = self._run_writer.write_started_run(snapshot=snapshot, requested_at=requested_at)
         if run_status != "running":
+            if run_status == "succeeded":
+                source_snapshot_id = self._run_writer.source_snapshot_id(
+                    snapshot=snapshot, source_name="boligsiden-search-cases",
+                )
+                if source_snapshot_id is not None:
+                    projected_count = self._project_completed_source(
+                        snapshot=snapshot, source_snapshot_id=source_snapshot_id, requested_at=requested_at,
+                    )
+                    return IngestionResult(
+                        False, snapshot.run_id, snapshot.manifest_sha256, snapshot.snapshot_count,
+                        projected_count, run_status, None,
+                    )
             return IngestionResult(
                 False, snapshot.run_id, snapshot.manifest_sha256, snapshot.snapshot_count, 0, run_status, None,
             )
@@ -128,28 +149,37 @@ class NativeIngestionOrchestrator:
                     snapshot=snapshot, stage_name=stage_name, stage_status="succeeded", outcome=outcome,
                     started_at=requested_at, completed_at=requested_at,
                 )
-            failed_stage = "projection"
-            projected_count = self._projector.project_completed_snapshot(
-                source_snapshot_id=source_snapshot_id, projected_at=requested_at,
-            )
-            self._run_writer.write_stage_outcome(
-                snapshot=snapshot, stage_name="projection", stage_status="succeeded",
-                outcome={"projected_count": projected_count, "source_snapshot_id": source_snapshot_id},
-                started_at=requested_at, completed_at=requested_at,
-            )
-            self._run_writer.complete_run(snapshot=snapshot, run_status="succeeded", completed_at=requested_at)
-        except Exception as error:
+        except BaseException as error:
+            terminal_status = "cancelled" if isinstance(error, KeyboardInterrupt) else "failed"
             try:
                 self._run_writer.write_stage_outcome(
                     snapshot=snapshot, stage_name=failed_stage, stage_status="failed", outcome={"error": str(error)},
                     started_at=requested_at, completed_at=requested_at,
                 )
             finally:
-                self._run_writer.complete_run(snapshot=snapshot, run_status="failed", completed_at=requested_at)
+                self._run_writer.complete_run(snapshot=snapshot, run_status=terminal_status, completed_at=requested_at)
             raise
+
+        self._run_writer.complete_run(snapshot=snapshot, run_status="succeeded", completed_at=requested_at)
+        projected_count = self._project_completed_source(
+            snapshot=snapshot, source_snapshot_id=source_snapshot_id, requested_at=requested_at,
+        )
         return IngestionResult(
             False, snapshot.run_id, snapshot.manifest_sha256, snapshot.snapshot_count, projected_count,
             "succeeded", processed.matched_count,
+        )
+
+
+    def _project_completed_source(
+        self, *, snapshot: RunSnapshot, source_snapshot_id: str, requested_at: datetime,
+    ) -> int:
+        return self._run_writer.run_projection_once(
+            snapshot=snapshot,
+            source_snapshot_id=source_snapshot_id,
+            projected_at=requested_at,
+            project=lambda: self._projector.project_completed_snapshot(
+                source_snapshot_id=source_snapshot_id, projected_at=requested_at,
+            ),
         )
 
 

@@ -28,6 +28,10 @@ class IngestionRunConflictError(RuntimeError):
     """A deterministic run ID is already bound to different immutable provenance."""
 
 
+class IngestionProjectionLifecycleError(RuntimeError):
+    """Projection outcomes require a completed succeeded source run and snapshot."""
+
+
 class PostgresRunWriter:
     def __init__(self, connection_factory: Callable[[], _Connection]) -> None:
         self._connection_factory = connection_factory
@@ -63,7 +67,7 @@ class PostgresRunWriter:
     def write_source_snapshot(self, *, snapshot: RunSnapshot, source_name: str, payload: Mapping[str, Any], captured_at: datetime) -> str:
         canonical_payload = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
         snapshot_sha256 = sha256(canonical_payload.encode()).hexdigest()
-        snapshot_id = str(UUID(bytes=sha256(snapshot_sha256.encode()).digest()[:16], version=5))
+        snapshot_id = str(UUID(bytes=sha256(f"{snapshot.run_id}:{source_name}:{snapshot_sha256}".encode()).digest()[:16], version=5))
         with self._connection_factory() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -75,6 +79,74 @@ class PostgresRunWriter:
                 )
             connection.commit()
         return snapshot_id
+
+    def source_snapshot_id(self, *, snapshot: RunSnapshot, source_name: str) -> str | None:
+        with self._connection_factory() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """SELECT snapshot_id::text FROM ingestion_source_snapshots
+                    WHERE run_id = %s AND source_name = %s
+                    ORDER BY captured_at DESC, snapshot_id DESC
+                    LIMIT 1""",
+                    (snapshot.run_id, source_name),
+                )
+                found = cursor.fetchone()
+        return str(found[0]) if found is not None else None
+
+    def latest_projection_status(self, *, snapshot: RunSnapshot, source_snapshot_id: str) -> str | None:
+        with self._connection_factory() as connection:
+            with connection.cursor() as cursor:
+                self._lock_completed_projection_source(
+                    cursor=cursor, snapshot=snapshot, source_snapshot_id=source_snapshot_id,
+                )
+                cursor.execute(
+                    """SELECT projection_status FROM ingestion_projection_outcomes
+                    WHERE run_id = %s AND source_snapshot_id = %s
+                    ORDER BY attempt DESC LIMIT 1""",
+                    (snapshot.run_id, source_snapshot_id),
+                )
+                latest = cursor.fetchone()
+            connection.commit()
+        return str(latest[0]) if latest is not None else None
+
+    def run_projection_once(
+        self, *, snapshot: RunSnapshot, source_snapshot_id: str, projected_at: datetime,
+        project: Callable[[], int],
+    ) -> int:
+        lock_key = f"{snapshot.run_id}:{source_snapshot_id}"
+        with self._connection_factory() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (lock_key,))
+                self._lock_completed_projection_source(
+                    cursor=cursor, snapshot=snapshot, source_snapshot_id=source_snapshot_id,
+                )
+                cursor.execute(
+                    """SELECT projection_status FROM ingestion_projection_outcomes
+                    WHERE run_id = %s AND source_snapshot_id = %s
+                    ORDER BY attempt DESC LIMIT 1""",
+                    (snapshot.run_id, source_snapshot_id),
+                )
+                latest = cursor.fetchone()
+                if latest is not None and str(latest[0]) == "succeeded":
+                    connection.commit()
+                    return 0
+                try:
+                    projected_count = project()
+                except BaseException as error:
+                    self._append_projection_outcome(
+                        cursor=cursor, snapshot=snapshot, source_snapshot_id=source_snapshot_id,
+                        projection_status="failed", outcome={"error": str(error)},
+                        started_at=projected_at, completed_at=projected_at,
+                    )
+                    connection.commit()
+                    raise
+                self._append_projection_outcome(
+                    cursor=cursor, snapshot=snapshot, source_snapshot_id=source_snapshot_id,
+                    projection_status="succeeded", outcome={"projected_count": projected_count},
+                    started_at=projected_at, completed_at=projected_at,
+                )
+            connection.commit()
+        return projected_count
 
     def write_stage_outcome(self, *, snapshot: RunSnapshot, stage_name: str, stage_status: str, outcome: Mapping[str, Any], started_at: datetime, completed_at: datetime) -> None:
         with self._connection_factory() as connection:
@@ -99,3 +171,56 @@ class PostgresRunWriter:
                     (run_status, completed_at, snapshot.run_id),
                 )
             connection.commit()
+
+    def write_projection_outcome(
+        self, *, snapshot: RunSnapshot, source_snapshot_id: str, projection_status: str,
+        outcome: Mapping[str, Any], started_at: datetime, completed_at: datetime,
+    ) -> None:
+        if projection_status not in {"succeeded", "failed"}:
+            raise ValueError("projection status must be succeeded or failed")
+        with self._connection_factory() as connection:
+            with connection.cursor() as cursor:
+                self._lock_completed_projection_source(
+                    cursor=cursor, snapshot=snapshot, source_snapshot_id=source_snapshot_id,
+                )
+                self._append_projection_outcome(
+                    cursor=cursor, snapshot=snapshot, source_snapshot_id=source_snapshot_id,
+                    projection_status=projection_status, outcome=outcome,
+                    started_at=started_at, completed_at=completed_at,
+                )
+            connection.commit()
+
+
+    @staticmethod
+    def _append_projection_outcome(
+        *, cursor: _Cursor, snapshot: RunSnapshot, source_snapshot_id: str,
+        projection_status: str, outcome: Mapping[str, Any], started_at: datetime, completed_at: datetime,
+    ) -> None:
+        cursor.execute(
+            """INSERT INTO ingestion_projection_outcomes
+            (run_id, source_snapshot_id, attempt, projection_status, outcome, started_at, completed_at)
+            SELECT %s, %s, COALESCE(MAX(attempt), 0) + 1, %s, %s::jsonb, %s, %s
+            FROM ingestion_projection_outcomes
+            WHERE run_id = %s AND source_snapshot_id = %s""",
+            (
+                snapshot.run_id, source_snapshot_id, projection_status,
+                json.dumps(outcome, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+                started_at, completed_at, snapshot.run_id, source_snapshot_id,
+            ),
+        )
+
+    @staticmethod
+    def _lock_completed_projection_source(*, cursor: _Cursor, snapshot: RunSnapshot, source_snapshot_id: str) -> None:
+        cursor.execute(
+            """SELECT r.run_id FROM ingestion_runs r
+            JOIN ingestion_source_snapshots s ON s.run_id = r.run_id
+            WHERE r.run_id = %s
+              AND s.snapshot_id = %s
+              AND r.run_status = 'succeeded'
+            FOR NO KEY UPDATE OF r""",
+            (snapshot.run_id, source_snapshot_id),
+        )
+        if cursor.fetchone() is None:
+            raise IngestionProjectionLifecycleError(
+                "projection outcomes require a completed succeeded source run and snapshot"
+            )

@@ -52,10 +52,10 @@ def test_native_ingestion_contract_copies_define_the_same_immutability_guards():
 
     def normalized_guard_sql(contract: str) -> str:
         start = contract.index(required_guards[0])
-        end = contract.rindex(
-            "FOR EACH STATEMENT EXECUTE FUNCTION reject_ingestion_audit_fact_truncate();",
+        end = contract.index(
+            "FOR EACH ROW EXECUTE FUNCTION enforce_ingestion_run_lifecycle();",
             start,
-        ) + len("FOR EACH STATEMENT EXECUTE FUNCTION reject_ingestion_audit_fact_truncate();")
+        ) + len("FOR EACH ROW EXECUTE FUNCTION enforce_ingestion_run_lifecycle();")
         return " ".join(contract[start:end].split())
 
     assert normalized_guard_sql(migration) == normalized_guard_sql(schema)
@@ -227,3 +227,35 @@ def test_native_ingestion_contract_rejects_truncating_every_audit_table(database
                 match=rf"{table} records cannot be truncated",
             ):
                 conn.execute(statement)
+
+
+def test_projection_outcome_contract_is_byte_equivalent_between_migration_and_bootstrap() -> None:
+    projection_migration = ROOT / "src/Server/Data/Migrations/202608230001_AddIngestionProjectionOutcomes.cs"
+    migration = projection_migration.read_text()
+    schema = SCHEMA.read_text()
+
+    def normalized_fragment(contract: str, start: str, end: str) -> str:
+        left = contract.index(start)
+        right = contract.index(end, left) + len(end)
+        return " ".join(contract[left:right].split())
+
+    fragments = (
+        (
+            "CREATE TABLE IF NOT EXISTS ingestion_projection_outcomes",
+            "ON ingestion_projection_outcomes(source_snapshot_id, attempt DESC);",
+        ),
+        (
+            "CREATE OR REPLACE FUNCTION enforce_ingestion_projection_outcome_source()",
+            "FOR EACH ROW EXECUTE FUNCTION enforce_ingestion_projection_outcome_source();",
+        ),
+        (
+            "DROP TRIGGER IF EXISTS ingestion_projection_outcomes_immutable",
+            "FOR EACH STATEMENT EXECUTE FUNCTION reject_ingestion_audit_fact_truncate();",
+        ),
+        (
+            "DO $$\nBEGIN\n    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'house_consensus') THEN",
+            "GRANT SELECT, INSERT ON ingestion_projection_outcomes TO house_consensus;",
+        ),
+    )
+    for start, end in fragments:
+        assert normalized_fragment(migration, start, end) == normalized_fragment(schema, start, end)
