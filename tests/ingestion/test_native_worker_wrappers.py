@@ -159,3 +159,23 @@ def test_release_dockerfile_exposes_immutable_worker_targets(
 
     assert f" AS {target}" in dockerfile
     assert f'ENTRYPOINT ["/app/scripts/{entrypoint}"]' in dockerfile
+
+
+def test_production_compose_declares_native_one_shot_workers_with_required_configuration() -> None:
+    compose = (ROOT / "docker-compose.production.yml").read_text()
+
+    assert "  native-ingestion:" in compose
+    assert "house-consensus:ingestion-latest" in compose
+    assert "  native-manual-scoring:" in compose
+    assert "house-consensus:manual-scoring-latest" in compose
+    for required in (
+        "CONSENSUS_DATABASE_URL",
+        "CONSENSUS_NOISE_DATABASE_URL",
+        "CONSENSUS_OLLAMA_HOST",
+        "CONSENSUS_OLLAMA_MODEL",
+        "CONSENSUS_COMMUTE_DESTINATIONS",
+    ):
+        assert required in compose
+    assert "restart: \"no\"" in compose
+    assert "--boligsiden" in compose
+    assert "--execute" in compose
