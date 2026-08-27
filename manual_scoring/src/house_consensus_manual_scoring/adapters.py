@@ -47,31 +47,48 @@ class NativeManualScoringPipeline:
         self._scorer = scorer
 
     def score(self, listing: dict[str, Any]) -> ScoringOutput:
-        breakdown = self._scorer.score(listing)
-        commute = listing.get("commute")
+        normalized = _normalize_case_for_scoring(listing)
+        breakdown = self._scorer.score(normalized)
+        commute = normalized.get("commute")
         if not isinstance(commute, dict) or commute.get("status") != "ok":
             raise RuntimeError("native commute enrichment did not produce complete evidence")
         vision = {
             key: value
-            for key, value in listing.items()
+            for key, value in normalized.items()
             if key.startswith("vision_") and key not in {"vision_image_urls"}
         }
         ai_evidence = {
-            "source_case_id": str(listing.get("caseID") or listing.get("external_id") or ""),
+            "source_case_id": str(normalized.get("caseID") or normalized.get("external_id") or ""),
             "score_breakdown": breakdown,
             "vision": vision,
             "noise": {
-                "status": listing.get("noise_status"),
-                "sources": listing.get("noise_sources") if isinstance(listing.get("noise_sources"), dict) else {},
+                "status": normalized.get("noise_status"),
+                "sources": normalized.get("noise_sources") if isinstance(normalized.get("noise_sources"), dict) else {},
             },
-            "sold_history": listing.get("sold_history") if isinstance(listing.get("sold_history"), list) else [],
-            "sold_history_status": listing.get("sold_history_status"),
+            "sold_history": normalized.get("sold_history") if isinstance(normalized.get("sold_history"), list) else [],
+            "sold_history_status": normalized.get("sold_history_status"),
         }
         return ScoringOutput(
             family_fit_score=breakdown.get("total"),
             commute_evidence=commute,
             ai_evidence=ai_evidence,
         )
+
+
+def _normalize_case_for_scoring(listing: dict[str, Any]) -> dict[str, Any]:
+    """Expose canonical fields required by native enrichers without losing raw data."""
+    normalized = dict(listing)
+    address = listing.get("address")
+    if isinstance(address, dict):
+        coordinates = address.get("coordinates")
+        if isinstance(coordinates, dict):
+            normalized.setdefault("latitude", coordinates.get("lat"))
+            normalized.setdefault("longitude", coordinates.get("lon"))
+        normalized.setdefault("_addressID", address.get("addressID"))
+    normalized.setdefault("housing_area_m2", listing.get("housingArea"))
+    normalized.setdefault("garden_size_m2", listing.get("lotArea"))
+    normalized.setdefault("rooms", listing.get("numberOfRooms"))
+    return normalized
 
 
 def build_source_resolver() -> BoligsidenSourceResolver:
