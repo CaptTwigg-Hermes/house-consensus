@@ -195,13 +195,35 @@ public sealed class BoligsidenListingLookupTests
         Assert.Null(await lookup.ResolveAsync(url, TestContext.Current.CancellationToken));
     }
 
+    [Fact]
+    public async Task Boligsiden_api_requests_use_required_browser_origin_headers()
+    {
+        var handler = new SequenceHandler("[]");
+        var lookup = new BoligsidenListingLookup(
+            new HttpClient(handler), new Uri("https://dawa.test/"), new Uri("https://api.boligsiden.dk/"));
+
+        Assert.Null(await lookup.ResolveAsync(
+            "https://www.boligsiden.dk/adresse/aavendingen-48-2700-broenshoej",
+            TestContext.Current.CancellationToken));
+
+        var request = Assert.Single(handler.Requests);
+        Assert.StartsWith("Mozilla/5.0", request.UserAgent, StringComparison.Ordinal);
+        Assert.Equal("https://www.boligsiden.dk/", request.Referrer);
+        Assert.Equal("https://www.boligsiden.dk", request.Origin);
+    }
+
     private sealed class SequenceHandler(params string[] bodies) : HttpMessageHandler
     {
         private readonly Queue<string> _bodies = new(bodies);
         public int Calls { get; private set; }
+        public List<(string UserAgent, string? Referrer, string? Origin)> Requests { get; } = [];
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Calls++;
+            Requests.Add((
+                request.Headers.UserAgent.ToString(),
+                request.Headers.Referrer?.AbsoluteUri,
+                request.Headers.TryGetValues("Origin", out var origins) ? origins.SingleOrDefault() : null));
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(_bodies.Dequeue(), Encoding.UTF8, "application/json"),

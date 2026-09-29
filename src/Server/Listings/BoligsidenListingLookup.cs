@@ -107,7 +107,9 @@ public sealed partial class BoligsidenListingLookup
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            request.Headers.UserAgent.ParseAdd("HouseConsensus/1.0");
+            request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140 Safari/537.36");
+            request.Headers.Referrer = new Uri("https://www.boligsiden.dk/");
+            request.Headers.TryAddWithoutValidation("Origin", "https://www.boligsiden.dk");
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
             if (!response.IsSuccessStatusCode || response.Content.Headers.ContentLength > MaximumResponseBytes)
             {
